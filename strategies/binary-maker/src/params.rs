@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 4, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 5, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -53,6 +53,25 @@ hft_strategy_sdk::define_params! {
         /// a cancel unanswered (no terminal order update) for this long is sent again and the leg is
         /// treated as having no quote
         stuck_reset_ms: DurationMs [min = 1_000, max = 600_000, default = 5_000, since = 4, relax = Down],
+        /// true: bids are capped by the strategy's own fair value of the Up token (anchored to the
+        /// Up mid, moved by the reference, inventory and the direction forecast); false: v5 rules
+        fv_limit: Bool [default = 0, since = 5, relax = Down],
+        /// half-life of the fair value's anchor to the Up token mid
+        fv_anchor_ms: DurationMs [min = 100, max = 600_000, default = 1_000, since = 5, relax = None],
+        /// bids rest at most at the fair value minus fv_edge (fraction of one, 1e-9)
+        fv_edge: Rate [min = -100_000_000, max = 100_000_000, default = 0, since = 5, relax = Down],
+        /// a resting bid more than this above its fair-value limit is cancelled (fraction of one, 1e-9)
+        fv_hyst: Rate [min = 0, max = 100_000_000, default = 5_000_000, since = 5, relax = Up],
+        /// fair-value limit shift per unit of (Up − Down) / inv_max_shares (fraction of one, 1e-9)
+        inv_skew: Rate [min = 0, max = 500_000_000, default = 30_000_000, since = 5, relax = None],
+        /// forecast drift of the fair value: pred_k × forecast × reference sigma × sqrt(30 s) (1e-9)
+        pred_k: Rate [min = 0, max = 2_000_000_000, default = 200_000_000, since = 5, relax = None],
+        /// forecast weight of the reference level-1 imbalance (bid − ask quantity) / (bid + ask) (1e-9)
+        pred_w_imb: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 1_372_490_000, since = 5, relax = None],
+        /// forecast weight of the last 5 one-second returns in sigma units, sum / (sigma × sqrt 5) (1e-9)
+        pred_w_ret: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 121_290_000, since = 5, relax = None],
+        /// forecast weight of the 15 s signed efficiency, sum / sum of absolute one-second returns (1e-9)
+        pred_w_ser: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 187_200_000, since = 5, relax = None],
     }
 }
 

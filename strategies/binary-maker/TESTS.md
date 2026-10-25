@@ -18,10 +18,10 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | group 形态 | BMK-001 |
-| 参数 | BMK-003, BMK-004, BMK-008, BMK-016 |
+| 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022 |
 | 订阅 | BMK-003、BMK-009 |
 | 波动率 | BMK-002 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-019 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017 |
 | 延迟与资源契约 | BMK-003 |
@@ -270,7 +270,7 @@ spec: README.md
 | BMK-016.1 | 默认 `stuck_reset_ms` 5 000;404.5 s、404.7 s 各一条 `U1` 簿事件(买一 0.460) | 404.5 s 无动作;404.7 s 再撤槽 11,并在 0.460 挂 `U1` |
 | BMK-016.2 | 接 .1,`U1` 新挂单为槽 21 在 0.460 存活;404.8 s 槽 11 的 `Cancelled` | 无动作;`U1` 仍是槽 21 的 Live |
 | BMK-016.3 | `stuck_reset_ms` 10 000;404.7 s `U1` 簿事件 | 无动作 |
-| BMK-016.4 | schema | 版本 4;下标 22(第 23 个)字段 `stuck_reset_ms`,`since` 4,默认 5 000;`n_fields_at(3)` = 22 |
+| BMK-016.4 | schema | 下标 22(第 23 个)字段 `stuck_reset_ms`,`since` 4,默认 5 000;`n_fields_at(3)` = 22,`n_fields_at(4)` = 23 |
 
 ### BMK-017 槽位对复用时清除上一窗口的状态
 
@@ -311,3 +311,62 @@ spec: README.md
   1. 399.6 s 槽 11 的 `Aged`
 - 期望:撤槽 11;无 `U1` 的 `place`;`U1` 为撤单在途
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_019_aged_quote_is_cancelled`
+
+### BMK-020 公允价上限
+
+- 规则:[规则](README.md#规则) 4、6、9
+- 级别:table
+- 里程碑:M3
+- 前置:`fv_limit` 1、`inv_skew` 0、`pred_k` 0,其余同 BMK-003;`warm(400, 399, 1)`(Up 中间价 0.460)
+- 步骤:依次执行下表各行
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_020_fair_value_limit`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-020.1 | 预热 | `U1`、`D1` 各在 0.450 挂单(上限约 0.46 / 0.54) |
+| BMK-020.2 | `inv_skew` 0.195,持有 `U1` 50 份(成本 0.450),预热 | `U1` 在 0.360(0.46 − 0.0975 向下取整)、`D1` 在 0.450 |
+| BMK-020.3 | `fv_cancel` 0;两腿在 0.450 存活(槽 11、12);399.6 s 参考中间价升 5 bp(100 055.00) | 只撤 `D1`(槽 12):Down 上限约 0.44 < 0.450 − 0.005;无 `place` |
+| BMK-020.4 | 接 .3,399.9 s 槽 12 的 `Cancelled` | `D1` 在 0.450 挂单(锚定已吸收约 30%,Down 上限约 0.461) |
+| BMK-020.5 | 同 .3、.4,`fv_anchor_ms` 600 000 | 399.6 s 撤槽 12;399.9 s `D1` 在 0.420 挂单(上限约 0.427) |
+| BMK-020.6 | `fv_limit` 0、`fv_cancel` 0;同 .3 | 无撤单 |
+
+### BMK-021 方向预测
+
+- 规则:[规则](README.md#规则) 9
+- 级别:table
+- 里程碑:M3
+- 前置:`warm(400, 399, 1)`(最近 5 个 1 秒收益 +1、−1、+1、−1、+1 bp)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_021_forecast`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-021.1 | `pred_w_ret` = `pred_w_ser` = 0;399.6 s 参考报价买一数量 3、卖一数量 1 | 失衡 0.5;预测 = 1.37249 × 0.5 = 0.686245 |
+| BMK-021.2 | `pred_w_imb` = `pred_w_ser` = 0,`pred_w_ret` 1 | `recent(5)` = (100 020, 499 980);预测 ≈ 0.4473(±0.001) |
+| BMK-021.3 | 只有 `pred_w_ser` 1 | 预测 ≈ 0.0667(最近 15 个:8 涨 7 跌) |
+| BMK-021.4 | `pred_w_imb` 10、失衡 1 | 截到 6 |
+
+### BMK-022 schema v5
+
+- 规则:[参数](README.md#参数)
+- 级别:table
+- 里程碑:M3
+- 前置:无
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_022_schema_v5`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-022.1 | schema | 版本 5;`n_fields_at(5)` = 32 |
+| BMK-022.2 | 下标 23–31 | `fv_limit` 0、`fv_anchor_ms` 1 000、`fv_edge` 0、`fv_hyst` 5 000 000、`inv_skew` 30 000 000、`pred_k` 200 000 000、`pred_w_imb` 1 372 490 000、`pred_w_ret` 121 290 000、`pred_w_ser` 187 200 000,`since` 均为 5 |
+
+### BMK-023 预测漂移
+
+- 规则:[规则](README.md#规则) 9
+- 级别:table
+- 里程碑:M3
+- 前置:`fv_limit` 1、`inv_skew` 0;参考报价 0–399 s 同 `warm`,`U1`、`D1` 簿买一 0.450、卖一 0.470,399.5 s 参考报价买一数量 9、卖一数量 1(失衡 0.8)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_023_forecast_drift`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-023.1 | `pred_k` 2 | `U1` 在 0.450;`D1` 在 0.200–0.300(公允 Up 概率约 0.73) |
+| BMK-023.2 | `pred_k` 0 | `U1`、`D1` 各在 0.450 |

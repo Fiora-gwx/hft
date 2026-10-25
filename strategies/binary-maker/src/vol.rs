@@ -85,6 +85,22 @@ impl Vol {
         self.last_sec = sec;
     }
 
+    /// Sum and sum of absolute values of the last `k` returns (fewer while the ring holds fewer).
+    pub fn recent(&self, k: usize) -> (i64, i64) {
+        let cap = self.ring.len();
+        let (mut sum, mut abs) = (0i64, 0i64);
+        for back in 1..=k.min(self.n) {
+            let r = self
+                .ring
+                .get((self.head + cap - back) % cap)
+                .copied()
+                .unwrap_or(0);
+            sum = sum.saturating_add(r);
+            abs = abs.saturating_add(r.saturating_abs());
+        }
+        (sum, abs)
+    }
+
     /// Per-second standard deviation of the returns (`Rate`); `None` below `min_samples`.
     pub fn sigma(&self, min_samples: usize) -> Option<i64> {
         if self.n == 0 || self.n < min_samples {

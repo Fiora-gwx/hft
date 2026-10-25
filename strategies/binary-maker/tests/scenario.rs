@@ -684,7 +684,8 @@ fn bmk_016_stuck_cancel_reset() {
     book_at(&mut h, 399_600_000_000, 460);
     let out = book_at(&mut h, 404_700_000_000, 460);
     assert!(out.items.is_empty(), "BMK-016.3 {:?}", out.items);
-    // .4 schema: field 22, since 4, default 5 000 ms; a version-3 body has the first 22 fields.
+    // .4 schema: field 22, since 4, default 5 000 ms; a version-3 body has the first 22 fields, a
+    // version-4 body 23.
     let schema = BinaryMaker::DESC.schema;
     let f = schema.field(22).unwrap();
     assert_eq!(
@@ -692,8 +693,8 @@ fn bmk_016_stuck_cancel_reset() {
         ("stuck_reset_ms", 4, 5_000),
         "BMK-016.4"
     );
-    assert_eq!(schema.version(), 4, "BMK-016.4");
     assert_eq!(n_fields_at(schema, 3), Some(22), "BMK-016.4");
+    assert_eq!(n_fields_at(schema, 4), Some(23), "BMK-016.4");
 }
 
 #[test]
@@ -764,4 +765,188 @@ fn bmk_019_aged_quote_is_cancelled() {
     assert_eq!(cancels(&out), vec![11], "BMK-019");
     assert!(up_places(&out).is_empty(), "BMK-019");
     assert_eq!(h.strategy().fast.quotes[2].state, QState::Cancelling, "BMK-019");
+}
+
+/// Fair-value limit on (README "规则" 9) with no inventory skew and no forecast drift, then `extra`.
+fn fv_params(extra: &[(&str, i64)]) -> BinaryMakerParams {
+    let mut f: Vec<(&str, i64)> = vec![("fv_limit", 1), ("inv_skew", 0), ("pred_k", 0)];
+    f.extend_from_slice(extra);
+    params_with(&f)
+}
+
+fn placed(out: &hft_testkit::sdk_mock::CtxCapture) -> Vec<(InstId, Px)> {
+    out.places().map(|it| (it.inst, it.px)).collect()
+}
+
+#[test]
+fn bmk_020_fair_value_limit() {
+    // .1 anchored to the Up mid 0.460: Up limit 0.46, Down 0.54; both bid the best bid 0.450.
+    let mut h = harness(&fv_params(&[]));
+    let out = warm(&mut h, 400, 399, 1);
+    assert_eq!(
+        placed(&out),
+        vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
+        "BMK-020.1"
+    );
+    // .2 long 50 Up (net 50 of 100) with inv_skew 0.195: Up limit 0.46 − 0.0975 = 0.3625 → 0.360;
+    // the Down bid stays at the best bid (its limit rises, its pair-cost limit is 0.540).
+    let mut h = harness(&fv_params(&[("inv_skew", 195_000_000)]));
+    hold(&mut h, 2, 50, 450);
+    let out = warm(&mut h, 400, 399, 1);
+    assert_eq!(
+        placed(&out),
+        vec![(SLOTS[2], Px(360)), (SLOTS[3], Px(450))],
+        "BMK-020.2"
+    );
+    // .3 both quotes live at 0.450 (fair-value cancel of rule 5 off); the reference jumps 5 bp up
+    // 0.1 s later: the anchor absorbs 1/11, the Up probability rises to ~0.56 and the Down limit
+    // falls to ~0.44 < 0.450 − 0.005: only the Down bid is cancelled.
+    let p = fv_params(&[("fv_cancel", 0)]);
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    let out = ref_at(&mut h, 399_600_000_000, 10_005_500);
+    assert_eq!(cancels(&out), vec![12], "BMK-020.3");
+    assert!(out.places().next().is_none(), "BMK-020.3");
+    // .4 the Down cancel completes 0.3 s later: with the default anchor half-life (1 s) the gap is
+    // ~70 % left, Down limit ~0.461 → the Down bid returns to the best bid 0.450.
+    let out = update_at(&mut h, 399_900_000_000, 3, 12, OrderUpdateKind::Cancelled);
+    assert_eq!(placed(&out), vec![(SLOTS[3], Px(450))], "BMK-020.4");
+    // .5 the same with fv_anchor_ms 600 000 (anchor practically fixed): Down limit ~0.427 → 0.420.
+    let mut h = harness(&fv_params(&[("fv_cancel", 0), ("fv_anchor_ms", 600_000)]));
+    live_pair(&mut h);
+    assert_eq!(
+        cancels(&ref_at(&mut h, 399_600_000_000, 10_005_500)),
+        vec![12],
+        "BMK-020.5"
+    );
+    let out = update_at(&mut h, 399_900_000_000, 3, 12, OrderUpdateKind::Cancelled);
+    assert_eq!(placed(&out), vec![(SLOTS[3], Px(420))], "BMK-020.5");
+    // .6 fv_limit 0 (v5): the same jump cancels nothing with rule 5 off.
+    let mut h = harness(&params_with(&[("fv_cancel", 0)]));
+    live_pair(&mut h);
+    assert!(
+        cancels(&ref_at(&mut h, 399_600_000_000, 10_005_500)).is_empty(),
+        "BMK-020.6"
+    );
+}
+
+#[test]
+fn bmk_021_forecast() {
+    let near = |a: i64, b: i64, tol: i64| (a - b).abs() <= tol;
+    // .1 imbalance only: bid 3, ask 1 → imbalance 0.5; forecast = 1.37249 × 0.5.
+    let mut h = harness(&params_with(&[("pred_w_ret", 0), ("pred_w_ser", 0)]));
+    warm(&mut h, 400, 399, 1);
+    h.views_mut().at_engine_ns(399_600_000_000);
+    h.views_mut().bbo(
+        R,
+        (Px(10_000_499), Qty(3_000_000)),
+        (Px(10_000_501), Qty(1_000_000)),
+    );
+    let b = h.views_mut().bbo_of(R);
+    h.feed(&ev::bbo(R, 6, b).as_ref());
+    let f = &h.strategy().fast;
+    assert_eq!(f.ref_imb, 500_000_000, "BMK-021.1");
+    let sigma = f.vol.sigma(60).unwrap();
+    assert_eq!(f.forecast(sigma), 686_245_000, "BMK-021.1");
+    // .2 returns only: the last five one-second returns +1, −1, +1, −1, +1 bp sum to ~1 bp;
+    // / (σ √5) ≈ 0.447.
+    let mut h = harness(&params_with(&[
+        ("pred_w_imb", 0),
+        ("pred_w_ret", 1_000_000_000),
+        ("pred_w_ser", 0),
+    ]));
+    warm(&mut h, 400, 399, 1);
+    let f = &h.strategy().fast;
+    let sigma = f.vol.sigma(60).unwrap();
+    assert_eq!(f.vol.recent(5), (100_020, 499_980), "BMK-021.2");
+    assert!(
+        near(f.forecast(sigma), 447_300_000, 1_000_000),
+        "BMK-021.2 {}",
+        f.forecast(sigma)
+    );
+    // .3 15 s signed efficiency only: (8 − 7) bp over 15 bp of path ≈ 0.0667.
+    let mut h = harness(&params_with(&[
+        ("pred_w_imb", 0),
+        ("pred_w_ret", 0),
+        ("pred_w_ser", 1_000_000_000),
+    ]));
+    warm(&mut h, 400, 399, 1);
+    let f = &h.strategy().fast;
+    let sigma = f.vol.sigma(60).unwrap();
+    assert!(
+        near(f.forecast(sigma), 66_717_000, 100_000),
+        "BMK-021.3 {}",
+        f.forecast(sigma)
+    );
+    // .4 clamped to ±6: weight 10 on an imbalance of 1.
+    let mut h = harness(&params_with(&[
+        ("pred_w_imb", 10_000_000_000),
+        ("pred_w_ret", 0),
+        ("pred_w_ser", 0),
+    ]));
+    warm(&mut h, 400, 399, 1);
+    h.strategy_mut().fast.ref_imb = 1_000_000_000;
+    let f = &h.strategy().fast;
+    assert_eq!(f.forecast(f.vol.sigma(60).unwrap()), 6_000_000_000, "BMK-021.4");
+}
+
+#[test]
+fn bmk_022_schema_v5() {
+    use hft_strategy_sdk::params::n_fields_at;
+    let schema = BinaryMaker::DESC.schema;
+    assert_eq!(schema.version(), 5, "BMK-022.1");
+    assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-022.1");
+    let want: [(&str, i64); 9] = [
+        ("fv_limit", 0),
+        ("fv_anchor_ms", 1_000),
+        ("fv_edge", 0),
+        ("fv_hyst", 5_000_000),
+        ("inv_skew", 30_000_000),
+        ("pred_k", 200_000_000),
+        ("pred_w_imb", 1_372_490_000),
+        ("pred_w_ret", 121_290_000),
+        ("pred_w_ser", 187_200_000),
+    ];
+    for (k, (name, default)) in want.iter().enumerate() {
+        let f = schema.field(23 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 5, *default), "BMK-022.2");
+    }
+}
+
+#[test]
+fn bmk_023_forecast_drift() {
+    // As `warm(400, 399, 1)` but the last reference quote (when the books are first quoted) has
+    // bid 9 / ask 1 (imbalance 0.8): with pred_k 2 the fair Up probability rises to ~0.73, so the
+    // Down bid rests at its limit (~0.27) while the Up bid stays at the best bid; pred_k 0: both
+    // at 0.450.
+    let run = |k: i64| {
+        let mut h = harness(&fv_params(&[("pred_k", k)]));
+        for t in 0..400i64 {
+            h.views_mut().at_engine_ns(t * 1_000_000_000);
+            ref_quote(h.views_mut(), if t % 2 == 0 { 10_000_000 } else { 10_001_000 });
+            let b = h.views_mut().bbo_of(R);
+            h.feed(&ev::bbo(R, 6, b).as_ref());
+        }
+        for i in [SLOTS[2], SLOTS[3]] {
+            slot_book(h.views_mut(), i, 450, 470);
+        }
+        h.views_mut().at_engine_ns(399_500_000_000);
+        h.views_mut().bbo(
+            R,
+            (Px(10_000_499), Qty(9_000_000)),
+            (Px(10_000_501), Qty(1_000_000)),
+        );
+        let b = h.views_mut().bbo_of(R);
+        placed(&h.feed(&ev::bbo(R, 6, b).as_ref()))
+    };
+    let drift = run(2_000_000_000);
+    assert!(
+        matches!(drift.as_slice(), [(u, Px(450)), (d, Px(px))] if *u == SLOTS[2] && *d == SLOTS[3] && (200..=300).contains(px)),
+        "BMK-023.1 {drift:?}"
+    );
+    assert_eq!(
+        run(0),
+        vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
+        "BMK-023.2"
+    );
 }
