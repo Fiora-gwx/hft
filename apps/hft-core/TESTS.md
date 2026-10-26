@@ -4344,7 +4344,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 里程碑:M3
 - 前置:`polymarket` feature;`support::write_polymarket_sim`(无 principal)
 - 步骤:按 `--dry-run` 加载生成的配置
-- 期望:加载成功;refdata 的 `polymarket-clob` 每连接 2 个流、16 个槽位 inst,inst 1 的 tick 为 1(px_exp −3,即 0.001)
+- 期望:加载成功;refdata 的 `polymarket-clob` 每连接 2 个流、16 个槽位 inst,inst 1 的 tick 为 1(px_exp −3,即 0.001);.3 venue `crossed_tolerance_default` 与 inst 1 的 `crossed_tolerance` 都是 3(三个配置生成器共用同一 refdata)
 - 实现:`apps/hft-core/tests/config.rs::core_422_polymarket_sim_config_loads`
 
 ### CORE-423 raw-feed 的写入粒度

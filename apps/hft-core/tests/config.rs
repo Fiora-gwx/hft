@@ -491,6 +491,9 @@ fn core_422_polymarket_sim_config_loads() {
     );
     let i = l.rd.inst(hft_types::InstId(1));
     assert_eq!((i.tick, i.px_exp), (1, -3), "CORE-422.2");
+    // .3 the book of a slot inst tolerates 3 consecutive locked or crossed messages.
+    assert_eq!(v.crossed_tolerance_default, 3, "CORE-422.3");
+    assert_eq!(i.crossed_tolerance, 3, "CORE-422.3");
 }
 #[test]
 fn core_423_feed_raw_modes() {
