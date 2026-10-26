@@ -118,6 +118,9 @@ impl Feed {
 pub struct Gateway {
     pub exchange: SimExchange,
     pub reader: hft_journal::JournalReader,
+    /// Opens the seq tail reader at a sequence number (after a tail gap or read error).
+    reopen: Reopen,
+    tail: TailGuard,
     pub orders: Consumer<GwCmd>,
     pub replies: ByteProducer,
     rd: &'static RefData,
@@ -140,6 +143,7 @@ impl Gateway {
     pub fn new(
         exchange: SimExchange,
         reader: hft_journal::JournalReader,
+        reopen: Reopen,
         orders: Consumer<GwCmd>,
         replies: ByteProducer,
         rd: &'static RefData,
@@ -148,6 +152,8 @@ impl Gateway {
         Self {
             exchange,
             reader,
+            reopen,
+            tail: TailGuard::default(),
             orders,
             replies,
             rd,
@@ -159,10 +165,21 @@ impl Gateway {
             levels: Vec::with_capacity(4096),
         }
     }
+    /// The tail reader failed (`what`): reopen it at the record after the last one consumed.
+    fn tail_failed(&mut self, what: String) -> Result<(), Error> {
+        let seq = self.seen + 1;
+        let reopen = &mut self.reopen;
+        if let Some(r) = self.tail.on_error(&what, || reopen(seq))? {
+            self.reader = r;
+            eprintln!("hft-core: sim-gw journal tail {what}: reader reopened at seq {seq}");
+        }
+        Ok(())
+    }
     pub fn poll(&mut self, now: Tsc) -> Result<bool, Error> {
         use hft_journal::Next;
         let mut busy = false;
         let mut caught_up = false;
+        let mut tail_err: Option<String> = None;
         while let Some((kind, bytes)) = self.pending.front() {
             if !io::write_record(&mut self.replies, *kind, &[bytes]) {
                 return Ok(busy);
@@ -198,6 +215,7 @@ impl Gateway {
             }
             match self.reader.poll() {
                 Next::Record(r) => {
+                    self.tail.ok();
                     self.seen = r.hdr.seq;
                     self.event_tsc = self.event_tsc.max(r.hdr.tsc);
                     busy = true;
@@ -252,10 +270,19 @@ impl Gateway {
                     caught_up = true;
                     break;
                 }
-                Next::Err(e) => return Err(Error::runtime("PaperJournal", format!("{e:?}"), 4)),
-                Next::Gap(_) => return Err(Error::runtime("PaperJournal", "journal gap", 4)),
+                // A gap or read error while tailing (seen at a segment roll under CPU contention)
+                // reopens the reader at the next sequence number; only repeated failures stop sim-gw.
+                Next::Err(e) => {
+                    tail_err = Some(format!("read error {e:?}"));
+                    break;
+                }
+                Next::Gap(g) => {
+                    tail_err = Some(format!("gap {g:?}"));
+                    break;
+                }
                 // Multi-part records (large L2 snapshots) arrive reassembled.
                 Next::Event(ev) => {
+                    self.tail.ok();
                     if matches!(ev.kind, EventKind::L2_SNAPSHOT | EventKind::L2_BATCH) {
                         self.seen = ev.seq;
                         self.event_tsc = self.event_tsc.max(ev.tsc);
@@ -271,6 +298,9 @@ impl Gateway {
                     }
                 }
             }
+        }
+        if let Some(what) = tail_err {
+            self.tail_failed(what)?;
         }
         // Commands that project no decision (SimSettle, SimReset, SimTransfer) run once the
         // journal is consumed and no decision is awaited: they must not wait for the next order.
@@ -294,6 +324,50 @@ impl Gateway {
             return Err(Error::runtime("PaperReplies", "pending replies exhausted", 3));
         }
         Ok(busy)
+    }
+}
+
+/// Opens the seq tail reader at a sequence number.
+pub type Reopen = Box<dyn FnMut(u64) -> Result<hft_journal::JournalReader, Error> + Send>;
+
+/// Consecutive tail failures (gap, read error or a failed reopen) without a record in between
+/// after which sim-gw stops with `PaperJournal`.
+pub const TAIL_MAX_FAILS: u32 = 1_000;
+
+/// Counts consecutive tail failures of sim-gw's seq reader (crates/hft-sim README "sim-gw 任务"
+/// step 1).
+#[derive(Debug, Default)]
+pub struct TailGuard {
+    pub fails: u32,
+    pub reopened: u64,
+}
+impl TailGuard {
+    /// A record or event was read: the failure streak ends.
+    pub fn ok(&mut self) {
+        self.fails = 0;
+    }
+    /// A failure `what`: `reopen` the reader (its new reader replaces the failed one), or stop
+    /// after `TAIL_MAX_FAILS` consecutive failures.
+    pub fn on_error<R>(
+        &mut self,
+        what: &str,
+        reopen: impl FnOnce() -> Result<R, Error>,
+    ) -> Result<Option<R>, Error> {
+        self.fails += 1;
+        if self.fails >= TAIL_MAX_FAILS {
+            return Err(Error::runtime(
+                "PaperJournal",
+                format!("journal tail failed {} times in a row, last: {what}", self.fails),
+                4,
+            ));
+        }
+        match reopen() {
+            Ok(r) => {
+                self.reopened += 1;
+                Ok(Some(r))
+            }
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -413,4 +487,49 @@ pub fn pop_unsequenced(orders: &mut Consumer<GwCmd>) -> Option<GwCmd> {
     }
     b.release();
     Some(head)
+}
+
+#[cfg(test)]
+mod tail_guard_tests {
+    use super::{TAIL_MAX_FAILS, TailGuard};
+    use crate::Error;
+
+    /// CORE-436: a failure reopens the reader; a record ends the streak; `TAIL_MAX_FAILS` failures in
+    /// a row stop sim-gw with `PaperJournal` naming the last failure.
+    #[test]
+    fn core_436_tail_reopen() {
+        let mut g = TailGuard::default();
+        // .1 reopen succeeds: the new reader is returned.
+        assert_eq!(
+            g.on_error("gap", || Ok::<u32, Error>(7)).unwrap(),
+            Some(7),
+            "CORE-436.1"
+        );
+        assert_eq!((g.fails, g.reopened), (1, 1), "CORE-436.1");
+        // .2 a record resets the streak.
+        g.ok();
+        assert_eq!(g.fails, 0, "CORE-436.2");
+        // .3 reopen fails: no reader, keep going below the limit.
+        for _ in 1..TAIL_MAX_FAILS {
+            assert_eq!(
+                g.on_error("gap", || Err::<u32, Error>(Error::runtime(
+                    "JournalReader",
+                    "x",
+                    4
+                )))
+                .unwrap(),
+                None,
+                "CORE-436.3"
+            );
+        }
+        // .4 the TAIL_MAX_FAILS-th failure in a row stops sim-gw with the reason.
+        let e = g
+            .on_error("gap MissingSegment", || Ok::<u32, Error>(1))
+            .unwrap_err();
+        let msg = format!("{e}");
+        assert!(
+            msg.contains("PaperJournal") && msg.contains("gap MissingSegment"),
+            "CORE-436.4 {msg}"
+        );
+    }
 }

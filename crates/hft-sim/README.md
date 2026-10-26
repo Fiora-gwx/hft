@@ -132,7 +132,7 @@ impl hft_rt::PollTask for SimGwTask {
 
 `poll_once` 的固定顺序:
 
-1. 尾随 seq journal 到 `committed_len`(每次 ≤ 4,096 条):行情记录 → `on_record`;Sim 账户的 `OrderDecision` → 记入 `decisions`。
+1. 尾随 seq journal 到 `committed_len`(每次 ≤ 4,096 条):行情记录 → `on_record`;Sim 账户的 `OrderDecision` → 记入 `decisions`。读者返回 `Gap` 或读错误时(在 CPU 争用下的段切换处出现过):本轮停止读取,从已消费最后一条记录的 seq + 1 重新打开读者(`StartAt::Seq`,hft-core `paper.rs` 的 `TailGuard`),打不开则下一轮再试;中间没有读到任何记录的连续失败达到 `TAIL_MAX_FAILS` = 1 000 次才以 `PaperJournal` 失败退出,错误信息带最后一次失败的原因;每次成功重开向 stderr 写一行(原因与起始 seq)。
 2. 取 `out-sim` 指令(每次至多 `CMDS_PER_POLL` = 256 条):订单类以 `decisions` 中同 `(account, slot, gen)` 的 `decided_tsc` 调 `on_command`(`OrderDecision` 在 `OutMsg` 入环之前已提交,[journal-format 提交游标](../../docs/subsystems/journal-format.md),所以第 1 步之后一定查得到);模拟命令(`SimReset`、`SimTransfer`、`SimSettle`,`GwCmd` 变体名以 [hft-event](../hft-event/README.md) 为准)以已消费的最后一条记录的 `tsc` 为时刻;维护类(`DeadManRefresh`、`Rotate`、`ResetRate`、`Resubscribe`、`SetEpoch`、`SessionKeepalive`、`MirrorRestore`)在模拟交易所没有对应状态,取出即丢弃、不回报、只计数 `maint_ignored`。
 3. `advance(已消费最后一条记录的 tsc)`。若 `tuning.quiet_ms` 内 journal 无新记录而有指令等待,以本地 TSC 推进并计数 `quiet_advance`(这类撮合在重演中不保证逐笔一致)。
 4. `drain_due(now)` → 推入 `rep-sim`;环满时留在待交付堆,下一轮重试,**从不丢弃**。
