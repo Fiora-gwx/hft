@@ -648,6 +648,14 @@ pub fn write_strategy_testnet(root: &Path, params: &toml::Value, is_prod: bool) 
     write_mode(root, &root.join("hot"), None, Some(params), true, is_prod, &[])
 }
 
+/// Crossed tolerance of the Polymarket venue and slot insts: the book stays Live through at most this
+/// many consecutive messages leaving bid ≥ ask, the next one makes it `Stale(Crossed)` until a snapshot.
+/// A taker sweep briefly locks the published book (the new level before the match removes it): on
+/// the 2026-10-26 live journal 91.5 % of such episodes clear within 1 message, 99.7 % within 3, all
+/// by an incremental update; with 0 every sweep made the book Stale and the maker cancel its quotes.
+#[allow(dead_code)]
+pub const PM_CROSSED_TOLERANCE: u16 = 3;
+
 /// Coins of `write_polymarket_sim`; slot `<coin>-<up|dn>-<k>` for windows k = 0, 1.
 #[allow(dead_code)]
 pub const PM_COINS: [&str; 4] = ["btc", "eth", "sol", "xrp"];
@@ -940,7 +948,7 @@ fn write_pm(
         client_id_prefix: "".into(),
         max_batch: 1,
         max_inflight_amend: 1,
-        crossed_tolerance_default: 0,
+        crossed_tolerance_default: PM_CROSSED_TOLERANCE,
         stale_guard: StaleGuardKind::ExpireAt,
     });
     let market = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -1007,6 +1015,7 @@ fn write_pm(
             min_notional: Notional(1_000_000),
             book_window: 128,
             l2_depth: 100,
+            crossed_tolerance: PM_CROSSED_TOLERANCE,
             tick_str: "0.001".into(),
             lot_str: if live.is_some() { "0.01" } else { "0.000001" }.into(),
             min_qty_str: if live.is_some() { "5" } else { "0.000001" }.into(),

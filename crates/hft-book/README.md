@@ -255,7 +255,8 @@ W = 2048 时每簿 ≈ 64 KiB 数量数组 + 1 KiB 位图 + 4 KiB 溢出区;400 
 
 <details><summary>给实现者</summary>
 
-- **待核实**:各 venue 的簿是否会合法地短暂交叉(方法:对现有 24 h Binance/OKX/Bitget 捕获离线统计交叉持续的消息数),据此给 `crossed_tolerance_default` 取值(当前默认 0,即一旦交叉立即重同步);Bybit `orderbook.N` 的 `u` 是否逐条 +1(决定其 venue 协议如何构造 `prev_id`)。
+- Polymarket 已核实(2026-10-27,实盘 journal live-20261026T115815,1 254 次):吃单扫过时公开簿会短暂锁住或交叉(新挂单档位先到、撮合后的删除随后到),91.5% 在 1 条消息内、99.7% 在 3 条内由增量恢复,无一靠快照;容忍 0 时每次扫单都使簿 Stale,做市策略随之撤单。Polymarket 槽位 inst 取 `crossed_tolerance = 3`(hft-core `pm_sim_config`)。
+- **待核实**:其余 venue 的簿是否会合法地短暂交叉(方法:对现有 24 h Binance/OKX/Bitget 捕获离线统计交叉持续的消息数),据此给 `crossed_tolerance_default` 取值(当前默认 0,即一旦交叉立即重同步);Bybit `orderbook.N` 的 `u` 是否逐条 +1(决定其 venue 协议如何构造 `prev_id`)。
 - **待核实**:各所分档快照流的 `snap_id` 来源与单调性(Binance `depth{5,10,20}` 的 `lastUpdateId`、OKX `books5`、Bitget `books5/books15` 各自的序号字段;方法:各所文档 + 金样中连续 1 h 的序号检查),决定 TopN 的重复判定是否可用;不单调的所由 venue 协议把 `snap_id` 置 0(不去重)。
 - 实现顺序:`bitmap.rs` → `l2.rs`(窗口内)+ 参考模型测试 → `overflow.rs` → `recenter.rs` → `top.rs` → `export.rs` → `set.rs` → 基准。
 - `window` 的默认值由流水线按"覆盖 ±0.5% 价格、夹在 [256, 8192]"给出,写进 refdata(BTC tick 0.1、价 1e5 时约 5000 档)。
