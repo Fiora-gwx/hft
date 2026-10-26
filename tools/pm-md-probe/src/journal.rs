@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use hft_event::{
-    CmdResult, ConnState, ControlCmd, EventKind, ExternalFill, L2BatchHdr, L2SnapHdr, OrderDecision,
+    Bbo, CmdResult, ConnState, ControlCmd, EventKind, ExternalFill, L2BatchHdr, L2SnapHdr, OrderDecision,
     OrderEvent, Trade,
 };
 use hft_journal::{JournalReader, Next};
@@ -87,6 +87,20 @@ pub fn run(raw: &[String]) -> Result<(), String> {
         std::fs::File::create(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?,
     );
     let (mut n_bind, mut n_snap, mut n_batch, mut n_trade) = (0u64, 0u64, 0u64, 0u64);
+    // Local calibration build: engine receive time of the last market event (decisions and order
+    // events carry it as t_ns), and the level deltas of every book record.
+    let mut last_rx: i64 = 0;
+    let lv = |ls: &[hft_event::Level], nb: usize| -> String {
+        let mut s = String::from("[");
+        for (k, l) in ls.iter().enumerate() {
+            if k > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("[{},{},{}]", if k < nb { 1 } else { 2 }, l.px.0, l.qty.0));
+        }
+        s.push(']');
+        s
+    };
     let (mut n_dec, mut n_oev, mut n_ext, mut n_settle, mut n_conn) = (0u64, 0u64, 0u64, 0u64, 0u64);
     let name = |label: &[String], i: InstId| -> String {
         label
@@ -95,14 +109,32 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             .cloned()
             .unwrap_or_else(|| format!("inst{}", i.0))
     };
+    let (mut cur_tsc, mut cur_seq) = (0u64, 0u64);
     loop {
+        // UTC calibration pair of the segment being read (the first record of a new segment still
+        // uses the previous one).
+        let calib = reader
+            .segment_header()
+            .map(|h| (h.calib_tsc, h.calib_realtime_ns, h.tsc_hz_milli));
         let (kind, body) = match reader.poll() {
-            Next::Record(r) => (EventKind(r.hdr.kind), r.body),
-            Next::Event(e) => (e.kind, e.body),
+            Next::Record(r) => {
+                (cur_tsc, cur_seq) = (r.hdr.tsc, r.hdr.seq);
+                (EventKind(r.hdr.kind), r.body)
+            }
+            Next::Event(e) => {
+                (cur_tsc, cur_seq) = (e.tsc, e.seq);
+                (e.kind, e.body)
+            }
             Next::End | Next::Pending => break,
             Next::Gap(g) => return Err(format!("journal gap: {g:?}")),
             Next::Err(e) => return Err(format!("journal read: {e:?}")),
         };
+        // Engine-time scale of the record tsc (tsc × 10^12 / tsc_hz_milli; differences are engine_ns differences).
+        let cur_e = calib.map_or(0, |(_, _, hz)| (i128::from(cur_tsc) * 1_000_000_000_000 / i128::from(hz.max(1))) as i64);
+        let cur_u = calib.map_or(0, |(ct, cr, hz)| {
+            let d = i128::from(cur_tsc) - i128::from(ct);
+            cr + (d * 1_000_000_000_000 / i128::from(hz.max(1))) as i64
+        });
         if kind == EventKind::CONTROL_CMD {
             let decoded = ControlCmd::decode(body);
             if let Ok((
@@ -115,7 +147,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 n_settle += 1;
                 let _ = writeln!(
                     out,
-                    "{{\"k\":\"settle\",\"slot\":\"{}\",\"inst\":{},\"end_s\":{end_s},\"payout\":{},\"cmd_id\":\"{}\"}}",
+                    "{{\"k\":\"settle\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"slot\":\"{}\",\"inst\":{},\"end_s\":{end_s},\"payout\":{},\"cmd_id\":\"{}\"}}",
                     name(&label, inst),
                     inst.0,
                     payout.0,
@@ -146,7 +178,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             if a.orders_only {
                 let _ = writeln!(
                     out,
-                    "{{\"k\":\"bind\",\"inst\":{},\"slot\":\"{slot}\",\"start_s\":{start_s}}}",
+                    "{{\"k\":\"bind\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"inst\":{},\"slot\":\"{slot}\",\"start_s\":{start_s}}}",
                     inst.0
                 );
             }
@@ -188,21 +220,25 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             if let Some(w) = awaiting.get_mut(h.h.inst.0 as usize) {
                 *w = false;
             }
-            for (k, l) in levels(rest, nb + na).iter().enumerate() {
+            let ls = levels(rest, nb + na);
+            for (k, l) in ls.iter().enumerate() {
                 let side = if k < nb { &mut b.bids } else { &mut b.asks };
                 side.insert(l.px.0, l.qty.0);
             }
             n_snap += 1;
+            last_rx = h.h.sw_rx_ns;
             let (bb, ba) = b.best();
             let _ = writeln!(
                 out,
-                "{{\"k\":\"snap\",\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"id\":{},\"bb\":{},\"ba\":{}}}",
+                "{{\"k\":\"snap\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"id\":{},\"org\":{},\"bb\":{},\"ba\":{},\"lv\":{}}}",
                 label[h.h.inst.0 as usize],
                 h.h.ex_ts_ns / 1_000_000,
                 h.h.sw_rx_ns,
                 h.snap_id,
+                h.origin,
                 bb.unwrap_or(-1),
-                ba.unwrap_or(-1)
+                ba.unwrap_or(-1),
+                lv(&ls, nb)
             );
         } else if kind == EventKind::L2_BATCH {
             let Ok((h, rest)) = L2BatchHdr::read_from_prefix(body) else {
@@ -215,7 +251,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             let Some(b) = books.get_mut(h.h.inst.0 as usize) else {
                 continue;
             };
-            for (k, l) in levels(rest, nb + na).iter().enumerate() {
+            let ls = levels(rest, nb + na);
+            last_rx = h.h.sw_rx_ns;
+            for (k, l) in ls.iter().enumerate() {
                 let side = if k < nb { &mut b.bids } else { &mut b.asks };
                 if l.qty.0 == 0 {
                     side.remove(&l.px.0);
@@ -227,14 +265,15 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             let (bb, ba) = b.best();
             let _ = writeln!(
                 out,
-                "{{\"k\":\"batch\",\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"prev\":{},\"last\":{},\"bb\":{},\"ba\":{}}}",
+                "{{\"k\":\"batch\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"prev\":{},\"last\":{},\"bb\":{},\"ba\":{},\"lv\":{}}}",
                 label[h.h.inst.0 as usize],
                 h.h.ex_ts_ns / 1_000_000,
                 h.h.sw_rx_ns,
                 h.prev_id,
                 h.last_id,
                 bb.unwrap_or(-1),
-                ba.unwrap_or(-1)
+                ba.unwrap_or(-1),
+                lv(&ls, nb)
             );
         } else if kind == EventKind::ORDER_DECISION {
             let Ok((d, _)) = OrderDecision::try_read_from_prefix(body) else {
@@ -243,7 +282,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_dec += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"dec\",\"slot\":\"{}\",\"inst\":{},\"action\":{},\"side\":\"{}\",\"tif\":{},\"px\":{},\"qty\":{},\"oslot\":{},\"gen\":{},\"reject\":{}}}",
+                "{{\"k\":\"dec\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"t_ns\":{last_rx},\"slot\":\"{}\",\"inst\":{},\"action\":{},\"side\":\"{}\",\"tif\":{},\"px\":{},\"qty\":{},\"oslot\":{},\"gen\":{},\"reject\":{},\"trig\":{},\"strat\":{},\"reason\":{},\"ino\":{},\"oflags\":{}}}",
                 name(&label, d.inst),
                 d.inst.0,
                 d.action as u8,
@@ -253,7 +292,12 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 d.qty.0,
                 d.slot.0,
                 d.r#gen,
-                d.reject
+                d.reject,
+                d.trigger_seq,
+                d.strategy.0,
+                d.reason,
+                d.intent_no,
+                d.oflags
             );
         } else if kind == EventKind::ORDER_EVENT {
             let Ok((e, _)) = OrderEvent::try_read_from_prefix(body) else {
@@ -262,7 +306,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_oev += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"oev\",\"slot\":\"{}\",\"inst\":{},\"what\":{},\"px\":{},\"qty\":{},\"cum\":{},\"fee\":{},\"oslot\":{},\"gen\":{},\"ex_ms\":{},\"code\":{}}}",
+                "{{\"k\":\"oev\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"t_ns\":{last_rx},\"slot\":\"{}\",\"inst\":{},\"what\":{},\"px\":{},\"qty\":{},\"cum\":{},\"fee\":{},\"oslot\":{},\"gen\":{},\"ex_ms\":{},\"code\":{}}}",
                 name(&label, e.inst),
                 e.inst.0,
                 e.what as u8,
@@ -282,7 +326,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_ext += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"ext\",\"slot\":\"{}\",\"inst\":{},\"cause\":{},\"side\":\"{}\",\"px\":{},\"qty\":{},\"end_s\":{}}}",
+                "{{\"k\":\"ext\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"slot\":\"{}\",\"inst\":{},\"cause\":{},\"side\":\"{}\",\"px\":{},\"qty\":{},\"end_s\":{}}}",
                 name(&label, e.inst),
                 e.inst.0,
                 e.cause as u8,
@@ -297,7 +341,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             };
             let _ = writeln!(
                 out,
-                "{{\"k\":\"cmdres\",\"cmd_id\":\"{}\",\"status\":{},\"detail\":{}}}",
+                "{{\"k\":\"cmdres\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"cmd_id\":\"{}\",\"status\":{},\"detail\":{}}}",
                 hex16(&r.cmd_id),
                 r.status,
                 r.detail
@@ -309,8 +353,30 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_conn += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"conn\",\"venue\":{},\"conn\":{},\"state\":{},\"inst\":{},\"reason\":{},\"role\":{}}}",
-                c.venue.0, c.conn, c.state as u8, c.inst.0, c.reason, c.role as u8
+                "{{\"k\":\"conn\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"venue\":{},\"conn\":{},\"state\":{},\"inst\":{},\"slot\":\"{}\",\"reason\":{},\"role\":{}}}",
+                c.venue.0,
+                c.conn,
+                c.state as u8,
+                c.inst.0,
+                if c.inst.0 == 0 { String::new() } else { name(&label, c.inst) },
+                c.reason,
+                c.role as u8
+            );
+        } else if kind == EventKind::BBO {
+            // Reference quotes (local calibration build): the replay's reference price as the engine saw it.
+            let Ok((b, _)) = Bbo::read_from_prefix(body) else {
+                continue;
+            };
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"bbo\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"inst\":{},\"rx_ns\":{},\"ex_ms\":{},\"bid\":{},\"bq\":{},\"ask\":{},\"aq\":{}}}",
+                b.h.inst.0,
+                b.h.sw_rx_ns,
+                b.h.ex_ts_ns / 1_000_000,
+                b.bid_px.0,
+                b.bid_qty.0,
+                b.ask_px.0,
+                b.ask_qty.0
             );
         } else if kind == EventKind::TRADE {
             let Ok((t, _)) = Trade::try_read_from_prefix(body) else {
@@ -320,9 +386,10 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 continue;
             }
             n_trade += 1;
+            last_rx = t.h.sw_rx_ns;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"trade\",\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"px\":{},\"qty\":{},\"side\":\"{}\"}}",
+                "{{\"k\":\"trade\",\"u\":{cur_u},\"sq\":{cur_seq},\"e\":{cur_e},\"slot\":\"{}\",\"ex_ms\":{},\"rx_ns\":{},\"px\":{},\"qty\":{},\"side\":\"{}\"}}",
                 label[t.h.inst.0 as usize],
                 t.h.ex_ts_ns / 1_000_000,
                 t.h.sw_rx_ns,
