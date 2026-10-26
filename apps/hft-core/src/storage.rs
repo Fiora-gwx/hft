@@ -72,6 +72,11 @@ pub fn open(cfg: JournalConfig, epoch: u32) -> Result<(JournalWriter, Side), Err
     Ok((writer, Side { cfg, prep, retirer }))
 }
 pub fn reader(c: &Config) -> Result<JournalReader, Error> {
+    JournalReader::open(&reader_cfg(c)).map_err(|e| Error::runtime("JournalReader", format!("{e:?}"), 4))
+}
+/// Configuration of the in-process seq tail reader (`reader`); sim-gw reopens it at a sequence
+/// number after a tail gap or read error.
+pub fn reader_cfg(c: &Config) -> ReaderConfig {
     let mut r = ReaderConfig::new(
         c.paths.journal_ram.clone(),
         c.paths.journal_cold.clone(),
@@ -79,7 +84,7 @@ pub fn reader(c: &Config) -> Result<JournalReader, Error> {
         "seq".into(),
     );
     r.tail_poll_us = 0;
-    JournalReader::open(&r).map_err(|e| Error::runtime("JournalReader", format!("{e:?}"), 4))
+    r
 }
 pub struct Persist {
     sides: Vec<Side>,

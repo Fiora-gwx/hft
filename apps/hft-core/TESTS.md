@@ -4557,3 +4557,18 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-435.2 | `daily_loss_abs = 7.5`、`daily_loss_max_resumes = 3`;另 `daily_loss_max_resumes = 0` | `7.5`、`1.0`、`3`;`0` |
 | CORE-435.3 | 额度 7.5,结转 −8,日切 | `last_day_rolled = 20 750`,当日 `net() = −8`,pm-live 有 `DailyLoss` cap |
 | CORE-435.4 | 额度缺省 15,同一结转与日切 | 当日 `net() = −8`,无 `DailyLoss` cap |
+
+### CORE-436 sim-gw 尾随 journal 出错时重开读者
+
+- 规则:[hft-sim sim-gw 任务](../../crates/hft-sim/README.md#sim-gw-任务task-feature) 第 1 步
+- 级别:table
+- 里程碑:M3
+- 前置:`paper::TailGuard::default()`,重开函数为测试闭包
+- 实现:`apps/hft-core/src/paper.rs::tail_guard_tests::core_436_tail_reopen`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-436.1 | 一次失败,重开成功 | 返回新读者;`fails = 1`、`reopened = 1` |
+| CORE-436.2 | 随后读到记录(`ok`) | `fails = 0` |
+| CORE-436.3 | 连续失败,重开失败,共 `TAIL_MAX_FAILS − 1` 次 | 每次返回无读者、不报错 |
+| CORE-436.4 | 第 `TAIL_MAX_FAILS` 次连续失败 | `PaperJournal` 错误,信息含最后一次失败的原因 |

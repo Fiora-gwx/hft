@@ -684,9 +684,16 @@ fn run_linux(
             .sim
             .as_ref()
             .ok_or_else(|| Error::config("SimConfig", "missing sim"))?;
+        let tail_cfg = storage::reader_cfg(c);
         let mut gateway = paper::Gateway::new(
             paper::exchange(p, rd, clock.hz_milli)?,
             storage::reader(c)?,
+            Box::new(move |seq| {
+                let mut r = tail_cfg.clone();
+                r.start = hft_journal::StartAt::Seq(seq);
+                hft_journal::JournalReader::open(&r)
+                    .map_err(|e| Error::runtime("JournalReader", format!("{e:?}"), 4))
+            }),
             sim_out,
             sim_tx,
             rd,
