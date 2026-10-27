@@ -52,6 +52,7 @@ KIND_HOST_PROFILE = 0x0507
 KIND_CLOCK_STATUS = 0x0508
 KIND_SEGMENT_ROLL = 0x0509
 KIND_ENGINE_CLOCK = 0x050A
+KIND_UTC_ANCHOR = 0x050B
 KIND_RAW_RX = 0x0601
 KIND_RAW_TX = 0x0602
 
@@ -94,6 +95,7 @@ HOST_PROFILE = _s(["boot_id", "build_git", "_pad", "profile_sha256", "release", 
 CLOCK_STATUS = _s(["tsc", "realtime_ns", "phc_ns", "tsc_hz_milli", "chrony_offset_ns", "max_error_ns", "rms_ns", "calib_err_ns", "source", "state", "_pad"], [_t("<u8", "tsc"), "<i8", "<i8", _t("<u8", "tsc"), "<i8", "<u4", "<u4", "<u4", _t("<u1", "enum:ClockSource"), _t("<u1", "enum:ClockState"), "V2"], [0, 8, 16, 24, 32, 40, 44, 48, 52, 53, 54], 56)
 SEGMENT_ROLL = _s(["segment_no", "other_segment_no", "seq_mark", "utc_ns", "mark", "reason", "journal_kind", "_pad", "boot_records", "_rsv"], ["<u8", "<u8", "<u8", "<i8", _t("<u1", "enum:RollMark"), _t("<u1", "enum:RollReason"), _t("<u1", "enum:JournalKind"), "V1", "<u4", "V8"], [0, 8, 16, 24, 32, 33, 34, 35, 36, 40], 48)
 ENGINE_CLOCK = _s(["base_engine_ns", "tsc_hz_milli", "prev_last_seq", "source", "_pad"], ["<i8", _t("<u8", "tsc"), "<u8", _t("<u1", "enum:EngineClockSource"), "V7"], [0, 8, 16, 24, 25], 32)
+UTC_ANCHOR = _s(["tsc", "realtime_ns", "hz_milli", "err_ns", "_pad"], [_t("<u8", "tsc"), "<i8", "<u8", "<u4", "V4"], [0, 8, 16, 24, 28], 32)
 RAW_RX = _s(["venue", "conn", "what", "rflags", "stream", "hw_rx_ns", "payload_len", "_pad"], [_t("<u1", "id:venue"), _t("<u1", "id:conn"), _t("<u1", "enum:RawWhat"), _t("<u1", "bits:RawFlags"), "<u4", "<i8", "<u4", "V4"], [0, 1, 2, 3, 4, 8, 16, 20], 24)
 RAW_TX = _s(["venue", "conn", "what", "rflags", "stream", "hw_rx_ns", "payload_len", "_pad"], [_t("<u1", "id:venue"), _t("<u1", "id:conn"), _t("<u1", "enum:RawWhat"), _t("<u1", "bits:RawFlags"), "<u4", "<i8", "<u4", "V4"], [0, 1, 2, 3, 4, 8, 16, 20], 24)
 
@@ -150,13 +152,14 @@ KINDS = {
     0x0508: ("ClockStatus", 1, "fixed 56", CLOCK_STATUS),
     0x0509: ("SegmentRoll", 1, "fixed 48", SEGMENT_ROLL),
     0x050A: ("EngineClock", 1, "fixed 32", ENGINE_CLOCK),
+    0x050B: ("UtcAnchor", 1, "fixed 32", UTC_ANCHOR),
     0x0601: ("RawRx", 1, "multi 24", RAW_RX),
     0x0602: ("RawTx", 1, "multi 24", RAW_TX),
 }
 
 # FNV-1a 64 of (kind u16, schema_version u16, size u32) LE of every production kind in number
 # order (size = fixed body or Var/Multi prefix); equals hft_py.schema_hash().
-SCHEMA_HASH = 0x27F90C859D48C3DC
+SCHEMA_HASH = 0x959D8504266615C9
 
 STRUCTS = {
     "StrategyParamsHdr": STRATEGY_PARAMS_HDR,

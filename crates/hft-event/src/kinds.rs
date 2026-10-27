@@ -60,6 +60,7 @@ impl EventKind {
     pub const CLOCK_STATUS: Self = EventKind(0x0508);
     pub const SEGMENT_ROLL: Self = EventKind(0x0509);
     pub const ENGINE_CLOCK: Self = EventKind(0x050A);
+    pub const UTC_ANCHOR: Self = EventKind(0x050B);
     pub const RAW_RX: Self = EventKind(0x0601);
     pub const RAW_TX: Self = EventKind(0x0602);
     /// Test kinds (feature `dev-kinds`; production readers reject `0x7Fxx`).
@@ -232,15 +233,15 @@ use crate::exec::{
 use crate::market::{Bbo, Funding, IndexPrice, L2BatchHdr, L2Delta, Liquidation, MarkPrice, Trade};
 use crate::strategy::AdviceHdr;
 use crate::system::{
-    ClockStatus, ConnState, EngineClock, HostProfile, LatencySample, Note, SegmentRoll, Timer,
+    ClockStatus, ConnState, EngineClock, HostProfile, LatencySample, Note, SegmentRoll, Timer, UtcAnchor,
 };
 use crate::var::{BlobHdr, L2SnapHdr, RawHdr, SnapshotHdr};
 use CrcPolicy::{Always, Never};
 use Domain::*;
 use Role::{ByBody, Input, Meta, Output};
 
-const N_BASE: usize = 40;
-const N_ALL: usize = 46;
+const N_BASE: usize = 41;
+const N_ALL: usize = 47;
 
 const KINDS_ALL: [KindInfo; N_ALL] = [
     k(
@@ -662,6 +663,17 @@ const KINDS_ALL: [KindInfo; N_ALL] = [
         EngineClock::FIELDS,
     ),
     k(
+        0x050B,
+        "UtcAnchor",
+        System,
+        fixed(32),
+        1,
+        Input,
+        SEQ,
+        Never,
+        UtcAnchor::FIELDS,
+    ),
+    k(
         0x0601,
         "RawRx",
         Raw,
@@ -760,9 +772,9 @@ const fn domain_slot(hi: u16) -> Option<(usize, usize)> {
         0x02 => Some((9, 10)),
         0x03 => Some((19, 4)),
         0x04 => Some((23, 5)),
-        0x05 => Some((28, 10)),
-        0x06 => Some((38, 2)),
-        0x7F if cfg!(feature = "dev-kinds") => Some((40, 6)),
+        0x05 => Some((28, 11)),
+        0x06 => Some((39, 2)),
+        0x7F if cfg!(feature = "dev-kinds") => Some((41, 6)),
         _ => None,
     }
 }

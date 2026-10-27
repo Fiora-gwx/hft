@@ -191,6 +191,20 @@ crate::event_body! {
 }
 layout!(EngineClock, 32, 8; base_engine_ns @ 0, tsc_hz_milli @ 8, prev_last_seq @ 16, source @ 24, _pad @ 25);
 
+crate::event_body! {
+    /// UTC re-anchoring of the engine clock (0x050B, Input): a TSC ↔ CLOCK_REALTIME pair and the
+    /// counter rate measured against CLOCK_REALTIME.
+    pub struct UtcAnchor : fixed(EventKind::UTC_ANCHOR, 1), FromBytes {
+        pub tsc: Tsc,
+        pub realtime_ns: i64,
+        /// Counter frequency against CLOCK_REALTIME × 1000; 0 = not measured.
+        pub hz_milli: u64,
+        pub err_ns: u32,
+        pub _pad: u32,
+    }
+}
+layout!(UtcAnchor, 32, 8; tsc @ 0, realtime_ns @ 8, hz_milli @ 16, err_ns @ 24, _pad @ 28);
+
 /// One `v[]` field of a Note: bits `[bit, bit + bits)` of the 512-bit `v` (bit = index × 64 + shift).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct VField {

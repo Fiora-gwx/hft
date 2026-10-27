@@ -332,6 +332,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
 ) -> R<()> {
     match slot.kind {
         EventKind::ENGINE_CLOCK => engine_clock(e, inst, drv, slot),
+        EventKind::UTC_ANCHOR => utc_anchor(e, slot),
         EventKind::BBO => bbo(e, inst, drv, slot, p),
         EventKind::L2_BATCH => l2_batch(e, inst, drv, slot, p),
         EventKind::L2_SNAPSHOT => l2_snapshot(e, inst, drv, slot, p),
@@ -495,6 +496,24 @@ fn engine_clock<D: Driver<S>, S: StrategySet>(
     }
     crate::subs::resend_all(e, inst);
     let _ = drv;
+    Ok(())
+}
+
+/// `UtcAnchor`: re-anchors the run's engine UTC line (README "引擎 UTC"); before this run's
+/// `EngineClock` it has no effect. The anchor record itself already carries the new line's UTC.
+fn utc_anchor(e: &mut Engine, slot: &InputSlot) -> R<()> {
+    if !e.clock.is_set() {
+        return Ok(());
+    }
+    let Some(a) = slot.read::<hft_event::UtcAnchor>() else {
+        return Ok(());
+    };
+    let cur = e.now.utc_ns;
+    let line = crate::clock::UtcLineRow::anchored(cur, slot.tsc, &a, e.clock.row.tsc_hz_milli);
+    // The line frequency is EngineClock's or within 1 000 ppm of it: always in range.
+    e.clock.set_utc(line).map_err(|_| FatalReason::ClockRange)?;
+    e.trace.rec("utc_anchor", line.lead_ns, 0);
+    e.now = e.now_of(slot.tsc, e.cur_seq);
     Ok(())
 }
 

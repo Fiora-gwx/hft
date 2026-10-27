@@ -695,7 +695,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             inst.models.notes.clear();
             inst.models.advice.clear();
             // The model tick's "previous" AdvisorTick: the last one at or before the start.
-            inst.models.prev_tick_utc = prev_tick_utc(log, start_ix);
+            inst.models.prev_tick_utc = prev_tick_utc(log, start_ix, e);
         }
         // Models restored from a checkpoint take the parameters at their last_seq once, after
         // the mirror reached it (`pending_params`).
@@ -841,7 +841,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             Sequencer::<ReplayDriver, S>::boot(BootSource::Journal(plan), &setup, drv, self.mirror.hb)?;
         next.inst.models.on = true;
         next.inst.models.slots = (0..next.inst.slots.len()).map(|_| ModelSlot::default()).collect();
-        next.inst.models.prev_tick_utc = prev_tick_utc(log, snapshot);
+        next.inst.models.prev_tick_utc = prev_tick_utc(log, snapshot, &next.e);
         for ix in 0..next.inst.slots.len() {
             let sl = &next.inst.slots[ix];
             if let Some(old) = self.mirror.inst.slots.iter().position(|s| {
@@ -1169,8 +1169,10 @@ pub(crate) fn restore_model<S: StrategySet>(
     Ok(None)
 }
 
-/// UTC of the last `Timer{Sys, AdvisorTick}` at or before record `ix`.
-pub(crate) fn prev_tick_utc(log: &Log, ix: usize) -> Option<i64> {
+/// UTC of the last `Timer{Sys, AdvisorTick}` at or before record `ix`. `e` is the engine restored
+/// at `ix`: a tick of its run after a `UtcAnchor` takes the run's UTC line (section 32); otherwise
+/// the tick's segment calibration pair.
+pub(crate) fn prev_tick_utc(log: &Log, ix: usize, e: &Engine) -> Option<i64> {
     let k = (0..=ix).rev().find(|k| {
         log.recs.get(*k).is_some_and(|r| {
             r.kind == EventKind::TIMER
@@ -1180,6 +1182,9 @@ pub(crate) fn prev_tick_utc(log: &Log, ix: usize) -> Option<i64> {
         })
     })?;
     let r = log.recs.get(k)?;
+    if e.clock.utc().is_set() && e.clock.is_set() && r.seq > e.clock.row.clock_seq {
+        return Some(e.utc_at(Tsc(r.tsc)));
+    }
     let c = log.segs.get(log.seg_of(k))?;
     let d = i128::from(r.tsc) - i128::from(c.calib_tsc);
     Some(c.calib_realtime_ns + (d * 1_000_000_000_000 / i128::from(c.tsc_hz_milli.max(1))) as i64)

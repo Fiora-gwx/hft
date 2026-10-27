@@ -97,7 +97,7 @@ spec: README.md
 - 规则:[记录头、标志与 kind](README.md#记录头标志与-kind)、[event-model kind 编号段](../../docs/subsystems/event-model.md#kind-编号段)
 - 级别:table
 - 里程碑:M1
-- 前置:默认特性构建(不含 dev 测试 kind);每行断言 `kind_info(k)` 的 `name`、`domain`、`layout`、`role`、`schema_version`、`journals`、`crc`、`optional`;另断言 `KINDS.len() == 40`(下表即全集,没有为模拟账户另设的 kind,没有 `0x7Fxx`)
+- 前置:默认特性构建(不含 dev 测试 kind);每行断言 `kind_info(k)` 的 `name`、`domain`、`layout`、`role`、`schema_version`、`journals`、`crc`、`optional`;另断言 `KINDS.len() == 41`(下表即全集,没有为模拟账户另设的 kind,没有 `0x7Fxx`)
 - 实现:`crates/hft-event/tests/kinds.rs::evt_004_kinds_registry`
 
 | 行 | kind | 期望(name / domain / layout / role / version / journals / crc / optional) |
@@ -142,6 +142,7 @@ spec: README.md
 | EVT-004.37 | `0x050A` | `EngineClock` / System / Fixed 32 / Input / 1 / SEQ / Never / false |
 | EVT-004.38 | `0x0601` | `RawRx` / Raw / Multi prefix 24 / Meta / 1 / RAW / Always / false |
 | EVT-004.39 | `0x0602` | `RawTx` / Raw / Multi prefix 24 / Meta / 1 / RAW / Always / false |
+| EVT-004.41 | `0x050B` | `UtcAnchor` / System / Fixed 32 / Input / 1 / SEQ / Never / false |
 
 ### EVT-005 KINDS 与 Body 实现一一对应、编号唯一、按编号段归域
 
@@ -174,7 +175,7 @@ spec: README.md
 | EVT-006.4 | `0x010A`(行情段未分配) | `None` |
 | EVT-006.5 | `0x020B`(执行段未分配) | `None` |
 | EVT-006.6 | `0x0310`(hft-ext-proto 段) | `None` |
-| EVT-006.7 | `0x050B` | `None` |
+| EVT-006.7 | `0x050C`(系统段未分配) | `None` |
 | EVT-006.8 | `0x7F01` | `None`(生产构建无测试 kind) |
 | EVT-006.9 | `0xFFFF` | `None` |
 
@@ -742,6 +743,7 @@ spec: README.md
 | EVT-070.9 | `EngineClock` | size 32;`base_engine_ns`@0、`tsc_hz_milli`@8、`prev_last_seq`@16、`source`@24、`_pad`@25 |
 | EVT-070.10 | `Timer` | size 24;`timer_id`@0、`owner`@4、`_pad`@6、`group`@8、`_pad2`@12、`deadline_tsc`@16 |
 | EVT-070.11 | `ConnState` | size 24;`venue`@0、`conn`@1、`state`@2、`role`@3、`inst`@4、`reason`@8、`account`@12、`_pad2`@13、`rx_tsc`@16 |
+| EVT-070.12 | `UtcAnchor` | size 32;`tsc`@0、`realtime_ns`@8、`hz_milli`@16、`err_ns`@24、`_pad`@28 |
 
 ### EVT-071 旧版本写出的记录读出时新增字段为 0
 
@@ -1827,11 +1829,11 @@ spec: README.md
   1. 生成
   2. 用 Python 导入 `<tmp>/python/_generated/events.py`,对每个 kind 读出 dtype
 - 期望:
-  - `docs/generated/event-catalog.md` 含 40 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 95 个名字,包含 Ledger BalanceCheck、ReceiptMismatch、DayPnlCarried 与 Sequencer ReconcileCash、ReconcileRejected
-  - `schemas/arrow/` 下 40 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
+  - `docs/generated/event-catalog.md` 含 41 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 95 个名字,包含 Ledger BalanceCheck、ReceiptMismatch、DayPnlCarried 与 Sequencer ReconcileCash、ReconcileRejected
+  - `schemas/arrow/` 下 41 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
   - 每个 kind 的 dtype `itemsize` 等于 `size`(Var/Multi 等于 `prefix`),`names` 与 `offsets` 与 `FieldDesc` 逐项相同;`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的 dtype itemsize 为 48、80、16
   - `refdata.py` 含 `LoadErrCode` 每个变体一项,数值与 hft-refdata 相同
-  - `event-layout.lock` 含 40 个 kind、全部已分配的 `CmdKind`(25 个,含 `BindSlot`)与 `LoadErrCode`
+  - `event-layout.lock` 含 41 个 kind、全部已分配的 `CmdKind`(25 个,含 `BindSlot`)与 `LoadErrCode`
   - `crates/hft-telemetry/src/notes_catalog.rs` 对每个 source crate `const` 表中的每个 `(source, n)` 恰有一项,名字与默认级别同 `NOTE_NAMES`
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_172_outputs_and_python_dtype`
 
@@ -1841,7 +1843,7 @@ spec: README.md
 - 级别:golden
 - 里程碑:M1
 - 输入:`crates/hft-event/tests/common/canonical.rs` 中每个 kind 一条规范样例(各字段取非零且按字段序递增的值,枚举取最大合法值;`seq = 1`、`tsc = 2`、`flags = EVENT_END`,`CRC` 按该 kind 的策略),Multi kind 为单段记录
-- 期望文件:`fixtures/hft-event/EVT-173/<kind>.bin`(40 个)
+- 期望文件:`fixtures/hft-event/EVT-173/<kind>.bin`(41 个)
 - 实现:`crates/hft-event/tests/golden.rs::evt_173_canonical_records`
 
 ### EVT-174 gen-schema --check 在生成物与仓库一致时通过、被手改时失败

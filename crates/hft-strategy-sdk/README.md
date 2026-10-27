@@ -567,12 +567,12 @@ pub trait ModelViews: Views {}
 pub struct Now {
     pub tsc: Tsc,              // 当前事件记录头 tsc(不是系统时钟);只在本次启动内有意义
     pub engine_ns: i64,        // 引擎时间:跨重启连续、停机不计(见下"时间轴");持久状态里的时刻一律用它
-    pub utc_ns: i64,           // 用当前段 journal 记录的时钟校准对换算(确定);clock_ok = false 时不可用于结算时刻判断
+    pub utc_ns: i64,           // 引擎 UTC:由 journal 记录的时钟校准对与 UtcAnchor 重锚换算(确定、单调不减、跟随 CLOCK_REALTIME);clock_ok = false 时不可用于结算时刻判断
     pub seq: u64,
     pub boot_seq: u64,         // 本次进程启动的 EpochStart 记录的 seq;Advice 跨启动过期的唯一判据(basis_seq < boot_seq)
     pub tsc_per_ms: u64,       // 来自 journal 记录的 tsc_hz;毫秒参数 × 它 = tsc 间隔(只用于本次启动内的 TSC 比较)
     pub clock_ok: bool,
-    clk: EngineClockAnchor,    // 本次启动的 EngineClock(base_engine_ns、记录 tsc、tsc_hz_milli)与当前段的 UTC 校准对;ens_of/tsc_of/utc_of 用
+    clk: EngineClockAnchor,    // 本次启动的 EngineClock(base_engine_ns、记录 tsc、tsc_hz_milli)与一个 UTC 锚点(段校准对,或重锚后的当前记录及其 UTC);ens_of/tsc_of/utc_of 用
 }
 pub struct EngineClockAnchor { pub base_engine_ns: i64, pub base_tsc: Tsc, pub tsc_hz_milli: u64, pub utc_tsc: Tsc, pub utc_ns: i64 }
 impl Now {
@@ -582,7 +582,7 @@ impl Now {
     pub fn ens_of(&self, t: Tsc) -> i64;
     /// engine_ns → 本次启动的 TSC(登记定时器、与视图里的 *_tsc 比较用;取 engine_ns ≥ e 的最小 TSC);早于本次启动的时刻饱和到 0(只能表示"已过去")。
     pub fn tsc_of(&self, e: i64) -> Tsc;
-    /// 本次启动内的 TSC 时刻 → UTC ns:与 utc_ns 同一校准对(确定);clock_ok = false 时同样不可用于时刻判断。
+    /// 本次启动内的 TSC 时刻 → UTC ns:从 utc_ns 的同一锚点按 tsc_hz_milli 外推(确定;用于接收时刻等相邻 TSC);clock_ok = false 时同样不可用于时刻判断。
     pub fn utc_of(&self, t: Tsc) -> i64;
 }
 pub mod time { pub const fn ms(ms: u32) -> i64; }   // 毫秒参数 → engine_ns 间隔(× 1_000_000)
@@ -1412,7 +1412,7 @@ SDK 自身的入口(在 `decided_tsc − proc_tsc` 分段内,[latency-budget](..
 
 <details><summary>给实现者</summary>
 
-- `Now.utc_ns`、`utc_of` 与 `tsc_per_ms` 由 sequencer 从 journal 段头的时钟校准对(`tsc_hz` 与段头 UTC/TSC 对;不用 Meta 的 `ClockStatus`,sequencer 不读 Meta)得出,回放确定;`Now.engine_ns` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md#时间戳语义)的公式由 sequencer 计算;实现都在 hft-sequencer 的 Views 适配器里。
+- `Now.utc_ns`、`utc_of` 与 `tsc_per_ms` 由 sequencer 从 journal 得出:段头 UTC/TSC 校准对与 `EngineClock.tsc_hz_milli`,再经 Input `UtcAnchor` 重锚(规则归 [hft-sequencer 引擎 UTC](../hft-sequencer/README.md#引擎-utc);不用 Meta 的 `ClockStatus`,sequencer 不读 Meta),回放确定;`Now.engine_ns` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md#时间戳语义)的公式由 sequencer 计算;实现都在 hft-sequencer 的 Views 适配器里。
 - `BboView` 的报价部分取自 hft-book `Top`,连接健康部分由 hft-sequencer 按成员位图现算(聚合规则归 [hft-sequencer 连接活性](../hft-sequencer/README.md#连接活性));本 crate 只规定字段语义与 `quote_live`。
 - `Views::risk_for` 的实现在 hft-sequencer 的 Views 适配器(从 hft-risk 的 inst → 价格带类别表投影,O(1));`model_own` 的事件重建在 advisor 镜像(镜像状态与 sequencer 逐 seq 一致)。
 - 实现顺序:`params` + `body_view` + `define_params!` + 金样 → `desc`(描述符与编译期校验、`encode_cmd`/`CmdView`)→ `intent`/`target`/`event`/`view_types` → `ctx` → `group`(指纹)→ `set` 宏 + 两个测试策略 → `advice` → `checkpoint`/`layout`(两节与路径金样)→ `testing` → `schema_json`(含 `minor_change`)→ `chain`。

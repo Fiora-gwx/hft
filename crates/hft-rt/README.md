@@ -172,13 +172,14 @@ pub struct PhcOffset { pub phc_ns: i64, pub sys_ns: i64 /* 最窄一组的中点
 pub struct DriftTracker { /* 最近 60 个校准对的线性拟合 */ }
 impl DriftTracker {
     pub fn new(step_threshold_ns: u32) -> DriftTracker;           // 取 rt.clock.step_threshold_ns
+    pub fn hz_milli(&self) -> Option<u64>;                        // 计数器相对 CLOCK_REALTIME 的频率 × 1000:窗口最小二乘斜率的倒数(精确整数);< 2 对或斜率非正 → None
     pub fn push(&mut self, p: CalibPair) -> ClockVerdict;          // Synced | Unsynced | Stepped{jump_ns}
 }
 // push:窗口(最近 60 对)不足 2 对 → Unsynced(new 之后的前两对、每次 Stepped 之后的下一对);否则以窗口内 realtime_ns 对 tsc 的最小二乘直线
 // 预测本对的 realtime_ns,|实测 − 预测| > step_threshold_ns → Stepped{jump_ns = 实测 − 预测} 并清空窗口;否则 Synced。本对随后加入窗口(满 60 淘汰最老)
 ```
 
-热路径**只读 TSC**;TSC → UTC 的换算在冷读者(段头校准对 + `ClockStatus` 记录)与 warm 线程(`SeqCell<TscUtc>`)里完成。跨重启连续的时间不是 TSC:持久状态里的时刻用 SDK `Now.engine_ns`(sequencer 由 journal 记录的运行区间累加,停机不计)或 UTC 日历量([hot-path-rules D6](../../docs/hot-path-rules.md#确定性d))。sequencer 不做任何 UTC 换算:整点滚动等依赖时钟的决定由 live driver 写成 `Timer` 输入记录。housekeeping 按校准节拍(取值归 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划))调 `sample_pair` + `DriftTracker::push`,更新 `SeqCell<TscUtc>`,并把这一次的校准对与误差界写成一条 `ClockStatus`(Meta 记录,布局归 [hft-event](../hft-event/README.md#控制与系统0x04xx0x05xx));`Stepped` 时另写一条。离线换算按样本前后两条 `ClockStatus` 插值、逐样本给误差界,规则归 [latency-budget §2.1](../../docs/latency-budget.md#21-跨时钟域换算)。
+热路径**只读 TSC**;TSC → UTC 的换算在冷读者(段头校准对 + `ClockStatus` 记录)与 warm 线程(`SeqCell<TscUtc>`)里完成。跨重启连续的时间不是 TSC:持久状态里的时刻用 SDK `Now.engine_ns`(sequencer 由 journal 记录的运行区间累加,停机不计)或 UTC 日历量([hot-path-rules D6](../../docs/hot-path-rules.md#确定性d))。sequencer 不读系统时钟:整点滚动等依赖时钟的决定由 live driver 写成 `Timer` 输入记录,决策用的 UTC 由 housekeeping 的校准对与 `DriftTracker::hz_milli` 经 Input `UtcAnchor` 重锚([hft-sequencer 引擎 UTC](../hft-sequencer/README.md#引擎-utc))。housekeeping 按校准节拍(取值归 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划))调 `sample_pair` + `DriftTracker::push`,更新 `SeqCell<TscUtc>`,并把这一次的校准对与误差界写成一条 `ClockStatus`(Meta 记录,布局归 [hft-event](../hft-event/README.md#控制与系统0x04xx0x05xx));`Stepped` 时另写一条。离线换算按样本前后两条 `ClockStatus` 插值、逐样本给误差界,规则归 [latency-budget §2.1](../../docs/latency-budget.md#21-跨时钟域换算)。
 
 ### CPU、主机检查、内存
 

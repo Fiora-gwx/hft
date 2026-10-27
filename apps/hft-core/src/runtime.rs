@@ -160,6 +160,54 @@ pub fn clock_tick(
     Ok(())
 }
 
+/// `UtcAnchor` cadence of the housekeeping calibration tick (README "引擎 UTC").
+#[derive(Copy, Clone, Debug)]
+pub struct AnchorTick {
+    every: u32,
+    since: Option<u32>,
+}
+
+impl AnchorTick {
+    /// One anchor every `every` Synced ticks (`clock.anchor_every()`).
+    pub fn new(every: u32) -> AnchorTick {
+        AnchorTick {
+            every: every.max(1),
+            since: None,
+        }
+    }
+}
+
+/// After `clock_tick`: on a `Synced` tick that is due (the first Synced tick, then every
+/// `every`-th), sends the pair and the tracker's counter rate as `HkMsg::UtcAnchor`; any other
+/// verdict defers it to the next Synced tick.
+pub fn anchor_tick(
+    hk: &mut Producer<HkMsg>,
+    pair: hft_rt::CalibPair,
+    verdict: hft_rt::ClockVerdict,
+    hz_milli: Option<u64>,
+    st: &mut AnchorTick,
+) -> Result<(), Error> {
+    if verdict != hft_rt::ClockVerdict::Synced {
+        st.since = None;
+        return Ok(());
+    }
+    if let Some(n) = st.since
+        && n + 1 < st.every
+    {
+        st.since = Some(n + 1);
+        return Ok(());
+    }
+    let mut a = <hft_event::UtcAnchor as zerocopy::FromZeros>::new_zeroed();
+    a.tsc = pair.tsc;
+    a.realtime_ns = pair.realtime_ns;
+    a.hz_milli = hz_milli.unwrap_or(0);
+    a.err_ns = pair.err_ns;
+    hk.try_push(HkMsg::UtcAnchor(a))
+        .map_err(|_| Error::runtime("HkFull", "utc anchor", 3))?;
+    st.since = Some(0);
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn notify(message: &str) -> Result<(), Error> {
     use std::os::{
@@ -736,12 +784,14 @@ fn run_linux(
     let mut hk = hk_tx;
     let threshold = c.clock.step_threshold_ns;
     let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
+    let anchor_every = c.clock.anchor_every();
     // This is an observation of sequencer-owned state, never a decision input.
     let observed_state = Arc::new(AtomicU8::new(hft_rt::HkLine::WARMUP));
     let hk_state = observed_state.clone();
     let stale_after = Duration::from_millis(u64::from(c.watchdog.hb_stale_ms));
     workers.spawn(policy(c, "housekeeping")?, move |stop, t| {
         let mut tracker = hft_rt::DriftTracker::new(threshold);
+        let mut anchor = AnchorTick::new(anchor_every);
         let mut last = None;
         let mut next = Instant::now();
         let mut seq_count = hb.read();
@@ -779,6 +829,7 @@ fn run_linux(
                     .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
                 let verdict = tracker.push(pair);
                 clock_tick(&mut hk, pair, clock.hz_milli, verdict, &mut last)?;
+                anchor_tick(&mut hk, pair, verdict, tracker.hz_milli(), &mut anchor)?;
                 heartbeat.hk.hk_utc_ns.store(pair.realtime_ns, Ordering::Release);
                 if seq_progress.elapsed() < stale_after {
                     notify("WATCHDOG=1")?;

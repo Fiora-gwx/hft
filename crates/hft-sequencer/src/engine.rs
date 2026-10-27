@@ -599,8 +599,15 @@ impl Engine {
     pub(crate) fn now_of(&self, tsc: Tsc, seq: u64) -> Now {
         let a = self
             .clock
-            .anchor(Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns);
+            .anchor_at(tsc, Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns);
         Now::new(tsc, seq, self.boot_seq, self.clock_ok, a)
+    }
+
+    /// Engine UTC of a record-header tsc of this run (the `Now.utc_ns` of a record at `t`).
+    pub fn utc_at(&self, t: Tsc) -> i64 {
+        self.clock
+            .anchor_at(t, Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns)
+            .utc_of(t)
     }
 
     /// Buffers a Sequencer Note.

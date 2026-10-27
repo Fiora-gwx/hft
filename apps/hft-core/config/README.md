@@ -14,7 +14,7 @@ Polymarket 实盘(`pm_sim_config --live UID KEYS_DIR [--day-loss-carry YYYY-MM-D
 
 `[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us` 与 `nice`。`nice` 为 0–19，housekeeping 必须为 0；模板的 persist 与控制/建连线程为 10。每个线程在执行任务前设置 `SCHED_OTHER`、`timerslack_ns = 1`、nice、名称及可选绑核；设置失败退出 3，所有工作线程的设置成功后才允许 READY。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。
 
-`clock.step_threshold_ns`、`clock.interval_ms`、`watchdog.hb_stale_ms` 与 `venues.<v>.stale_guard_ms` 均为必填正整数。线程名不超过 Linux comm 的 15 字节；park 时长遵守 [心跳约束](../README.md#线程计划)。网关订单槽位容量从 ECF1 的 OMS 配置取得。缺失键逐项报 `MissingField`，凭据引用缺失报 `MissingCredential`，未知键与类型错误报单条脱敏 `ConfigParse`。加载还检查 [执行/风险与尘埃线约束](../README.md#内存与-journal-段按主机类唯一归属)，失败发生在运行资源创建前。
+`clock.step_threshold_ns`、`clock.interval_ms`、`watchdog.hb_stale_ms` 与 `venues.<v>.stale_guard_ms` 均为必填正整数;`clock.anchor_interval_ms`(`UtcAnchor` 重锚周期,按 `interval_ms` 节拍向上取整)可选,缺省 10 000,必须为正。线程名不超过 Linux comm 的 15 字节；park 时长遵守 [心跳约束](../README.md#线程计划)。网关订单槽位容量从 ECF1 的 OMS 配置取得。缺失键逐项报 `MissingField`，凭据引用缺失报 `MissingCredential`，未知键与类型错误报单条脱敏 `ConfigParse`。加载还检查 [执行/风险与尘埃线约束](../README.md#内存与-journal-段按主机类唯一归属)，失败发生在运行资源创建前。
 
 `threads.idle` 可选 `"park"`（默认，保留 `park_us`）或 `"spin"`。Spin 只允许 sequencer/feed/gw 热线程，必须显式绑定且无其他配置线程共用该核；启动还要求该核位于 Linux isolated CPU 列表，否则在 READY 前退出 3。低延迟主机可使用用户态持续轮询，dev2 模板保持 Park；这不启用网卡/socket 的内核 busy poll。
 

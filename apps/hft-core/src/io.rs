@@ -335,6 +335,7 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                         b.deadline_tsc = now.0;
                         out.set(RecordFlags(0), now, &b);
                     }
+                    HkMsg::UtcAnchor(b) => out.set(RecordFlags(0), now, &b),
                 }
                 true
             }
@@ -441,7 +442,7 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     }
     fn roll_info(&mut self) -> RollInfo {
         RollInfo {
-            utc_ns: self.clock.to_utc_ns(hft_rt::tsc_now()),
+            utc_ns: self.utc_of(hft_rt::tsc_now()),
             calib: self.clock.base,
             tsc_hz_milli: self.clock.hz_milli,
         }
@@ -452,8 +453,21 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     fn clock_status(&self) -> ClockStatus {
         self.clock_status
     }
+    /// From the latest housekeeping `ClockStatus` pair (≤ one calibration tick old), so the
+    /// driver's UTC decisions (hourly roll, DayRoll, FundingSettle) do not inherit the boot
+    /// calibration's rate error; the boot pair until the first status.
     fn utc_of(&self, t: Tsc) -> i64 {
-        self.clock.to_utc_ns(t)
+        let c = &self.clock_status;
+        if c.tsc.0 == 0 {
+            return self.clock.to_utc_ns(t);
+        }
+        let pair = hft_rt::CalibPair {
+            tsc: c.tsc,
+            realtime_ns: c.realtime_ns,
+            phc_ns: c.phc_ns,
+            err_ns: c.calib_err_ns,
+        };
+        self.clock.tsc_utc(&pair).utc_ns(t)
     }
 }
 

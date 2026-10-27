@@ -81,7 +81,7 @@ fn evt_008_dev_kinds_registered() {
     assert!(kind_info(EventKind(0x7F00)).is_none(), "EVT-008.7");
     // EVT-008.8: the gen-schema export never contains test kinds.
     let cat = schema::catalog();
-    assert_eq!(cat.kinds.len(), 40);
+    assert_eq!(cat.kinds.len(), 41);
     assert!(cat.kinds.iter().all(|k| k.kind.0 >> 8 != 0x7F), "EVT-008.8");
     // The dev bodies round-trip like any other kind.
     let b = dev::TCrc { bytes: [7; 40] };

@@ -40,7 +40,7 @@ BBO 合并的保留顺序、CONFLATED 与缓冲复用规则归 [sequencer](../..
 | 记录头 `tsc` | sequencer 取出时的 TSC(`proc_tsc`) | `hft-rt` | tsc |
 | `engine_ns` | **引擎时间**:跨进程重启连续、停机时间不计;由 seq journal 的运行区间累加,确定(下述) | 由记录头 `tsc` 与 `EngineClock` 计算,不是记录字段 | ns |
 
-TSC → UTC/PHC 用段头的校准对与 `ClockStatus` 事件换算:housekeeping 每 1 000 ms 写一条 `ClockStatus`(含 `(tsc, realtime_ns, phc_ns, calib_err_ns)`,[hft-event](../../crates/hft-event/README.md#控制与系统0x04xx0x05xx));延迟分段按样本前后两条 `ClockStatus` 线性插值换算并逐样本给误差界,误差界超限的样本计入 `unsynced_cal`、不进分位数——插值、误差界与 HW 时间戳不可用时以 `sw_rx` 为锚的规则唯一归属 [latency-budget §2.1](../latency-budget.md#21-跨时钟域换算)。**不同来源的时间戳不混算**;延迟分段名只用 [latency-budget.md](../latency-budget.md) 中的定义;模拟账户的样本不与实盘直方图混算。
+决策用的 UTC(SDK `Now.utc_ns`)是引擎 UTC:段头校准对经 Input `UtcAnchor` 重锚,单调不减,算法归 [hft-sequencer 引擎 UTC](../../crates/hft-sequencer/README.md#引擎-utc)。取证与延迟换算的 TSC → UTC/PHC 用段头的校准对与 `ClockStatus` 事件换算:housekeeping 每 1 000 ms 写一条 `ClockStatus`(含 `(tsc, realtime_ns, phc_ns, calib_err_ns)`,[hft-event](../../crates/hft-event/README.md#控制与系统0x04xx0x05xx));延迟分段按样本前后两条 `ClockStatus` 线性插值换算并逐样本给误差界,误差界超限的样本计入 `unsynced_cal`、不进分位数——插值、误差界与 HW 时间戳不可用时以 `sw_rx` 为锚的规则唯一归属 [latency-budget §2.1](../latency-budget.md#21-跨时钟域换算)。**不同来源的时间戳不混算**;延迟分段名只用 [latency-budget.md](../latency-budget.md) 中的定义;模拟账户的样本不与实盘直方图混算。
 
 **引擎时间 `engine_ns`(唯一定义)**:每次进程启动,live driver 在任何其他 Input 之前写一条 Input 记录 [`EngineClock`](../../crates/hft-event/README.md#engineclock0x050ainput)(`base_engine_ns`、`tsc_hz_milli`)。对 seq journal 中该条之后、下一条 `EngineClock` 之前的任意记录 r:
 
@@ -106,6 +106,7 @@ E.base_engine_ns = engine_ns(上次运行最后一条已提交记录)           
 | 0x0508 | `ClockStatus` | 定长 56 | Meta | 每 1 000 ms 一条 |
 | 0x0509 | `SegmentRoll` | 定长 48 | **Meta** | 结构记录;滚动决定是 Input `Timer{Roll}` |
 | 0x050A | `EngineClock` | 定长 32 | Input | 每次进程启动一条:引擎时间 `engine_ns` 的运行区间基准(见[时间戳语义](#时间戳语义)) |
+| 0x050B | `UtcAnchor` | 定长 32 | Input | 引擎 UTC 的重锚:housekeeping 的校准对与计数器频率,周期写入([hft-sequencer 引擎 UTC](../../crates/hft-sequencer/README.md#引擎-utc)) |
 | 0x0601 | `RawRx` | Multi | raw journal | 收到的解密后 payload |
 | 0x0602 | `RawTx` | Multi | raw journal | 发出的明文订单帧;**登录帧与任何含签名的帧不记录** |
 
@@ -200,7 +201,7 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
 
 **分档快照流**(`L2Snapshot{origin = TopN}`)没有序号链:每条消息整体替换该簿(簿只含这 N 档;应用规则归 [hft-book](../../crates/hft-book/README.md)),不做 `prev_id` 校验,也没有 REST 重同步。**`L2Delta`/`L2Batch`(增量深度,可选扩展)的序号归一化**:各所的序号规则(Binance 合约 `pu`、现货 `U/u` 重叠、OKX `seqId/prevSeqId`、Bitget `seq/pseq`、快照后的首条衔接)由 venue 协议在 feed 线程内判定,并归一化为"`prev_id` = 本消息作用于其上的状态 id";快照后的首条消息 `prev_id` 置为快照的 `snap_id`。簿只做通用校验 `prev_id == 当前 last_id`(见 [hft-book](../../crates/hft-book/README.md))。
 
-其余体——`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、`OrderDecision`(含 `link_role` 编码与 `OrderFlags` 位值)、`SendReport`、`PositionReport`、`BalanceReport`、`FundingSettle`、`ExternalFill`、`MarginReport`、`AccountConfigReport`(含每 inst 杠杆)、`ExecDecision`(含 `TargetOrigin` 线上码)、`Advice`、`ChainHead`、`PoolQuote`、`SwapDecision`、`CmdResult`、`ReconcileReport`、`LatencySample`、`Note`(含 `source` 表与 `AdvisorLag` 的唯一定义)、`HostProfile`、`ClockStatus`、`SegmentRoll`、`EngineClock`——的布局、各枚举的编码与测量字段表在 [`hft-event`](../../crates/hft-event/README.md#事件体布局) 定义并由 `gen-schema` 导出;`StrategyParams` 的容器(`StrategyParamsHdr` + `GroupSpec`)在 [hft-event 策略载荷容器](../../crates/hft-event/README.md#策略载荷容器);变长记录(`L2Snapshot`、`ControlCmd`、`ConfigBlob`、`StateSnapshot`、`RawRx`、`RawTx`)的分段规则见 [journal-format.md](journal-format.md#变长与多段记录)。线格式枚举与位(`RunMode`、`KillLevel`、`CapSource`、`KillBits`、**`RejectBits`**)在 [hft-types](../../crates/hft-types/README.md)。
+其余体——`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、`OrderDecision`(含 `link_role` 编码与 `OrderFlags` 位值)、`SendReport`、`PositionReport`、`BalanceReport`、`FundingSettle`、`ExternalFill`、`MarginReport`、`AccountConfigReport`(含每 inst 杠杆)、`ExecDecision`(含 `TargetOrigin` 线上码)、`Advice`、`ChainHead`、`PoolQuote`、`SwapDecision`、`CmdResult`、`ReconcileReport`、`LatencySample`、`Note`(含 `source` 表与 `AdvisorLag` 的唯一定义)、`HostProfile`、`ClockStatus`、`SegmentRoll`、`EngineClock`、`UtcAnchor`——的布局、各枚举的编码与测量字段表在 [`hft-event`](../../crates/hft-event/README.md#事件体布局) 定义并由 `gen-schema` 导出;`StrategyParams` 的容器(`StrategyParamsHdr` + `GroupSpec`)在 [hft-event 策略载荷容器](../../crates/hft-event/README.md#策略载荷容器);变长记录(`L2Snapshot`、`ControlCmd`、`ConfigBlob`、`StateSnapshot`、`RawRx`、`RawTx`)的分段规则见 [journal-format.md](journal-format.md#变长与多段记录)。线格式枚举与位(`RunMode`、`KillLevel`、`CapSource`、`KillBits`、**`RejectBits`**)在 [hft-types](../../crates/hft-types/README.md)。
 
 ## 演进规则
 

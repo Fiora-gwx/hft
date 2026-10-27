@@ -35,7 +35,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             &["raw_feed", "raw_gw", "latency_trace_capacity"],
         ),
         "journal_size" => (&["segment_bytes", "hot_keep"], &[]),
-        "clock" => (&["step_threshold_ns", "interval_ms"], &[]),
+        "clock" => (&["step_threshold_ns", "interval_ms"], &["anchor_interval_ms"]),
         "watchdog" => (&["hb_stale_ms"], &[]),
         "startup" => (&["budget_s", "gate_timeout_s"], &[]),
         "thread" => (&["name", "task", "park_us", "nice"], &["core", "idle"]),

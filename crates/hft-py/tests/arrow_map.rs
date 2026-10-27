@@ -54,7 +54,8 @@ fn typed_ok(info: &KindInfo, prefix: &[u8]) -> bool {
         TX_LIFECYCLE => TxLifecycle, CONTROL_CMD => CmdHdr, CMD_RESULT => CmdResult, CONFIG_BLOB => BlobHdr,
         RECONCILE_REPORT => ReconcileReport, TIMER => Timer, CONN_STATE => ConnState, ADVICE => AdviceHdr,
         STATE_SNAPSHOT => SnapshotHdr, LATENCY_SAMPLE => LatencySample, NOTE => Note, HOST_PROFILE => HostProfile,
-        CLOCK_STATUS => ClockStatus, SEGMENT_ROLL => SegmentRoll, ENGINE_CLOCK => EngineClock, RAW_RX => RawHdr,
+        CLOCK_STATUS => ClockStatus, SEGMENT_ROLL => SegmentRoll, ENGINE_CLOCK => EngineClock, UTC_ANCHOR => UtcAnchor,
+        RAW_RX => RawHdr,
         RAW_TX => RawHdr,
     )
 }

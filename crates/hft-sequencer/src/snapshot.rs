@@ -12,7 +12,7 @@ use hft_types::{AccountId, GroupId, InstId, StrategyId, Tsc, VenueId};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::Driver;
-use crate::clock::{EngineClockRow, SeqDayRow};
+use crate::clock::{EngineClockRow, SeqDayRow, UtcLineRow};
 use crate::commands::{
     ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, FILL_SEQ_VERSION, FillSeqRow,
     RECON_PENDING_VERSION, RECON_VIEW_DIFFS, RECON_VIEW_REPORTS, RECON_VIEW_VERSION, ReconDiff, ReconDiffRow,
@@ -43,6 +43,8 @@ pub const SECTION_SEQ_DAY: u16 = 20;
 pub const SEQ_DAY_VERSION: u16 = 1;
 pub const SECTION_ENGINE_CLOCK: u16 = 25;
 pub const ENGINE_CLOCK_VERSION: u16 = 1;
+pub const SECTION_UTC_LINE: u16 = 32;
+pub const UTC_LINE_VERSION: u16 = 1;
 pub const SECTION_STRATEGY_TIMERS: u16 = 27;
 pub const STRATEGY_TIMERS_VERSION: u16 = 1;
 
@@ -260,6 +262,12 @@ fn w_seq_sections<S: StrategySet>(
     w.begin_section(SECTION_ENGINE_CLOCK, ENGINE_CLOCK_VERSION);
     w.put_row(&e.clock.row);
     w.end_section();
+    // 32 UtcLine: only once a UtcAnchor was applied in this run (absent = segment pair).
+    if e.clock.utc().is_set() {
+        w.begin_section(SECTION_UTC_LINE, UTC_LINE_VERSION);
+        w.put_row(e.clock.utc());
+        w.end_section();
+    }
     // 26 ConnLive.
     w.begin_section(SECTION_CONN_LIVE, CONN_LIVE_VERSION);
     for (v, slots) in e.market.conns.iter().enumerate() {
@@ -770,6 +778,8 @@ pub struct SeqSections {
     /// Section 31 (absent = no binding).
     pub bindings: Vec<crate::commands::SlotBindingRow>,
     pub engine_clock: EngineClockRow,
+    /// Section 32 (absent = no UtcAnchor applied in the snapshot's run).
+    pub utc_line: UtcLineRow,
     pub conns: Vec<ConnLiveRow>,
     pub order_conns: Option<Vec<crate::commands::OrderConnsRow>>,
     /// `None` distinguishes an old snapshot with no identity history from an empty table.
@@ -881,6 +891,16 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
     }
     if let Some(s) = sec(SECTION_ENGINE_CLOCK)? {
         out.engine_clock = s.reader().get_row().map_err(|_| SECTION_ENGINE_CLOCK)?;
+    }
+    if let Some(s) = sec(SECTION_UTC_LINE)? {
+        if s.version != UTC_LINE_VERSION || s.count != 1 || s.body.len() != size_of::<UtcLineRow>() {
+            return Err(SECTION_UTC_LINE);
+        }
+        let row: UtcLineRow = s.reader().get_row().map_err(|_| SECTION_UTC_LINE)?;
+        if !row.is_set() || out.engine_clock.tsc_hz_milli == 0 {
+            return Err(SECTION_UTC_LINE);
+        }
+        out.utc_line = row;
     }
     if let Some(s) = sec(SECTION_CONN_LIVE)? {
         let mut rr = s.reader();

@@ -15,7 +15,7 @@ use crate::header::RecordFlags;
 use crate::macros::layout;
 use crate::market::{Bbo, Funding, IndexPrice, L2Delta, Liquidation, MarkPrice, Trade};
 use crate::strategy::AdviceRecord;
-use crate::system::{ClockStatus, ConnState, Note, NoteSource};
+use crate::system::{ClockStatus, ConnState, Note, NoteSource, UtcAnchor};
 use crate::{DecodeErr, EncodeErr, EventKind};
 
 /// `bbo-<venue>` / `md-<venue>` ring element.
@@ -67,6 +67,8 @@ pub enum HkMsg {
     Sys {
         timer_id: u32,
     },
+    /// UTC re-anchoring pair; the live driver writes it as the Input `UtcAnchor`.
+    UtcAnchor(UtcAnchor),
 }
 const _: () = assert!(size_of::<HkMsg>() <= 128);
 

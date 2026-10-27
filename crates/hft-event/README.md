@@ -719,6 +719,20 @@ pub struct EngineClock {            // 0x050A,32 B,Input
 - 上次运行的尾部若丢失(崩溃后只恢复到更早的已提交记录),`base_engine_ns` 取恢复到的最后一条记录的值:丢失的那段运行时间不计入引擎时间,所有按 `engine_ns` 计的截止与冷却只会更晚到期(保守)。
 - 运行中的段滚动不写本记录;读者从中途某段引导块起步时,从该段 `StateSnapshot` 的 `EngineClock` 节([journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构))取得当前基准。
 
+#### UtcAnchor(0x050B,Input)
+
+引擎 UTC(SDK `Now.utc_ns`)的**重锚**:housekeeping([apps/hft-core](../../apps/hft-core/README.md))在 `Synced` 校准节拍上按 `clock.anchor_interval_ms` 经 hk 环送出,live driver 原样写成 Input;sequencer 据此把本运行的 UTC 线对齐 CLOCK_REALTIME(落后则前跳,超前则以 500 ppm 减速,不回跳)。重锚的算法、常数与快照节 32 归 [hft-sequencer 引擎 UTC](../hft-sequencer/README.md#引擎-utc)。回放照读这条记录,因此 `Now.utc_ns` 确定。
+
+```rust
+pub struct UtcAnchor {              // 0x050B,32 B,Input
+    pub tsc: Tsc,                   //  0 校准对:TSC(hft-rt `sample_pair` 的窗口中点)
+    pub realtime_ns: i64,           //  8 校准对:CLOCK_REALTIME
+    pub hz_milli: u64,              // 16 计数器相对 CLOCK_REALTIME 的频率 × 1000(hft-rt `DriftTracker::hz_milli`,最近 60 个校准对的最小二乘);0 = 未测得
+    pub err_ns: u32,                // 24 校准对误差界(hft-rt `CalibPair.err_ns`)
+    pub _pad: u32,                  // 28
+}                                   // 32 B
+```
+
 ### cap 记录
 
 模式上限(cap)的编码,快照 `RiskState` 节的行、`Note{CapSet/CapCleared}` 的 `v[]` 都用它;来源、作用域、恢复条件归 [hft-risk](../hft-risk/README.md),优先级与解除命令列在 [control-plane](../../docs/subsystems/control-plane.md#模式与上限的统一优先级)。
@@ -900,6 +914,7 @@ pub enum HkMsg {                     // hk 环元素(→ sequencer;唯一写者�
     ClockStatus(ClockStatus),        // Meta,原样记录
     Note(Note),                      // Meta;source ∈ {Housekeeping, Boot}(advisor 的 Note 走 advice 环)
     Sys { timer_id: u32 },           // 环境观测(存储档位、时钟判定、kill 自检等,按定时器编码打包好的 Sys timer_id):live driver 当场写成 Input Timer{Sys}
+    UtcAnchor(UtcAnchor),            // 时钟重锚:live driver 原样写成 Input UtcAnchor
 }
 pub type OutMsg = GwCmd;            // out 环元素的唯一类型(没有 enum 包装);hft-venue/hft-sequencer 沿用 OutMsg 这个名字
 #[repr(C)]
@@ -1234,7 +1249,7 @@ impl<'b> Reassembler<'b> {
 | `src/var.rs` | `PartHdr`、`L2SnapHdr`、`BlobHdr`、`RawHdr`、`SnapshotHdr`/`SectionHdr`;`multi_view`、`PartIter`(拆分)与 `Reassembler`(重组,调用方提供缓冲) |
 | `src/codec.rs` | `encode_fixed`、`encode_var`、`decode_record`、`classify`、CRC32C(`crc32c` crate,ARMv8 CRC 指令) |
 | `src/ring.rs` | `FeedMsg`、`RepMsg`、`HkMsg`、`OutMsg`、`GwCmd`、`FeedCmd`、`CtlRecord`、`AdviceMsg`(进程内环元素与 ctl、advice 帧) |
-| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()`(返回 `Catalog`:40 个生产 kind、`CmdKind`、`NOTE_NAMES`、SPB1 与分帧结构、全部码表、`MEASURE_MASK`;测试 kind 不导出) |
+| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()`(返回 `Catalog`:41 个生产 kind、`CmdKind`、`NOTE_NAMES`、SPB1 与分帧结构、全部码表、`MEASURE_MASK`;测试 kind 不导出) |
 | `src/codes.rs` | 整数编码字段的码表与位集合(`EnumDesc`) |
 
 </details>

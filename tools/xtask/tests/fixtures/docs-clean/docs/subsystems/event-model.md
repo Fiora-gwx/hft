@@ -47,5 +47,6 @@
 | 0x0508 | `ClockStatus` | 定长 56 | Meta | 每 1 000 ms 一条 |
 | 0x0509 | `SegmentRoll` | 定长 48 | **Meta** | 结构记录;滚动决定是 Input `Timer{Roll}` |
 | 0x050A | `EngineClock` | 定长 32 | Input | 每次进程启动一条:引擎时间 `engine_ns` 的运行区间基准(见[时间戳语义](#时间戳语义)) |
+| 0x050B | `UtcAnchor` | 定长 32 | Input | 引擎 UTC 的重锚 |
 | 0x0601 | `RawRx` | Multi | raw journal | 收到的解密后 payload |
 | 0x0602 | `RawTx` | Multi | raw journal | 发出的明文订单帧;**登录帧与任何含签名的帧不记录** |

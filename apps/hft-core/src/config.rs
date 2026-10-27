@@ -151,6 +151,19 @@ impl Journal {
 pub struct Clock {
     pub step_threshold_ns: u32,
     pub interval_ms: u32,
+    /// Period of the `UtcAnchor` Input (engine UTC re-anchoring); rounded up to whole
+    /// `interval_ms` ticks.
+    #[serde(default = "default_anchor_interval_ms")]
+    pub anchor_interval_ms: u32,
+}
+const fn default_anchor_interval_ms() -> u32 {
+    10_000
+}
+impl Clock {
+    /// Calibration ticks between two `UtcAnchor` Inputs (≥ 1).
+    pub fn anchor_every(&self) -> u32 {
+        self.anchor_interval_ms.div_ceil(self.interval_ms.max(1)).max(1)
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -431,8 +444,11 @@ pub fn load_timed(
     if c.startup.budget_s == 0 || c.startup.gate_timeout_s == 0 {
         bad!("BadValue", "startup budgets must be positive".into());
     }
-    if c.clock.step_threshold_ns == 0 || c.clock.interval_ms == 0 {
-        bad!("BadValue", "clock threshold and interval must be positive".into());
+    if c.clock.step_threshold_ns == 0 || c.clock.interval_ms == 0 || c.clock.anchor_interval_ms == 0 {
+        bad!(
+            "BadValue",
+            "clock threshold and intervals must be positive".into()
+        );
     }
     if c.watchdog.hb_stale_ms == 0 {
         bad!("BadValue", "watchdog.hb_stale_ms must be positive".into());

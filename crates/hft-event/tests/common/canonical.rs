@@ -62,7 +62,7 @@ macro_rules! fixed_all {
     ($($t:ty),* $(,)?) => { vec![$((<$t as Body>::KIND, fixed::<$t>(<$t>::FIELDS))),*] };
 }
 
-/// `(kind, record bytes)` for all 40 production kinds, ascending by number.
+/// `(kind, record bytes)` for all 41 production kinds, ascending by number.
 pub fn records() -> Vec<(EventKind, Vec<u8>)> {
     let mut v = fixed_all!(
         Bbo,
@@ -93,7 +93,8 @@ pub fn records() -> Vec<(EventKind, Vec<u8>)> {
         HostProfile,
         ClockStatus,
         SegmentRoll,
-        EngineClock
+        EngineClock,
+        UtcAnchor
     );
     let snap = L2SnapHdr::FIELDS;
     let blob = BlobHdr::FIELDS;

@@ -116,6 +116,7 @@ fn evt_004_kinds_registry() {
         (0x050A, "EngineClock", System, L::F(32), I, 1, s, N, false),
         (0x0601, "RawRx", Raw, L::M(24), Me, 1, r, A, false),
         (0x0602, "RawTx", Raw, L::M(24), Me, 1, r, A, false),
+        (0x050B, "UtcAnchor", System, L::F(32), I, 1, s, N, false),
     ];
     for (i, &(k, name, dom, lay, role, ver, j, crc, opt)) in rows.iter().enumerate() {
         let row = format!("EVT-004.{}", i + 1);
@@ -136,9 +137,9 @@ fn evt_004_kinds_registry() {
         assert_eq!(e.optional, opt, "{row}");
     }
     if !cfg!(feature = "dev-kinds") {
-        assert_eq!(KINDS.len(), 40);
+        assert_eq!(KINDS.len(), 41);
     }
-    assert_eq!(KINDS.iter().filter(|k| k.domain != Domain::Test).count(), 40);
+    assert_eq!(KINDS.iter().filter(|k| k.domain != Domain::Test).count(), 41);
 }
 
 #[test]
@@ -200,7 +201,7 @@ fn evt_006_kind_info_lookup() {
         ("EVT-006.4", 0x010A),
         ("EVT-006.5", 0x020B),
         ("EVT-006.6", 0x0310),
-        ("EVT-006.7", 0x050B),
+        ("EVT-006.7", 0x050C),
         ("EVT-006.9", 0xFFFF),
     ] {
         assert!(kind_info(EventKind(k)).is_none(), "{row}");
