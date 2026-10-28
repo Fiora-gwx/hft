@@ -12,8 +12,8 @@ use hft_risk::mode::CellKey;
 use hft_risk::{EquityView, LegSummary, ModeView, Risk, RiskView, Scope};
 use hft_strategy_sdk::{
     BboView, BookRead, BookStatus, CashView, FeeView, FundingView, GroupPosView, InstRiskView, InventoryView,
-    LegView, MarginView, ModelViews, Now, OrderRef, OrderStateView, OrderView, PerpPosView, PortfolioRead,
-    RiskStateView, TargetView, VenueEquityView, VenueSet, Views,
+    LegView, MarginView, MdStampView, ModelViews, Now, OrderRef, OrderStateView, OrderView, PerpPosView,
+    PortfolioRead, RiskStateView, TargetView, VenueEquityView, VenueSet, Views,
 };
 use hft_types::{AccountId, AssetId, GroupId, InstId, Notional, Px, Qty, Rate, RunMode, Side, Tsc, VenueId};
 
@@ -403,6 +403,12 @@ impl Views for SeqViews<'_> {
             return None;
         }
         self.risk.leverage(a, h.venue, i).map(lev_x100)
+    }
+    fn md_count(&self, i: InstId) -> u64 {
+        self.market.md_count(i)
+    }
+    fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView> {
+        self.market.md_stamp(i, n)
     }
 }
 

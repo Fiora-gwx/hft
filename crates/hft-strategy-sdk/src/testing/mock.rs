@@ -7,9 +7,12 @@ use hft_types::{AccountId, AssetId, GroupId, InstId, Notional, Px, Qty, RunMode,
 use crate::intent::OrderRef;
 use crate::view_types::{
     BboView, CashView, FeeView, FundingView, GroupPosView, InstRiskView, InventoryView, LegView, MarginView,
-    OrderView, PerpPosView, PortfolioRead, RiskStateView, RxTsSrc, TargetView, VenueEquityView, VenueSet,
+    MdStampView, OrderView, PerpPosView, PortfolioRead, RiskStateView, RxTsSrc, TargetView, VenueEquityView,
+    VenueSet,
 };
-use crate::views::{BookRead, BookStatus, EngineClockAnchor, ModelViews, Now, RefView, Views};
+use crate::views::{
+    BookRead, BookStatus, EngineClockAnchor, MD_STAMPS_KEPT, ModelViews, Now, RefView, Views,
+};
 
 /// Minimal reference data of a test (insts, assets, `VenueCaps`, fees, accounts) and the account
 /// the instance is bound to.
@@ -281,6 +284,8 @@ pub struct MockViews {
     risk_for: Vec<((AccountId, InstId), InstRiskView)>,
     ready: Vec<((AccountId, VenueId), bool)>,
     leverage: Vec<((AccountId, InstId), Option<u32>)>,
+    orders: Vec<OrderView>,
+    md: Vec<(InstId, Vec<MdStampView>)>,
 }
 
 impl MockViews {
@@ -312,6 +317,8 @@ impl MockViews {
             risk_for: Vec::new(),
             ready: Vec::new(),
             leverage: Vec::new(),
+            orders: Vec::new(),
+            md: Vec::new(),
         }
     }
     /// The reference data and bound account.
@@ -495,6 +502,29 @@ impl MockViews {
         upsert(&mut self.leverage, (a, i), x100);
         self
     }
+    /// Sets the `OrderView` returned by `Views::order` for `o.r` (same slot and gen); replaces an
+    /// earlier one of that slot.
+    pub fn set_order(&mut self, o: OrderView) -> &mut Self {
+        self.orders
+            .retain(|x| (x.r.venue, x.r.account, x.r.slot) != (o.r.venue, o.r.account, o.r.slot));
+        self.orders.push(o);
+        self
+    }
+    /// Removes the order of slot `r.slot` (`Views::order` → `None`).
+    pub fn clear_order(&mut self, r: OrderRef) -> &mut Self {
+        self.orders
+            .retain(|x| (x.r.venue, x.r.account, x.r.slot) != (r.venue, r.account, r.slot));
+        self
+    }
+    /// Appends one market-data stamp of `i` (`Views::md_count` + 1; `md_stamp` keeps the last
+    /// `MD_STAMPS_KEPT`).
+    pub fn md_push(&mut self, i: InstId, m: MdStampView) -> &mut Self {
+        match self.md.iter_mut().find(|(x, _)| *x == i) {
+            Some(e) => e.1.push(m),
+            None => self.md.push((i, vec![m])),
+        }
+        self
+    }
 }
 
 impl Views for MockViews {
@@ -545,8 +575,8 @@ impl Views for MockViews {
     fn target(&self, a: AccountId, g: GroupId) -> Option<&TargetView> {
         self.targets.iter().find(|(k, _)| *k == (a, g)).map(|e| &e.1)
     }
-    fn order(&self, _: OrderRef) -> Option<OrderView> {
-        None
+    fn order(&self, h: OrderRef) -> Option<OrderView> {
+        self.orders.iter().find(|o| o.r == h).copied()
     }
     fn inst(&self, i: InstId) -> &InstHot {
         self.rd.rd.inst(i)
@@ -580,6 +610,20 @@ impl Views for MockViews {
     }
     fn leverage(&self, a: AccountId, i: InstId) -> Option<u32> {
         self.leverage.iter().find(|(k, _)| *k == (a, i)).and_then(|e| e.1)
+    }
+    fn md_count(&self, i: InstId) -> u64 {
+        self.md
+            .iter()
+            .find(|(x, _)| *x == i)
+            .map_or(0, |e| e.1.len() as u64)
+    }
+    fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView> {
+        let v = &self.md.iter().find(|(x, _)| *x == i)?.1;
+        let count = v.len() as u64;
+        if n == 0 || n > count || count - n >= MD_STAMPS_KEPT {
+            return None;
+        }
+        v.get(usize::try_from(n - 1).ok()?).copied()
     }
 }
 

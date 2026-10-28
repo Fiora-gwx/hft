@@ -385,3 +385,123 @@ fn seq_026_affordability_reads() {
     assert_eq!(ra.avail_quote(AC1, A, USDT), Some(n("700")));
     assert_eq!(ra.avail_margin(AC1, B), Some(n("650")));
 }
+
+/// SEQ-447: every L2 batch, exchange or top-N L2 snapshot and trade leaves its `MarketHdr` stamps
+/// for `Views::md_count`/`md_stamp` (exchange snapshots too, although they deliver no Book event);
+/// the last 16 are kept; a snapshot hides the earlier ones.
+#[test]
+fn seq_447_md_stamps() {
+    use hft_event::{L2BatchHdr, L2SnapHdr, Level};
+    use hft_strategy_sdk::MdStampView;
+    reset_script();
+    let mut h = b0().boot();
+    h.steady();
+    let lv = |p: &str| Level {
+        px: px(p),
+        qty: q("1"),
+    };
+    let hdr = |h: &H, ex: i64, sw: i64| {
+        let mut m = MarketHdr::new_zeroed();
+        m.venue = A;
+        m.inst = A1;
+        m.rx_tsc = h.now();
+        m.ex_ts_ns = ex;
+        m.sw_rx_ns = sw;
+        m
+    };
+    // .1 an exchange snapshot, a batch in sequence and a trade.
+    let mut sn = L2SnapHdr::new_zeroed();
+    sn.h = hdr(&h, 1_000_000_000, 1_010_000_000);
+    sn.snap_id = 1;
+    sn.origin = L2SnapHdr::EXCHANGE;
+    sn.n_bids = 1;
+    sn.n_asks = 1;
+    let mut body = sn.as_bytes().to_vec();
+    body.extend_from_slice(lv("50000").as_bytes());
+    body.extend_from_slice(lv("50002").as_bytes());
+    h.push_bytes(RingId::Md(0), EventKind::L2_SNAPSHOT, body);
+    h.run();
+    let mut bt = L2BatchHdr::new_zeroed();
+    bt.h = hdr(&h, 2_000_000_000, 2_012_000_000);
+    bt.prev_id = 1;
+    bt.last_id = 2;
+    bt.n_bids = 1;
+    let mut body = bt.as_bytes().to_vec();
+    body.extend_from_slice(lv("50001").as_bytes());
+    h.push_bytes(RingId::Md(0), EventKind::L2_BATCH, body);
+    h.run();
+    let mut t = trade(A1, 1);
+    t.h = hdr(&h, 3_000_000_000, 3_013_000_000);
+    h.push(RingId::Md(0), &t);
+    h.run();
+    let c: Cap<(u64, Vec<Option<MdStampView>>)> = cap();
+    let c2 = c.clone();
+    set_hook(move |hx, ev, _| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let n = hx.v.md_count(A1);
+            c2.borrow_mut()
+                .push((n, (0..=n + 1).map(|k| hx.v.md_stamp(A1, k)).collect()));
+        }
+    });
+    h.quote(A1, "50000", "50002");
+    h.run();
+    clear_hook();
+    let (n, s) = c.borrow().last().cloned().expect("delivered");
+    assert_eq!(n, 3, "SEQ-447.1");
+    let got: Vec<_> = s[1..=3]
+        .iter()
+        .map(|m| m.map(|m| (m.kind, m.ex_ts_ns, m.sw_rx_ns)))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            Some((MdStampView::MD_SNAPSHOT, 1_000_000_000, 1_010_000_000)),
+            Some((MdStampView::MD_BATCH, 2_000_000_000, 2_012_000_000)),
+            Some((MdStampView::MD_TRADE, 3_000_000_000, 3_013_000_000)),
+        ],
+        "SEQ-447.1"
+    );
+    assert!(s[1].is_some_and(|m| m.rx_tsc.0 > 0), "SEQ-447.1 rx_tsc");
+    assert_eq!((s[0], s[4]), (None, None), "SEQ-447.1 out of range");
+    // .2 17 more trades: 20 in all, the last 16 kept.
+    for k in 0..17 {
+        let mut t = trade(A1, 2 + k);
+        t.h = hdr(&h, 4_000_000_000 + k as i64, 0);
+        h.push(RingId::Md(0), &t);
+        h.run();
+    }
+    let m = &h.s.engine().market;
+    assert_eq!(m.md_count(A1), 20, "SEQ-447.2");
+    assert_eq!(m.md_stamp(A1, 4), None, "SEQ-447.2 dropped");
+    assert_eq!(
+        m.md_stamp(A1, 5).map(|x| (x.kind, x.ex_ts_ns)),
+        Some((MdStampView::MD_TRADE, 4_000_000_001)),
+        "SEQ-447.2 oldest kept"
+    );
+    assert_eq!(
+        m.md_stamp(A1, 20).map(|x| x.ex_ts_ns),
+        Some(4_000_000_016),
+        "SEQ-447.2"
+    );
+    assert_eq!(m.md_count(B1), 0, "SEQ-447.2 other inst");
+    // .3 a keyframe hides the earlier stamps (rx_from_seq); the count goes on.
+    h.keyframe();
+    let m = &h.s.engine().market;
+    assert_eq!(m.md_stamp(A1, 20), None, "SEQ-447.3 hidden");
+    assert_eq!(m.md_count(A1), 20, "SEQ-447.3");
+    let mut t = trade(A1, 19);
+    t.h = hdr(&h, 5_000_000_000, 0);
+    h.push(RingId::Md(0), &t);
+    h.run();
+    let m = &h.s.engine().market;
+    assert_eq!(m.md_count(A1), 21, "SEQ-447.3");
+    assert_eq!(
+        m.md_stamp(A1, 21).map(|x| (x.kind, x.ex_ts_ns)),
+        Some((MdStampView::MD_TRADE, 5_000_000_000)),
+        "SEQ-447.3 after the keyframe"
+    );
+    assert_eq!(m.md_stamp(A1, 20), None, "SEQ-447.3 still hidden");
+}

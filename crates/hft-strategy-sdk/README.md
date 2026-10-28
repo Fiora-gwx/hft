@@ -557,6 +557,12 @@ pub trait Views {
     /// 引擎口径的报价健康:bbo(i).quote_live(now.tsc, risk(a).conn_liveness_ms × now.tsc_per_ms)。
     /// 提供的默认方法(实现者不覆盖);执行层、策略要与引擎同一阈值时用它。
     fn quote_ok(&self, a: AccountId, i: InstId) -> bool;
+    /// 本进程内该 inst 已处理的行情消息数(L2Batch、origin 为交易所或 TopN 的 L2Snapshot——含不投递 EventRef::Book 的交易所整簿——与 Trade,
+    /// 含当前 Input);第 n 条(从 1 起)在最近 MD_STAMPS_KEPT(16)条之内、且晚于最近一个快照时 md_stamp 返回其戳,否则 None
+    /// (与 bbo(i).rx_tsc 同一可见性:实盘与从该快照起步的回放读到同一组戳)。md_count 只作读取游标:从运行中的快照起步的回放从 0 计。
+    /// 提供的默认方法返回 0 / None(不带行情戳的实现);引擎实现(hft-sequencer)覆盖二者。
+    fn md_count(&self, i: InstId) -> u64;
+    fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView>;
 }
 
 /// 模型侧视图:advisor 从 journal 重建的同一组状态,截至 Model 当前处理的那条记录(now() = 该记录)。
@@ -606,6 +612,7 @@ pub trait BookRead {
 | UTC | `Now.utc_ns`、`Now::utc_of`、事件里的 `*_ns`(交易所时刻、`next_settle_ns`、`Notice` 的时刻) | 资金费结算、下架与维护窗口、Model 的样本时刻、按接收时刻的信号(`Now::utc_of(rx_tsc)`) | 按钟表时间;`clock_ok = false` 时不可用于时刻判断 |
 
 - **`hw_rx_ns` 不在这三条时间轴上**:它是网卡硬件接收戳(PHC 域),不可用时退化为软件戳(CLOCK_REALTIME 域),都没有为 0(口径唯一定义在 [event-model 时间戳语义](../../docs/subsystems/event-model.md#时间戳语义));来源由 `BboView.rx_ts_src` 区分。它只用于延迟测量与同源比较,策略不把它当 UTC、不与 TSC 或 UTC 混算;按接收时刻的信号一律用 `rx_tsc`(本次启动内)或 `Now::utc_of(rx_tsc)`(确定,跨 venue 同一时钟)。
+- **`MdStampView.sw_rx_ns`** 是内核软件接收戳(CLOCK_REALTIME 域,与交易所时刻 `ex_ts_ns` 同为墙钟),只用于同一条消息的 `sw_rx_ns − ex_ts_ns`(交易所 → 本机的行情延迟)这类测量;同样不与 TSC 混算,0 表示不可用。
 
 - **持久状态不存 TSC**:策略快照(`Strategy::snapshot`)、Model 检查点与 hft-strat-lib 构件里的时刻一律存 `engine_ns`(由交易所或命令按 UTC 给出的时刻存 UTC ns),TSC 只在单次启动内使用。视图里的 `_tsc` 字段要跨事件保存时先用 `Now::ens_of`(或 `utc_of`)换算;只按 engine_ns 记账的写者(ledger、risk)对可能早于本次启动的时刻直接给 `_ens` 字段。
 - 停机不计意味着:冷却、重入封锁、持仓时长在停机期间不前进(偏保守);按 UTC 定义的窗口(结算、下架、维护)不受影响。
@@ -632,6 +639,13 @@ pub struct BboView {                     // 按值返回(Views::bbo、EventRef::
     pub resync: bool,                    // 该 inst 的报价在重同步或没有健康成员;为真时 quote_live 为假
 }
 #[repr(u8)] pub enum RxTsSrc { None = 0, Hw = 1, Sw = 2 }   // 0 = 无接收戳;Hw = 网卡 PHC;Sw = 内核软件戳(REALTIME)
+#[derive(Clone, Copy)]
+pub struct MdStampView {                 // 按值(Views::md_stamp);写者 sequencer,取自该消息的 MarketHdr
+    pub kind: u8,                        // MD_BATCH = 1、MD_SNAPSHOT = 2(交易所或 TopN 整簿)、MD_TRADE = 3
+    pub ex_ts_ns: i64,                   // 交易所消息时刻(UTC ns;0 = 交易所未给)
+    pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用);与 ex_ts_ns 之差即交易所 → 本机的行情延迟
+    pub rx_tsc: Tsc,                     // 接收线程的 TSC(本次运行;Now::utc_of 换成引擎 UTC)
+}
 impl BboView {
     /// 报价健康——全系统唯一的判定:conn_up && !resync && now − conn_live_tsc ≤ max_silence(连接 Live、非重同步、静默不超限)。
     /// 报价多久没变不影响结果(安静 ≠ 过期):健康时报价就是该 inst 的最新值。
@@ -1240,6 +1254,8 @@ pub mod testing {
         pub fn risk_for(&mut self, a: AccountId, i: InstId, r: InstRiskView) -> &mut Self;
         pub fn venue_ready(&mut self, a: AccountId, v: VenueId, ready: bool) -> &mut Self;
         pub fn leverage(&mut self, a: AccountId, i: InstId, x100: Option<u32>) -> &mut Self;
+        pub fn set_order(&mut self, o: OrderView) -> &mut Self;        // Views::order(o.r) 返回它(同槽号的旧值被替换);clear_order(r) 删除
+        pub fn md_push(&mut self, i: InstId, m: MdStampView) -> &mut Self;   // 追加一条行情戳(md_count + 1,md_stamp 保留最近 16 条)
     }
     pub struct CtxHarness { /* 拥有 Ctx 缓冲与上一事件的 outcome 表 */ }
     impl CtxHarness {

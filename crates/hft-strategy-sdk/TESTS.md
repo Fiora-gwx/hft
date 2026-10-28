@@ -20,8 +20,8 @@ spec: README.md
 | Strategy 与 Model | SDK-009、SDK-016–SDK-041、SDK-059–SDK-089、SDK-207、SDK-208 |
 | 参数 schema 与 ParamSet | SDK-090–SDK-121 |
 | 策略描述符:Note、报表、策略命令 | SDK-053、SDK-054、SDK-112–SDK-119 |
-| Views 与 ModelViews | SDK-056、SDK-123–SDK-140 |
-| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209 |
+| Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213 |
+| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213 |
 | EventRef | SDK-031、SDK-040–SDK-058、SDK-143、SDK-144、SDK-157 |
 | Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212 |
 | 目标意图 | SDK-141、SDK-158–SDK-163 |
@@ -32,7 +32,7 @@ spec: README.md
 | 确定性规则 | SDK-011、SDK-013、SDK-015、SDK-029、SDK-079、SDK-128、SDK-176–SDK-179 |
 | 版本与兼容规则 | SDK-008、SDK-022、SDK-057、SDK-076、SDK-077、SDK-096、SDK-171、SDK-190、SDK-210 |
 | chain 特性(optional) | 不适用:里程碑外(`chain` 特性随链上策略接入时启用) |
-| 测试桩(testing 特性) | SDK-063、SDK-078、SDK-115、SDK-127、SDK-129、SDK-150、SDK-192–SDK-195 |
+| 测试桩(testing 特性) | SDK-063、SDK-078、SDK-115、SDK-127、SDK-129、SDK-150、SDK-192–SDK-195、SDK-213 |
 | 实现说明 | 不适用:见子节 |
 | Ctx 的内存与排空 | SDK-145、SDK-146、SDK-148、SDK-149、SDK-212 |
 | 快照节 | SDK-014、SDK-020、SDK-024、SDK-025、SDK-070、SDK-071、SDK-191 |
@@ -3149,6 +3149,21 @@ spec: README.md
 - 步骤:交替借用两个实例与同一实例的多个回调;取消已有 ID、本轮 ID、未知 ID 及重复 ID;先取消尚未分配的 ID 再登记并取消;填满登记/取消缓冲;将计数器设为 u64::MAX
 - 期望:每次返回值与剩余配额一致,失败不消耗 ID 或预留量;有效取消只释放一次,未知/丢弃的取消不释放且不约束未来登记;begin 清理本轮操作但保留 ID 计数;耗尽不回绕;操作数组保留接受顺序
 - 实现:`crates/hft-strategy-sdk/tests/ctx.rs::sdk_212_timer_admission_preserves_call_order`
+
+### SDK-213 `MockViews` 的订单视图与行情戳
+
+- 规则:[Views 与 ModelViews](README.md#views-与-modelviews)(`md_count`/`md_stamp`)、[视图类型](README.md#视图类型)(`MdStampView`)、[测试桩(testing 特性)](README.md#测试桩testing-特性)
+- 级别:table
+- 里程碑:M3
+- 前置:`MockViews::new(RefFixture{I1, I2, BTC, USDT, V1, V2, A1})`;引擎侧(hft-sequencer 的记录与环)见 SEQ-447
+- 实现:`crates/hft-strategy-sdk/tests/mock_views.rs::sdk_213_mock_orders_and_md_stamps`
+
+| 行 | 设定 | 读取与期望 |
+|---|---|---|
+| SDK-213.1 | `set_order(o)`(`r = (V1, A1, 7, 2)`) | `order(r) == Some(o)`;gen 3 → `None` |
+| SDK-213.2 | `clear_order(r)` | `order(r) = None` |
+| SDK-213.3 | 无行情戳 | `md_count(I1) = 0`,`md_stamp(I1, 1) = None` |
+| SDK-213.4 | `md_push(I1, …)` 20 次(`ex_ts_ns = k`、`sw_rx_ns = 100 + k`) | `md_count(I1) = 20`;`md_stamp` 第 4 条 `None`、第 5 条 `ex_ts_ns = 5`、第 20 条 `sw_rx_ns = 120`、第 21 条 `None`;`md_count(I2) = 0` |
 
 ## 验收
 

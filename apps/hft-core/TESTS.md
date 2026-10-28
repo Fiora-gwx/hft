@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4602,3 +4602,17 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-436.2 | 随后读到记录(`ok`) | `fails = 0` |
 | CORE-436.3 | 连续失败,重开失败,共 `TAIL_MAX_FAILS − 1` 次 | 每次返回无读者、不报错 |
 | CORE-436.4 | 第 `TAIL_MAX_FAILS` 次连续失败 | `PaperJournal` 错误,信息含最后一次失败的原因 |
+
+### CORE-439 Polymarket 挂单配置的参数值(`pm_sim_config --param`)
+
+- 规则:[config/README](config/README.md)(binary-maker 参数值 `--param NAME=RAW`)
+- 级别:table
+- 里程碑:M3
+- 前置:Cargo feature `polymarket`;`write_polymarket_maker_sim_with`/`write_polymarket_maker_live_with` 即 `pm_sim_config --maker`/`--live` 加 `--param`;`config::load`
+- 实现:`apps/hft-core/tests/config.rs::core_439_polymarket_maker_param_values`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-439.1 | 模拟:`pair_margin = −20 000 000`、`fv_limit = 1` | 生成的 `StrategyParams` 这两个字段为该值,`enabled = 1` |
+| CORE-439.2 | 实盘:`clip_shares = 7` | `clip_shares = 7`(在 `PM_LIVE_PARAMS` 的 5 之后),`inv_max_shares = 10` 不变 |
+| CORE-439.3 | `clip_shares`(无 `=`)、`clip_shares=0.5`;未知字段;`clip_shares = 0`、`pair_margin = −100 000 001` | 各被拒绝;` clip_shares = 7 ` 解析为 (`clip_shares`, 7);`pair_margin = −100 000 000` 通过 |

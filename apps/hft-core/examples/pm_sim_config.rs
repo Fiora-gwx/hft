@@ -8,6 +8,9 @@
 //! `--daily-loss USDC` (live only, > 0, default 15): the account's `daily_loss_abs`.
 //! `--daily-loss-resumes N` (live only, 0..=20, default the hft-risk default 1): the account's
 //! `daily_loss_max_resumes` (`Resume{DailyLoss}` per UTC day).
+//! `--param NAME=RAW` (repeatable; `--maker` or `--live`): sets the binary-maker parameter `NAME` to
+//! the raw schema value `RAW` after the defaults (and the live parameters); an unknown name or a
+//! value outside the schema's range is refused.
 #[path = "../tests/support/mod.rs"]
 mod support;
 
@@ -55,8 +58,18 @@ fn take(all: &mut Vec<String>, flag: &str, usage: &str) -> Option<String> {
 }
 
 fn main() {
-    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N]] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
+    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N]] [--param NAME=RAW ...] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
     let mut all: Vec<String> = std::env::args().skip(1).collect();
+    let mut params = Vec::new();
+    while let Some(p) = take(&mut all, "--param", usage) {
+        match support::parse_param(&p) {
+            Ok(kv) => params.push(kv),
+            Err(e) => panic!("{e}"),
+        }
+    }
+    if let Err(e) = support::check_maker_params(&params) {
+        panic!("{e}");
+    }
     let daily_loss = take(&mut all, "--daily-loss", usage).map(|v| {
         usdc(&v)
             .filter(|p| *p > 0)
@@ -101,6 +114,10 @@ fn main() {
     );
     let maker = all.iter().any(|a| a == "--maker");
     assert!(!(maker && live.is_some()), "--maker and --live are exclusive");
+    assert!(
+        params.is_empty() || maker || live.is_some(),
+        "--param needs --maker or --live"
+    );
     let mut args = all.into_iter().filter(|a| a != "--maker");
     let root = std::path::PathBuf::from(args.next().expect(usage));
     let hot = std::path::PathBuf::from(args.next().expect(usage));
@@ -109,7 +126,7 @@ fn main() {
     let user = args.next();
     let pipeline = args.next();
     let path = if let Some(l) = &live {
-        support::write_polymarket_maker_live(
+        support::write_polymarket_maker_live_with(
             &root,
             &hot,
             user.as_deref(),
@@ -117,14 +134,20 @@ fn main() {
             &src_ip,
             &dev,
             l,
+            &params,
+        )
+    } else if maker {
+        support::write_polymarket_maker_sim_with(
+            &root,
+            &hot,
+            user.as_deref(),
+            pipeline.as_deref(),
+            &src_ip,
+            &dev,
+            &params,
         )
     } else {
-        let write = if maker {
-            support::write_polymarket_maker_sim
-        } else {
-            support::write_polymarket_sim
-        };
-        write(&root, &hot, user.as_deref(), pipeline.as_deref(), &src_ip, &dev)
+        support::write_polymarket_sim(&root, &hot, user.as_deref(), pipeline.as_deref(), &src_ip, &dev)
     };
     println!("{}", path.display());
 }
