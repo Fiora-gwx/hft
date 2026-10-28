@@ -22,6 +22,11 @@ use hft_strategy_sdk::testing::{MockViews, ev};
 
 /// The parameters of tests/scenario.rs: defaults with `enabled = 1`, `vol_min_samples` = 60.
 fn params() -> BinaryMakerParams {
+    params_with(&[])
+}
+
+/// `params()` with the named fields set.
+fn params_with(fields: &[(&str, i64)]) -> BinaryMakerParams {
     let schema = BinaryMaker::DESC.schema;
     let mut defaults: Vec<i64> = (0..schema.n_fields())
         .filter_map(|i| schema.field(i).map(|f| f.default))
@@ -33,6 +38,9 @@ fn params() -> BinaryMakerParams {
     };
     defaults[ix("enabled")] = 1;
     defaults[ix("vol_min_samples")] = 60;
+    for (name, v) in fields {
+        defaults[ix(name)] = *v;
+    }
     BinaryMakerParams::from_raw(
         &RawParams {
             defaults,
@@ -45,7 +53,11 @@ fn params() -> BinaryMakerParams {
 /// The scenario warm-up (BMK-003): 400 s of 1 bp reference moves ending at second 399, books of
 /// pair 1 at 0.450/0.470, clock at 399.5 s (window 300..600 is pair 1). No quote is live.
 fn fixture() -> (BinaryMaker, MockViews) {
-    let p = params();
+    fixture_with(&params())
+}
+
+/// `fixture()` with parameters `p`.
+fn fixture_with(p: &BinaryMakerParams) -> (BinaryMaker, MockViews) {
     let groups = groups();
     let mut views = MockViews::new(common::fixture());
     let mut strategy = BinaryMaker::new(
@@ -54,7 +66,7 @@ fn fixture() -> (BinaryMaker, MockViews) {
             account: A1,
             kind_id: 7,
         },
-        &p,
+        p,
         &groups,
         &views.refview(),
     )
@@ -138,6 +150,20 @@ fn on_event(c: &mut Criterion) {
     live(&mut strategy);
     let event = ev::bbo(R, 6, views.bbo_of(R));
     measure(c, "strategies/binary-maker/tick_miss", strategy, views, event, 0);
+
+    // The same with the v7 rules on (README "规则" 10, 11): the composite score of both tokens
+    // recomputed on every event (`comp_every_ms` 0) and the venue-load gates reading the stamps.
+    let v7 = params_with(&[
+        ("comp_skip", 500_000_000),
+        ("comp_dir", 500_000_000),
+        ("comp_every_ms", 0),
+        ("load_gate_ns", 12_688_500),
+        ("mdslow_gate_ns", 40_000_000),
+    ]);
+    let (mut strategy, views) = fixture_with(&v7);
+    live(&mut strategy);
+    let event = ev::bbo(R, 6, views.bbo_of(R));
+    measure(c, "strategies/binary-maker/tick_comp", strategy, views, event, 0);
 
     // The same reference quote with no live quote: two post-only bids.
     let (strategy, views) = fixture();

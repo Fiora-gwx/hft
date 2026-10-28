@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 5, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 6, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -72,6 +72,59 @@ hft_strategy_sdk::define_params! {
         pred_w_ret: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 121_290_000, since = 5, relax = None],
         /// forecast weight of the 15 s signed efficiency, sum / sum of absolute one-second returns (1e-9)
         pred_w_ser: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 187_200_000, since = 5, relax = None],
+        /// a token whose composite direction score is below −comp_skip is not quoted (its resting
+        /// bid is cancelled); score in standard deviations (1e-9); 0 = off
+        comp_skip: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
+        /// a token whose composite direction score is above comp_dir may hold up to
+        /// dir_cap_shares net (instead of inv_max_shares); 1e-9 standard deviations; 0 = off
+        comp_dir: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
+        /// net-share cap of a token whose score is above comp_dir
+        dir_cap_shares: Count [min = 1, max = 1_000_000, default = 20, since = 6, relax = None],
+        /// the composite score is recomputed at most this often (UTC time)
+        comp_every_ms: DurationMs [min = 0, max = 60_000, default = 250, since = 6, relax = None],
+        /// prints of at least this many shares count in the score's 30 s flow feature
+        comp_flow_min_shares: Count [min = 0, max = 1_000_000, default = 50, since = 6, relax = None],
+        /// true: the strategy's own resting bids are taken out of the bid sizes of the score's
+        /// imbalance features (they are in the venue's public book); false: not (a simulated account)
+        comp_excl_own: Bool [default = 1, since = 6, relax = None],
+        /// score normalization: mean of the best-bid size imbalance of the token and its complement (1e-9)
+        comp_imb1_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 6_035, since = 6, relax = None],
+        /// score normalization: standard deviation of the best-bid size imbalance of the token and its complement (1e-9)
+        comp_imb1_sd: Rate [min = 1, max = 100_000_000_000, default = 674_103_869, since = 6, relax = None],
+        /// score normalization: mean of the 5-cent bid depth imbalance (1e-9)
+        comp_imb5_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 3_815, since = 6, relax = None],
+        /// score normalization: standard deviation of the 5-cent bid depth imbalance (1e-9)
+        comp_imb5_sd: Rate [min = 1, max = 100_000_000_000, default = 382_699_882, since = 6, relax = None],
+        /// score normalization: mean of the token mid change over 30 s (fraction of one) (1e-9)
+        comp_mom30_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = -1_799, since = 6, relax = None],
+        /// score normalization: standard deviation of the token mid change over 30 s (fraction of one) (1e-9)
+        comp_mom30_sd: Rate [min = 1, max = 100_000_000_000, default = 165_941_588, since = 6, relax = None],
+        /// score normalization: mean of the token mid change over 60 s (fraction of one) (1e-9)
+        comp_mom60_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = -5_917, since = 6, relax = None],
+        /// score normalization: standard deviation of the token mid change over 60 s (fraction of one) (1e-9)
+        comp_mom60_sd: Rate [min = 1, max = 100_000_000_000, default = 224_952_723, since = 6, relax = None],
+        /// score normalization: mean of the reference return over 15 s in implied-sigma units, signed for the token (1e-9)
+        comp_bret15_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = -28_103, since = 6, relax = None],
+        /// score normalization: standard deviation of the reference return over 15 s in implied-sigma units, signed for the token (1e-9)
+        comp_bret15_sd: Rate [min = 1, max = 100_000_000_000, default = 919_829_667, since = 6, relax = None],
+        /// score normalization: mean of the reference return over 60 s in implied-sigma units, signed for the token (1e-9)
+        comp_bret60_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = -24_869, since = 6, relax = None],
+        /// score normalization: standard deviation of the reference return over 60 s in implied-sigma units, signed for the token (1e-9)
+        comp_bret60_sd: Rate [min = 1, max = 100_000_000_000, default = 968_755_915, since = 6, relax = None],
+        /// score normalization: mean of the signed log1p of the 30 s net taker flow in large prints (shares) (1e-9)
+        comp_flow30_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = -49_610, since = 6, relax = None],
+        /// score normalization: standard deviation of the signed log1p of the 30 s net taker flow in large prints (shares) (1e-9)
+        comp_flow30_sd: Rate [min = 1, max = 100_000_000_000, default = 6_260_786_978, since = 6, relax = None],
+        /// score normalization: mean of the best-bid change over 1 s in cents (1e-9)
+        comp_bdrop1_mu: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 1_550_071, since = 6, relax = None],
+        /// score normalization: standard deviation of the best-bid change over 1 s in cents (1e-9)
+        comp_bdrop1_sd: Rate [min = 1, max = 100_000_000_000, default = 3_031_529_770, since = 6, relax = None],
+        /// no quoting while the previous UTC minute's median of the per-second 90th percentile of the
+        /// slot books' and trades' feed lag (kernel receive − venue time) is at least this (ns); 0 = off
+        load_gate_ns: Count [min = 0, max = 1_000_000_000, default = 0, since = 6, relax = None],
+        /// no quoting while the previous UTC minute's median of the per-second median feed lag is
+        /// above this (ns); 0 = off
+        mdslow_gate_ns: Count [min = 0, max = 1_000_000_000, default = 0, since = 6, relax = None],
     }
 }
 
