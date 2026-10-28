@@ -436,7 +436,7 @@ fn run(a: Args) -> Result<(), String> {
             handoff: h_rx,
             retire: r_tx,
             build: b_tx,
-            clock: utc,
+            clock: hft_rt::UtcClock::fixed(utc),
         },
         ctx,
     )

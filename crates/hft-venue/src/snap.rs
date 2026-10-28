@@ -6,7 +6,7 @@ use crate::{LoopStat, SNAP_FIRST};
 use hft_event::{Bbo, FeedMsg};
 use hft_net::{BuildReq, ConnId, ConnRole, EndpointId};
 use hft_refdata::RefData;
-use hft_rt::{ByteProducer, Consumer, PollTask, Polled, TscUtc};
+use hft_rt::{ByteProducer, Consumer, PollTask, Polled, UtcClock};
 use hft_types::{AccountId, InstId, Tsc};
 use hft_venue_proto::{RestReqBuf, RxMeta, VenueProtocol};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -58,7 +58,8 @@ pub struct SnapDeps {
     pub rd: &'static RefData,
     pub reqs: [Option<Consumer<SnapReq>>; 2],
     pub out: [Option<ByteProducer>; 2],
-    pub clock: TscUtc,
+    /// The published TSC → UTC line (hft-rt `UtcClock`): REST deadlines, record times.
+    pub clock: UtcClock,
 }
 pub struct SnapFetchTask<P: VenueProtocol, T: Transport = hft_net::rest::Client> {
     cfg: SnapCfg,
@@ -108,7 +109,7 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
         if vm.ws_max_conn_age_s != 0 && cfg.rotate_margin_s >= vm.ws_max_conn_age_s {
             return Err(InitErr::RotateMargin);
         }
-        let ticks = crate::config::Ticks { clock: deps.clock };
+        let ticks = crate::config::Ticks::of(&deps.clock);
         let rate = crate::RateCounters::rest(deps.rd.rate_limits(P::VENUE), |ms| ticks.ms(ms));
         Ok(Self {
             cfg,

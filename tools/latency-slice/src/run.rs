@@ -676,7 +676,7 @@ where
             handoff: fh,
             retire: fr,
             build: fb,
-            clock: utc_conv,
+            clock: hft_rt::UtcClock::fixed(utc_conv),
         },
         feed_ctx,
     )
@@ -709,7 +709,7 @@ where
             handoff: gh,
             retire: gr,
             build: gb,
-            clock: utc_conv,
+            clock: hft_rt::UtcClock::fixed(utc_conv),
         },
         vec![GwAccountSpec {
             account: ACCOUNT,

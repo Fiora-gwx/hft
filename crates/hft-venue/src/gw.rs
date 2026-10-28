@@ -19,7 +19,7 @@ use hft_net::{
 };
 use hft_refdata::{AccountKind, MarginData, RefData};
 use hft_rt::{
-    Backing, ByteConsumer, ByteProducer, Consumer, KillWord, PollTask, Polled, Producer, TscUtc, WaitFds,
+    Backing, ByteConsumer, ByteProducer, Consumer, KillWord, PollTask, Polled, Producer, UtcClock, WaitFds,
     byte_spsc,
 };
 use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, SlotId, Tsc};
@@ -60,7 +60,9 @@ pub struct GwDeps {
     pub handoff: Consumer<Handover>,
     pub retire: Producer<RetireMsg>,
     pub build: Producer<BuildReq>,
-    pub clock: TscUtc,
+    /// The published TSC → UTC line (hft-rt `UtcClock`): request signing timestamps, app-level
+    /// ping timestamps, raw roll.
+    pub clock: UtcClock,
 }
 
 /// One Live account served by this gw. The account owns its REST credential separately from
@@ -216,6 +218,7 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     cfg: GwCfg,
     rd: &'static RefData,
     t: Ticks,
+    utc: UtcClock,
     accts: Vec<Acct<P>>,
     rest_ip: Vec<(u8, RateCounters)>,
     mirror: Vec<SlotMirror>,
@@ -456,7 +459,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         if vm.ws_max_conn_age_s != 0 && cfg.rotate_margin_s >= vm.ws_max_conn_age_s {
             return Err(InitErr::RotateMargin);
         }
-        let t = Ticks { clock: deps.clock };
+        let t = Ticks::of(&deps.clock);
         let stagger = t.ms(3_600_000);
         let limits = rd.rate_limits(P::VENUE);
         let mut list = Vec::with_capacity(accts.len());
@@ -530,7 +533,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             acct: deps.acct,
             acct_req: None,
             acct_queries: [&[], &[]],
-            raw: RawLog::new(deps.raw, P::VENUE, t),
+            raw: RawLog::new(deps.raw, P::VENUE, deps.clock.clone()),
+            utc: deps.clock,
             kill: deps.kill,
             kill_mask: deps.kill_mask,
             tx_tags: deps.tx_tags,
@@ -574,7 +578,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
 
     fn wall(&self, now: u64) -> WallClock {
-        let ns = self.t.utc_ns(now);
+        let ns = self.utc.utc_ns(hft_types::Tsc(now));
         WallClock {
             unix_ms: ns.div_euclid(1_000_000),
             unix_us: ns.div_euclid(1000),
@@ -2764,7 +2768,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     let send = m.hb.due(now, m.last_data);
                     (t, send)
                 };
-                let now_ms = self.t.utc_ns(now) / 1_000_000;
+                let now_ms = self.utc.utc_ns(hft_types::Tsc(now)) / 1_000_000;
                 let Some(c) = self.conn_of(a, id) else { continue };
                 if !bits.is_empty() {
                     c.mark(bits);

@@ -173,7 +173,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         commands: cmd_rx,
         quotes: paper.quotes.clone(),
         subscribed: vec![false; paper.quotes.len()],
-        clock,
+        clock: hft_rt::UtcClock::fixed(clock.tsc_utc(&clock.base)),
         interval_ticks: 0,
         next: 0,
         update: 0,
@@ -229,7 +229,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         |_, _| Err(1),
         hft_sequencer::config_blob::decode_risk_blob,
         vec![],
-        clock.tsc_utc(&clock.base),
+        hft_rt::UtcClock::fixed(clock.tsc_utc(&clock.base)),
         Default::default(),
     );
     let hb = Box::leak(Box::new(hft_rt::Heartbeat::new()));
@@ -849,7 +849,7 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         |_, _| Err(1),
         hft_sequencer::config_blob::decode_risk_blob,
         vec![active],
-        clock.tsc_utc(&clock.base),
+        hft_rt::UtcClock::fixed(clock.tsc_utc(&clock.base)),
         Default::default(),
     );
     // One SetParams through the gateway and, if it was written, the sequencer.

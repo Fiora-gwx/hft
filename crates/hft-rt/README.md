@@ -10,7 +10,7 @@ status: spec
 
 ## 概要
 
-`hft-rt` 拥有线程间与进程间传递数据的原语(`Spsc` 的 `Producer`/`Consumer`、`ShmSpsc`、`ByteSpsc`、所有权交接 `Mailbox`、单写者值单元 `SeqCell`,以及只供可选热替换使用的 `EpochSwap`)、kill 字 `KillWord`、时间原语(`tsc_now`、`TscClock`、`TscUtc`、校准对采样)、CPU 与内存原语(`CpuSet` 绑核、`check_host` 主机检查、`HugeRegion` 大页、`lock_all` 锁页、预触摸)与等待/存活原语(`cpu_relax`、`Backoff`、`Heartbeat`、共享内存心跳块 `HeartbeatBlock`、`CachePadded`)。它不拥有任何业务状态、不创建线程、不决定哪个线程绑哪个核(装配在 [apps/hft-core](../../apps/hft-core/README.md))。调用者:feed/gw/sequencer(环与 TSC,热路径)、housekeeping 与 ctl-gateway(校准、心跳检查、回收,warm)、chain-core 与冷进程(共享内存环对端、心跳读取)。`unsafe` 允许,每处带 `// SAFETY:`。**主路径是 aarch64**(唯一发布目标 `aarch64-unknown-linux-gnu`,`target-cpu=neoverse-v1`,唯一归属 [development.md 目标 CPU](../../docs/development.md#目标-cpu));x86_64 是可选的 metal 剖面(触发条件:裸金属 + Onload 立项),代码以 `cfg(target_arch)` 分开,换架构即版本变化(按冷启动规则处理)。
+`hft-rt` 拥有线程间与进程间传递数据的原语(`Spsc` 的 `Producer`/`Consumer`、`ShmSpsc`、`ByteSpsc`、所有权交接 `Mailbox`、单写者值单元 `SeqCell`,以及只供可选热替换使用的 `EpochSwap`)、kill 字 `KillWord`、时间原语(`tsc_now`、`TscClock`、`TscUtc`、发布线 `UtcClock`/`UtcPublisher`、校准对采样)、CPU 与内存原语(`CpuSet` 绑核、`check_host` 主机检查、`HugeRegion` 大页、`lock_all` 锁页、预触摸)与等待/存活原语(`cpu_relax`、`Backoff`、`Heartbeat`、共享内存心跳块 `HeartbeatBlock`、`CachePadded`)。它不拥有任何业务状态、不创建线程、不决定哪个线程绑哪个核(装配在 [apps/hft-core](../../apps/hft-core/README.md))。调用者:feed/gw/sequencer(环与 TSC,热路径)、housekeeping 与 ctl-gateway(校准、心跳检查、回收,warm)、chain-core 与冷进程(共享内存环对端、心跳读取)。`unsafe` 允许,每处带 `// SAFETY:`。**主路径是 aarch64**(唯一发布目标 `aarch64-unknown-linux-gnu`,`target-cpu=neoverse-v1`,唯一归属 [development.md 目标 CPU](../../docs/development.md#目标-cpu));x86_64 是可选的 metal 剖面(触发条件:裸金属 + Onload 立项),代码以 `cfg(target_arch)` 分开,换架构即版本变化(按冷启动规则处理)。
 
 ## 目录
 
@@ -114,13 +114,13 @@ pub struct SeqCell<T: Copy> { /* 单写者 seqlock:seq: AtomicU64 + T;读者重�
 impl<T: Copy> SeqCell<T> { pub fn new(v: T) -> SeqCell<T>; pub fn store(&self, v: T); pub fn load(&self) -> T; pub fn try_load(&self) -> Option<T>; }  // try_load:单次尝试,写入中 → None   // store 只能由一个线程调用(调用约定)
 
 #[derive(Copy, Clone)] pub struct TscUtc { pub base_tsc: Tsc, pub base_utc_ns: i64, pub mult: u64, pub shift: u32, pub err_ns: u32 }
-impl TscUtc { pub fn utc_ns(&self, t: Tsc) -> i64; }     // base_utc_ns + ((t − base_tsc) × mult) >> shift(i128,有符号差,算术右移);warm 线程(ctl-gateway、snap-fetch)把 TSC 换成 UTC;热路径不调用
+impl TscUtc { pub fn utc_ns(&self, t: Tsc) -> i64; }     // base_utc_ns + ((t − base_tsc) × mult) >> shift(i128,有符号差,算术右移);一条 TSC → UTC 线,经 UtcClock 分发(见[时间](#时间))
 
 pub type KillWord = CachePadded<AtomicU32>;              // 全系统 32 位;位布局 hft_types::KillBits(u32);行为归 hft-risk
 const _: () = assert!(core::mem::size_of::<KillWord>() == 128);   // CachePadded 为 128 B
 ```
 
-- housekeeping 每次校准后 `SeqCell<TscUtc>::store`;读者 `load` 一次拿到一致的值(读 ~5 ns,无分配)。这是分发时钟换算的唯一方式。
+- housekeeping 每个校准节拍经 `UtcPublisher::update` `store` 一条新的 `TscUtc`;读者经 `UtcClock` 做一次 `try_load` 拿到一致的值(无分配、不自旋)。这是分发时钟换算的唯一方式(规则见[时间](#时间))。
 - `KillWord`:apps/hft-core 启动期分配 `&'static [KillWord]`(每个 gw 一个),交给 hft-sequencer 的 LiveDriver(唯一写者,`store(Release)`)与各 gw(只读,`load(Acquire)`;判定含按账户 HARD 位,掩码与判定式归 [hft-venue](../hft-venue/README.md))。元素宽度与 `KillBits` 一致(u32),全系统没有 8 位的 kill 字;hft-risk 只输出每个 gw 的 `KillBits` 值、不依赖本 crate;快照恢复不重建这些字,由 LiveDriver 按恢复后的 cap 集合重写。hft-core 启动自检经真实的 `store`/`load` 逐位验证(每个位写入后由 gw 侧读回),不只比较常量。
 
 ### 版本交换(可选)
@@ -177,9 +177,26 @@ impl DriftTracker {
 }
 // push:窗口(最近 60 对)不足 2 对 → Unsynced(new 之后的前两对、每次 Stepped 之后的下一对);否则以窗口内 realtime_ns 对 tsc 的最小二乘直线
 // 预测本对的 realtime_ns,|实测 − 预测| > step_threshold_ns → Stepped{jump_ns = 实测 − 预测} 并清空窗口;否则 Synced。本对随后加入窗口(满 60 淘汰最老)
+
+pub const UTC_SLEW_PPM: u64 = 500;        // 线超前 CLOCK_REALTIME 时的最大减速(内核 adjtime 上限),从不回跳
+pub const UTC_RATE_TOL_PPM: u64 = 1_000;  // 实测频率偏离启动校准超过此值则不用(沿用启动频率)
+#[derive(Clone)] pub struct UtcClock { /* &'static SeqCell<TscUtc> + 本读者最近一次读到的线 + 上次结果 */ }  // Send,非 Sync:每线程一个
+impl UtcClock {
+    pub fn shared(clock: &TscClock, horizon_ms: u32) -> (UtcClock, UtcPublisher); // 启动期:进程唯一的线(初值 = clock.tsc_utc(&clock.base))与它唯一的写者;泄漏一个单元
+    pub fn fixed(line: TscUtc) -> UtcClock;  // 不再发布的线(测试、工具、探针);泄漏一个单元
+    pub fn line(&self) -> TscUtc;            // 一次 SeqCell::try_load;写入中 → 本读者上次读到的线(不自旋)
+    pub fn utc_ns(&self, t: Tsc) -> i64;     // max(本读者上次结果, line().utc_ns(t)):同一读者内单调不减(调用方传不减的 t)
+}
+pub struct UtcPublisher { /* 单元 + 当前线 + 启动频率 + horizon */ }
+impl UtcPublisher {
+    pub fn update(&mut self, pair: &CalibPair, hz_milli: Option<u64>) -> TscUtc; // 每校准节拍一次(housekeeping);返回发布的线
+    pub fn current(&self) -> TscUtc;
+}
 ```
 
-热路径**只读 TSC**;TSC → UTC 的换算在冷读者(段头校准对 + `ClockStatus` 记录)与 warm 线程(`SeqCell<TscUtc>`)里完成。跨重启连续的时间不是 TSC:持久状态里的时刻用 SDK `Now.engine_ns`(sequencer 由 journal 记录的运行区间累加,停机不计)或 UTC 日历量([hot-path-rules D6](../../docs/hot-path-rules.md#确定性d))。sequencer 不读系统时钟:整点滚动等依赖时钟的决定由 live driver 写成 `Timer` 输入记录,决策用的 UTC 由 housekeeping 的校准对与 `DriftTracker::hz_milli` 经 Input `UtcAnchor` 重锚([hft-sequencer 引擎 UTC](../hft-sequencer/README.md#引擎-utc))。housekeeping 按校准节拍(取值归 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划))调 `sample_pair` + `DriftTracker::push`,更新 `SeqCell<TscUtc>`,并把这一次的校准对与误差界写成一条 `ClockStatus`(Meta 记录,布局归 [hft-event](../hft-event/README.md#控制与系统0x04xx0x05xx));`Stepped` 时另写一条。离线换算按样本前后两条 `ClockStatus` 插值、逐样本给误差界,规则归 [latency-budget §2.1](../../docs/latency-budget.md#21-跨时钟域换算)。
+**warm 读者的 UTC**:feed、gw、snap-fetch、acct-fetch、conn-builder、ctl-gateway、persist 与 paper feed 的墙钟(请求签名时间戳、REST 与建连截止、应用层 ping、raw 段头、ctl 过期判断)都从同一条发布线读,不按启动校准对外推(启动校准对 CLOCK_MONOTONIC_RAW 得到的是计数器的标称频率;Graviton 上真实频率与之差约 30 ppm,一天约 2.6 s)。`update(pair, hz)`:`H` = `hz`(`DriftTracker::hz_milli`;`None` 或偏离启动频率超过 `UTC_RATE_TOL_PPM` → 启动频率),`c` = 当前线在 `pair.tsc` 的值;`pair.realtime_ns ≥ c` → 发布目标线(基准 = 该校准对、频率 `H`,即在该点前跳 `realtime_ns − c`);否则(超前 `lead = c − realtime_ns`)→ 基准 `(pair.tsc, c)`、频率 `H` 的线乘以 `1 − min(lead / horizon, UTC_SLEW_PPM)`(`mult` 整数减小),一个 `horizon` 后与目标线相交(受 500 ppm 上限时继续减速),`err_ns` 加上 `lead`。发布线在每个校准对处不减;读者在发布前读到的 `t` 换到新线上可能比旧线低至多"发布延迟 × 斜率差"(亚微秒),由读者的 `max` 吸收,所以同一 `UtcClock` 的连续结果不回退。时长换算(超时、节拍、限速窗口的 TSC 数)取构造时的线,不随发布变化。hft-core 以 `horizon_ms = clock.interval_ms` 构造、在每个校准节拍 `DriftTracker::push` 之后 `update`。决策用的 UTC(sequencer `Now.utc_ns`)不读这条线,经 `UtcAnchor` 输入重锚,两者用同一组校准对。
+
+热路径**只读 TSC**;TSC → UTC 的换算在冷读者(段头校准对 + `ClockStatus` 记录)与 warm 读者(`UtcClock`;gw 只在填请求时间戳时读一次)里完成。跨重启连续的时间不是 TSC:持久状态里的时刻用 SDK `Now.engine_ns`(sequencer 由 journal 记录的运行区间累加,停机不计)或 UTC 日历量([hot-path-rules D6](../../docs/hot-path-rules.md#确定性d))。sequencer 不读系统时钟:整点滚动等依赖时钟的决定由 live driver 写成 `Timer` 输入记录,决策用的 UTC 由 housekeeping 的校准对与 `DriftTracker::hz_milli` 经 Input `UtcAnchor` 重锚([hft-sequencer 引擎 UTC](../hft-sequencer/README.md#引擎-utc))。housekeeping 按校准节拍(取值归 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划))调 `sample_pair` + `DriftTracker::push`,经 `UtcPublisher::update` 更新发布线,并把这一次的校准对与误差界写成一条 `ClockStatus`(Meta 记录,布局归 [hft-event](../hft-event/README.md#控制与系统0x04xx0x05xx));`Stepped` 时另写一条。离线换算按样本前后两条 `ClockStatus` 插值、逐样本给误差界,规则归 [latency-budget §2.1](../../docs/latency-budget.md#21-跨时钟域换算)。
 
 ### CPU、主机检查、内存
 
@@ -505,6 +522,7 @@ x86_64(可选 metal 剖面):
 | `src/swap.rs` | `EpochSwap`(可选) |
 | `src/mailbox.rs` | `Mailbox`、`SeqCell`、`KillWord` |
 | `src/tsc.rs` | `tsc_now`/`tsc_ordered`(`cfg(target_arch)` 两套)、`TscClock::calibrate`、`mult/shift` |
+| `src/utc.rs` | `UtcClock`、`UtcPublisher`(发布线的读写规则) |
 | `src/host_aarch64.rs` / `src/host_x86.rs` | 按 ISA 分开的主机检查表 |
 | `src/calib.rs` | `sample_pair`、`Phc`、`DriftTracker` |
 | `src/cpu.rs` | `CpuSet`、绑核、线程命名 |
@@ -532,6 +550,7 @@ x86_64(可选 metal 剖面):
 | `delta_ns` | ≤ 3 ns | `rt_tsc_delta` |
 | `SwapReader::get`(无变化,可选) | ≤ 2 ns | `rt_swap_get` |
 | `Mailbox::try_take`(空) / `SeqCell::load` | ≤ 2 ns / ≤ 5 ns | `rt_mailbox`、`rt_seqcell` |
+| `UtcClock::utc_ns`(无写者争用) | ≤ 8 ns | `rt_utc_clock` |
 | `Heartbeat::beat` | ≤ 1 ns(无读者争用时) | `rt_heartbeat` |
 | `cpu_relax` 本身耗时 | 记录实测值(Neoverse 上 `ISB`/`YIELD` 各测一次;可选 metal 剖面另测 x86 PAUSE) | `rt_pause_cost` |
 | `sample_pair` | warm,≤ 2 µs | `rt_sample_pair` |

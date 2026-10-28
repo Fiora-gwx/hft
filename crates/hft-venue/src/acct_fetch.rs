@@ -3,7 +3,7 @@ use crate::acct_wire::{self, Reports};
 use crate::{ACCT_RAW_CHUNK, AcctFail, AcctRecHdr, AcctReq, GwCfg, InitErr, LoopStat};
 use hft_net::{ConnId, RestErr, Timestamps};
 use hft_refdata::RefData;
-use hft_rt::{ByteProducer, Consumer, PollTask, Polled, TscUtc, WaitFds};
+use hft_rt::{ByteProducer, Consumer, PollTask, Polled, UtcClock, WaitFds};
 use hft_types::{AccountId, Tsc};
 use hft_venue_proto::{AcctProtocol, AcctQuery, AcctQueryKind, RestReqBuf, WallClock};
 
@@ -70,6 +70,8 @@ pub struct AcctFetchTask<P: AcctProtocol, T: AcctTransport> {
     rd: &'static RefData,
     cfg: GwCfg,
     t: crate::config::Ticks,
+    /// Signing timestamps of the account queries.
+    utc: UtcClock,
     reqs: Consumer<AcctReq>,
     pending_req: Option<AcctReq>,
     out: ByteProducer,
@@ -88,7 +90,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
     pub fn new(
         rd: &'static RefData,
         cfg: GwCfg,
-        clock: TscUtc,
+        clock: UtcClock,
         reqs: Consumer<AcctReq>,
         mut out: ByteProducer,
         accounts: Vec<AcctAccount<P, T>>,
@@ -154,7 +156,8 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
         Ok(Self {
             rd,
             cfg,
-            t: crate::config::Ticks { clock },
+            t: crate::config::Ticks::of(&clock),
+            utc: clock,
             reqs,
             pending_req: None,
             out,
@@ -417,7 +420,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
             }
             if let Some(q) = w.queries.get(w.next).copied() {
                 let mut wire = RestReqBuf::default();
-                let utc = self.t.utc_ns(now);
+                let utc = self.utc.utc_ns(hft_types::Tsc(now));
                 let clk = WallClock {
                     unix_ms: utc / 1_000_000,
                     unix_us: utc / 1000,

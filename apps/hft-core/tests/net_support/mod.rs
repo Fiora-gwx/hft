@@ -62,7 +62,7 @@ impl Gateway {
                 handoff: hc,
                 retire: rp,
                 build: bp,
-                clock: clock.tsc_utc(&clock.base),
+                clock: hft_rt::UtcClock::fixed(clock.tsc_utc(&clock.base)),
             },
             vec![GwAccountSpec {
                 account: hft_types::AccountId(1),

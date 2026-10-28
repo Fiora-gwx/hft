@@ -133,6 +133,10 @@ name = "time"
 path = "tests/time.rs"
 
 [[test]]
+name = "utc"
+path = "tests/utc.rs"
+
+[[test]]
 name = "wait"
 path = "tests/wait.rs"
 

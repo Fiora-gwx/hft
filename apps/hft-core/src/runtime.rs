@@ -418,6 +418,8 @@ fn run_linux(
     }
     let clock = TscClock::calibrate(&hft_rt::CalibConfig::default())
         .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
+    // The published TSC → UTC line of the non-sequencer threads; housekeeping is its writer.
+    let (utc, mut utc_pub) = hft_rt::UtcClock::shared(&clock, c.clock.interval_ms);
     // A partial recovery implementation must never silently reset account/OMS state.
     let jcfg = storage::config(c, "seq", hft_journal::JournalKind::Seq, VenueId(0));
     let cold = c.paths.journal_cold.join(storage::instance(c).as_str());
@@ -506,7 +508,7 @@ fn run_linux(
                 commands: feed_rx,
                 quotes,
                 subscribed,
-                clock,
+                clock: utc.clone(),
                 interval_ticks: (u128::from(clock.hz_milli) * u128::from(p.quote_interval_ms) / 1_000_000)
                     as u64,
                 next: 0,
@@ -515,7 +517,7 @@ fn run_linux(
             let _ = (md_tx, bulk_tx);
         } else {
             let vtask = crate::venues::assemble(
-                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
+                c, &l.setup, name, v, rd, clock, &utc, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
             )?;
             let (task, gw, js, baseline) = vtask;
             initial_balances.extend(baseline.balances);
@@ -646,7 +648,7 @@ fn run_linux(
         hft_sequencer::config_blob::decode_risk_blob,
         active_params,
         storage::reader(c)?,
-        clock.tsc_utc(&clock.base),
+        utc.clone(),
         Default::default(),
     )
     .map_err(|e| Error::runtime("CtlSocket", format!("{e:?}"), 3))?;
@@ -660,7 +662,7 @@ fn run_linux(
         |_, _| Err(1),
         hft_sequencer::config_blob::decode_risk_blob,
         active_params,
-        clock.tsc_utc(&clock.base),
+        utc.clone(),
         Default::default(),
     );
     #[cfg(not(target_os = "linux"))]
@@ -673,6 +675,7 @@ fn run_linux(
     hft_rt::lock_all().map_err(|_| Error::runtime("MemLock", "mlockall failed; check LimitMEMLOCK", 3))?;
     let mut persist_workers = Workers::new(heartbeat);
     let mut persist = storage::Persist::new(sides);
+    let persist_utc = utc.clone();
     persist_workers.spawn(policy(c, "persist")?, move |stop, t| {
         let start = Instant::now();
         while !stop.load(Ordering::Acquire) {
@@ -680,7 +683,7 @@ fn run_linux(
             trace_drain.poll()?;
             if !persist.poll(
                 start.elapsed().as_nanos() as u64,
-                clock.to_utc_ns(hft_rt::tsc_now()),
+                persist_utc.utc_ns(hft_rt::tsc_now()),
             )? {
                 idle(&t);
             }
@@ -688,7 +691,7 @@ fn run_linux(
         trace_drain.finish()?;
         persist.flush(
             start.elapsed().as_nanos() as u64,
-            clock.to_utc_ns(hft_rt::tsc_now()),
+            persist_utc.utc_ns(hft_rt::tsc_now()),
         )
     })?;
     let drain = Arc::new(AtomicBool::new(false));
@@ -828,6 +831,7 @@ fn run_linux(
                 let pair = hft_rt::sample_pair(&clock, None)
                     .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
                 let verdict = tracker.push(pair);
+                utc_pub.update(&pair, tracker.hz_milli());
                 clock_tick(&mut hk, pair, clock.hz_milli, verdict, &mut last)?;
                 anchor_tick(&mut hk, pair, verdict, tracker.hz_milli(), &mut anchor)?;
                 heartbeat.hk.hk_utc_ns.store(pair.realtime_ns, Ordering::Release);

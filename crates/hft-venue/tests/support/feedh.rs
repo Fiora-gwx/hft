@@ -5,7 +5,7 @@
 use hft_event::{ConnState, ConnStateKind, FeedCmd, FeedMsg};
 use hft_net::{BuildReq, ConnId, RetireMsg};
 use hft_rt::{
-    Backing, ByteConsumer, ByteProducer, CalibPair, Consumer, Producer, TscClock, TscUtc, byte_spsc, spsc,
+    Backing, ByteConsumer, ByteProducer, CalibPair, Consumer, Producer, TscClock, UtcClock, byte_spsc, spsc,
 };
 use hft_types::InstId;
 use hft_venue::{FeedCfg, FeedDeps, FeedRoutes, FeedRuntime, Handover, LoopStat, SnapReq, streams};
@@ -17,9 +17,9 @@ use super::rd::rd_stub;
 use super::stub::StubProto;
 
 /// 1 tick = 1 ns, `utc_ns = tsc`.
-pub fn clock() -> TscUtc {
+pub fn clock() -> UtcClock {
     let c = TscClock::from_hz_milli(1_000_000_000_000, CalibPair::default());
-    c.tsc_utc(&CalibPair::default())
+    UtcClock::fixed(c.tsc_utc(&CalibPair::default()))
 }
 
 /// `F0`.

@@ -2,7 +2,7 @@
 use crate::{Error, config::Paper, io};
 use hft_event::*;
 use hft_refdata::{AccountKind, RefData};
-use hft_rt::{ByteProducer, Consumer, Producer, TscClock};
+use hft_rt::{ByteProducer, Consumer, Producer};
 use hft_sim::{MarketEventRef, SimExchange, SimInput, SimSetup};
 use hft_types::{AccountId, InstId, Px, Qty, Tsc, VenueId};
 use std::collections::VecDeque;
@@ -51,7 +51,8 @@ pub struct Feed {
     pub commands: Consumer<FeedCmd>,
     pub quotes: Vec<crate::config::Quote>,
     pub subscribed: Vec<bool>,
-    pub clock: TscClock,
+    /// The published TSC → UTC line (synthetic quotes' `ex_ts_ns`).
+    pub clock: hft_rt::UtcClock,
     pub interval_ticks: u64,
     pub next: u64,
     pub update: u64,
@@ -94,7 +95,7 @@ impl Feed {
             h.venue = self.venue;
             h.inst = InstId(q.inst);
             h.rx_tsc = now.0;
-            h.ex_ts_ns = self.clock.to_utc_ns(now);
+            h.ex_ts_ns = self.clock.utc_ns(now);
             let b = Bbo {
                 h,
                 bid_px: Px(q.bid_raw),

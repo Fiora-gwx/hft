@@ -11,7 +11,7 @@ use hft_ctl_proto::{CmdResponse, encode_frame, frame_len};
 use hft_event::{CmdResult, EventKind};
 use hft_journal::{JournalReader, Next};
 use hft_refdata::RefData;
-use hft_rt::{Consumer, MailReceiver, MailSender, PollTask, Polled, TscUtc, WaitFds};
+use hft_rt::{Consumer, MailReceiver, MailSender, PollTask, Polled, UtcClock, WaitFds};
 use hft_strategy_sdk::StrategySet;
 use hft_types::Tsc;
 
@@ -125,7 +125,7 @@ impl<S: StrategySet, R: CtlRing, J: ResultSource> Gateway<S, R, J> {
         risk_decode: RiskDecode,
         active_params: Vec<ParsedConfig<S>>,
         journal: J,
-        clock: TscUtc,
+        clock: UtcClock,
         engine: hft_ctl_proto::EngineInfo,
     ) -> Result<Gateway<S, R, J>, GatewayError> {
         if ring_bytes < MIN_RING_BYTES {

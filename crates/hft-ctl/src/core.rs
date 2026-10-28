@@ -17,7 +17,7 @@ use hft_event::{
     parse_spb1,
 };
 use hft_refdata::{AccountKind, LegView, LoadErrCode, RefData};
-use hft_rt::{MailReceiver, MailSender, TscUtc};
+use hft_rt::{MailReceiver, MailSender, UtcClock};
 use hft_strategy_sdk::{GroupTable, ParamError, RefView, ResetPreview, StrategySet};
 use hft_types::{AccountId, GROUP_NONE, InstId, StrategyId, Tsc, VenueId};
 use sha2::{Digest, Sha256};
@@ -63,27 +63,31 @@ pub enum Reply {
     Wait,
 }
 
-/// TSC ↔ UTC.
-#[derive(Copy, Clone, Debug)]
-pub struct Clock(pub TscUtc);
+/// TSC ↔ UTC on the published line (hft-rt `UtcClock`).
+#[derive(Clone, Debug)]
+pub struct Clock(pub UtcClock);
 
 impl Clock {
+    /// UTC of `t` (never less than this clock's previous result).
     pub fn utc(&self, t: Tsc) -> i64 {
         self.0.utc_ns(t)
     }
-    /// The TSC at which the UTC clock reads `utc_ns`.
+    /// The TSC at which the current line reads `utc_ns`.
     pub fn tsc_of(&self, utc_ns: i64) -> u64 {
-        let c = &self.0;
+        Self::tsc_on(&self.0.line(), utc_ns)
+    }
+    fn tsc_on(c: &hft_rt::TscUtc, utc_ns: i64) -> u64 {
         let d = (i128::from(utc_ns) - i128::from(c.base_utc_ns)) << c.shift.min(64);
         let t = i128::from(c.base_tsc.0) + d / i128::from(c.mult.max(1));
         t.clamp(0, i128::from(u64::MAX)) as u64
     }
     /// Ticks of `ms` milliseconds.
     pub fn ticks_ms(&self, ms: u64) -> u64 {
-        let base = self.tsc_of(self.0.base_utc_ns);
-        self.tsc_of(
-            self.0
-                .base_utc_ns
+        let c = self.0.line();
+        let base = Self::tsc_on(&c, c.base_utc_ns);
+        Self::tsc_on(
+            &c,
+            c.base_utc_ns
                 .saturating_add((ms as i64).saturating_mul(1_000_000)),
         ) - base
     }
@@ -264,7 +268,7 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
         refdata_check: RefdataAssemblyCheck,
         risk_decode: RiskDecode,
         active_params: Vec<ParsedConfig<S>>,
-        clock: TscUtc,
+        clock: UtcClock,
         engine: EngineInfo,
     ) -> Core<S, R> {
         let bases = active_params
@@ -311,8 +315,8 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
     pub fn refdata(&self) -> &RefData {
         &self.rd
     }
-    pub fn clock(&self) -> Clock {
-        self.clock
+    pub fn clock(&self) -> &Clock {
+        &self.clock
     }
     /// Number of commands waiting for their `CmdResult`.
     pub fn pending_len(&self) -> usize {

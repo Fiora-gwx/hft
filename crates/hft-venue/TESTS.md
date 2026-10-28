@@ -34,7 +34,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 使用本组件 | 不适用:见子节 |
 | 协议接口 | VEN-018、VEN-064、VEN-341、VEN-390 |
 | 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403 |
-| 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264 |
+| 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264、VEN-404 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
 | 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402 |
 | 实现说明 | 不适用:见子节 |
@@ -73,7 +73,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 - **`ScriptNet`**:基于 hft-net feature `test-io` 的 `ScriptIo` 与 `MemPeer`(真实 rustls 会话、真实 WS 分帧,[hft-net TESTS](../hft-net/TESTS.md) 的同名夹具):`push(conn, payload, at_tsc)` 让对端发一条 WS 文本帧,`pong(conn, at_tsc)` 回 WS Pong,`eof(conn)`/`rst(conn)` 断开,`set_ready(conn, bool)` 决定 `ReadyPoll::probe` 的结果,`sent(conn)` 返回本端发出的明文帧序列,`SysCount` 按连接与种类(`recvmsg`、`sendmsg`、`epoll_pwait`、`epoll_ctl`)计数。
 - **`BuildStub`**:代替 conn-builder:读 `BuildReq` 环;用例调用 `complete(req, conn)` 把一条 `ScriptNet` 连接以请求方给出的 `ConnId` 交接,`fail(req)` 报建连失败;`retired()` 返回收到的 `RetireMsg`。
 - **`Taps`**:`bbo`、`md`(含 bulk)、`rep`(含 bulk)、`snapreq`、`snap`、`acctreq`、`acct` 各环的消费端,按顺序收集元素;`raw(j)` 按顺序读出 journal `j` 的记录(`RawHdr` + payload + 记录头 `tsc`);`Order` 把各环与 journal 的写入合成一条全序日志(用于"先入环、后写 raw"一类断言)。
-- **时钟**:hft-testkit `ManualTsc`,1 tick = 1 ns;`TscUtc` 取 `utc_ns = tsc`。用例中的 TSC 值即纳秒。
+- **时钟**:hft-testkit `ManualTsc`,1 tick = 1 ns;`clock` 为固定线的 `UtcClock`,`utc_ns = tsc`(VEN-404 另用发布线)。用例中的 TSC 值即纳秒。
 - **`rd_stub()`**:venue V7;inst `S1` = 701、`S2` = 702、`S3` = 703(价格指数 −2、数量指数 −4:refdata 要求价格与数量指数之和 ≤ −6),规模用例另有 `P001`–`P300` = 7001–7300;资产 USDT(数量指数 −6)、BNB(−8);账户 A1 = `AccountId(1)`(Live,`venue_account_ix = 0`)、A2 = `AccountId(12)`(Live,`venue_account_ix = 11`;refdata 的 ix 是稠密序号,中间是 10 个只占位的 Live 账户 2–11)、A9 = `AccountId(13)`(Sim);`VenueMeta{ws_max_streams_per_conn: 50, ws_max_in_msgs_per_s: 10, ws_max_conn_age_s: 86400}`;`VenueCaps{margin_data: Poll{interval_ms: 2000}, flags: AMEND | POST_ONLY | IOC | BATCH_CANCEL, reduce_only: true, ignorable_user_events: ["listenKeyExtended"], funding_settle: PerSymbolPush}`;`RateLimitTable`:(V7, A1)、(V7, A2) 下单桶各 10 条 / 1000 ms,REST 权重桶各 100 / 60 000 ms。
 - **基准配置**(用例在 `前置` 里写"`F0`"等即表示取下列显式值,再列出本用例改动的键):
   - `F0`(`FeedRuntime`):`routes = All`、`ready = false`、`feed.bbo_conns = 2`、`feed.bbo_frames_per_poll = 8`、`feed.frames_per_poll = 64`、`feed.bbo_ping_ms = 1000`、`feed.bbo_dead_ms = 3000`、`feed.bbo_refresh_grace_ms = 500`、`feed.depth = topn`、`feed.topn_levels = 5`、`feed.snapshot_part_levels = 64`、`feed.raw_dups = false`、`feed.raw.bbo = on`、`feed.raw.md = on`、`feed.raw.sample_ms = 1000`、`feed.ring_full_park_us = 200`、`conn.rotate_margin_s = 3600`、`max_sub_insts = 50`;环容量 bbo 1024、md 1024、md-bulk 1 MiB、feedctl 256、snapreq 64、snap 256 KiB;`StubCfg{bbo_snapshot: true, bbo_batch: 4}`。
@@ -2554,12 +2554,28 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
 - 级别:unit
 - 里程碑:M1.5
-- 前置:`G0`,`gw.stale_guard_ms = 1500`;`TscUtc` 把 `now_tsc = 1_700_000_000_123_456_789` 换算为 `utc_ns` 同值;`StubProto` 帧中的过期字段 = `WallClock.unix_ms` + 过期窗口
+- 前置:`G0`,`gw.stale_guard_ms = 1500`;`clock`(固定线的 `UtcClock`)把 `now_tsc = 1_700_000_000_123_456_789` 换算为 `utc_ns` 同值;`StubProto` 帧中的过期字段 = `WallClock.unix_ms` + 过期窗口
 - 步骤:
   1. 在该 `now_tsc` 发出一条 `Place`
 - 期望:
   - `encode` 收到 `WallClock{unix_ms: 1700000000123, unix_us: 1700000000123456}`;帧中过期字段 = 1700000000123 + 1500;gw 线程上 `clock_gettime` 调用数为 0
 - 实现:`crates/hft-venue/tests/gw_send.rs::ven_246_wall_clock_and_expiry`
+
+### VEN-404 填帧的墙钟跟随重新发布的 UTC 线
+
+- 规则:[运行时入口](README.md#运行时入口)、[§4](README.md#4-gwruntimepoll_once-的循环结构)
+- 级别:unit
+- 里程碑:M1.5
+- 前置:`G0`(A1、A2,连接全开,`SetEpoch{5}`),`clock` = `UtcClock::shared(1 GHz、utc = tsc 的启动时钟, horizon 1 000 ms)` 的读者;`t0 = 1_700_000_000_123_456_789`
+- 步骤:
+  1. 在 `t0` 发一条 `Place`
+  2. 发布者 `update((t0 + 10^9, t0 + 3.7·10^9), None)`(CLOCK_REALTIME 比启动线快 2.7 s);在 `t0 + 2·10^9` 发一条 `Place`
+  3. 发布者 `update((t0 + 3·10^9, t0 + 4.7·10^9), None)`(比当前线慢 1 s);在 `t0 + 3·10^9 + 1000` 发一条 `Place`
+- 期望:
+  - 第 1 条 `encode` 的 `WallClock{unix_ms: 1700000000123, unix_us: 1700000000123456}`
+  - 第 2 条 `WallClock{unix_ms: 1700000004823, unix_us: 1700000004823456}`(按新线换算,不沿用构造时的线)
+  - 第 3 条 `unix_ms = 1700000005823`、`unix_us` ∈ [1700000005823456, 1700000005823457](线保持当前值并减速,不回跳 1 s)
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_404_wall_clock_follows_published_line`
 
 ### VEN-247 gw 从不自行刷新死手
 

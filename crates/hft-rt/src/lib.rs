@@ -42,6 +42,7 @@ mod swap;
 mod sync;
 mod sys;
 mod tsc;
+mod utc;
 mod wait;
 
 pub use calib::{ClockVerdict, DriftTracker, Phc, PhcOffset, SysClock, sample_pair, sample_pair_with};
@@ -66,6 +67,7 @@ pub use ring::spsc::{Backing, Consumer, Producer, ReadBatch, WriteBatch, spsc};
 #[cfg(not(loom))]
 pub use swap::{EpochSwap, SwapPublisher, SwapReader, SwapReclaimer};
 pub use tsc::{CalibPair, ClockErr, ClockReads, TscClock, TscUtc, tsc_hz_nominal, tsc_now, tsc_ordered};
+pub use utc::{UTC_RATE_TOL_PPM, UTC_SLEW_PPM, UtcClock, UtcPublisher};
 pub use wait::{Backoff, CachePadded, HbKind, Heartbeat, HeartbeatWatch, Progress, cpu_relax};
 
 /// The one error type of this crate's startup and warm entries (hot entries never return it).

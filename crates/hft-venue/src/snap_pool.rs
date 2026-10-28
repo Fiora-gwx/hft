@@ -104,7 +104,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
         if age != 0 && cfg.rotate_margin_s >= age {
             return Err(InitErr::RotateMargin);
         }
-        let t = crate::config::Ticks { clock: deps.clock };
+        let t = crate::config::Ticks::of(&deps.clock);
         let rate = crate::RateCounters::rest(deps.rd.rate_limits(P::VENUE), |ms| t.ms(ms));
         Ok(Self {
             cfg,
@@ -290,9 +290,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
         work
     }
     fn ticks(&self) -> crate::config::Ticks {
-        crate::config::Ticks {
-            clock: self.deps.clock,
-        }
+        crate::config::Ticks::of(&self.deps.clock)
     }
     fn complete(&mut self, ix: usize, status: u8, now: u64) {
         self.completed = Some(ix);
@@ -549,10 +547,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                             }
                         }
                         batch.deadline = now.saturating_add(
-                            crate::config::Ticks {
-                                clock: self.deps.clock,
-                            }
-                            .ms(u64::from(self.cfg.timeout_ms)),
+                            crate::config::Ticks::of(&self.deps.clock).ms(u64::from(self.cfg.timeout_ms)),
                         );
                         self.next = now.saturating_add(self.ticks().ms(u64::from(self.cfg.request_gap_ms)));
                         if sent.is_err() {

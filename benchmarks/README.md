@@ -289,6 +289,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `rt_taskloop_idle_round` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-163 |
 | `rt_tsc_delta` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-157 |
 | `rt_tsc_now` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-155 |
+| `rt_utc_clock` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-172 |
 | `rt_unpark_latency` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-165 |
 | `rt_wake_check` | hft-rt | [hft-rt 延迟与资源契约](../crates/hft-rt/README.md#延迟与资源契约) | RT-164 |
 | `sdk/body_view` | hft-strategy-sdk | [hft-strategy-sdk 延迟与资源契约](../crates/hft-strategy-sdk/README.md#延迟与资源契约) | SDK-204 |
