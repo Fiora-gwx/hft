@@ -6329,3 +6329,4 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 |---|---|---|
 | SEQ-447.1 | `a1` 的 `L2Snapshot{origin = Exchange}`(`ex_ts_ns` 1 s、`sw_rx_ns` 1.010 s)、`L2Batch`(2 s / 2.012 s)、`Trade`(3 s / 3.013 s);再一条 `a1` 报价 | 在该报价的 `on_event` 中 `md_count(a1) = 3`,`md_stamp(a1, 1..=3)` 依次为 `(MD_SNAPSHOT, 1 s, 1.010 s)`、`(MD_BATCH, …)`、`(MD_TRADE, …)`,`rx_tsc` 非 0;第 0、4 条 `None` |
 | SEQ-447.2 | 再 17 条 `a1` 的 `Trade`(`ex_ts_ns` = 4 s + k) | `md_count(a1) = 20`;第 4 条 `None`,第 5 条为 `ex_ts_ns` 4 s + 1 ns 的 `MD_TRADE`,第 20 条 4 s + 16 ns;`md_count(b1) = 0` |
+| SEQ-447.3 | 写关键帧;再一条 `a1` 的 `Trade`(`ex_ts_ns` 5 s) | 关键帧后 `md_stamp(a1, 20) = None`(seq 不晚于 `rx_from_seq`),`md_count(a1)` 仍为 20;该成交后 `md_count(a1) = 21`,第 21 条为 `ex_ts_ns` 5 s 的 `MD_TRADE`,第 20 条仍 `None` |

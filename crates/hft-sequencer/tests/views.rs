@@ -388,7 +388,7 @@ fn seq_026_affordability_reads() {
 
 /// SEQ-447: every L2 batch, exchange or top-N L2 snapshot and trade leaves its `MarketHdr` stamps
 /// for `Views::md_count`/`md_stamp` (exchange snapshots too, although they deliver no Book event);
-/// the last 16 are kept.
+/// the last 16 are kept; a snapshot hides the earlier ones.
 #[test]
 fn seq_447_md_stamps() {
     use hft_event::{L2BatchHdr, L2SnapHdr, Level};
@@ -487,4 +487,21 @@ fn seq_447_md_stamps() {
         "SEQ-447.2"
     );
     assert_eq!(m.md_count(B1), 0, "SEQ-447.2 other inst");
+    // .3 a keyframe hides the earlier stamps (rx_from_seq); the count goes on.
+    h.keyframe();
+    let m = &h.s.engine().market;
+    assert_eq!(m.md_stamp(A1, 20), None, "SEQ-447.3 hidden");
+    assert_eq!(m.md_count(A1), 20, "SEQ-447.3");
+    let mut t = trade(A1, 19);
+    t.h = hdr(&h, 5_000_000_000, 0);
+    h.push(RingId::Md(0), &t);
+    h.run();
+    let m = &h.s.engine().market;
+    assert_eq!(m.md_count(A1), 21, "SEQ-447.3");
+    assert_eq!(
+        m.md_stamp(A1, 21).map(|x| (x.kind, x.ex_ts_ns)),
+        Some((MdStampView::MD_TRADE, 5_000_000_000)),
+        "SEQ-447.3 after the keyframe"
+    );
+    assert_eq!(m.md_stamp(A1, 20), None, "SEQ-447.3 still hidden");
 }

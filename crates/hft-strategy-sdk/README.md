@@ -558,7 +558,8 @@ pub trait Views {
     /// 提供的默认方法(实现者不覆盖);执行层、策略要与引擎同一阈值时用它。
     fn quote_ok(&self, a: AccountId, i: InstId) -> bool;
     /// 本进程内该 inst 已处理的行情消息数(L2Batch、origin 为交易所或 TopN 的 L2Snapshot——含不投递 EventRef::Book 的交易所整簿——与 Trade,
-    /// 含当前 Input);第 n 条(从 1 起)在最近 MD_STAMPS_KEPT(16)条之内时 md_stamp 返回其戳,否则 None。
+    /// 含当前 Input);第 n 条(从 1 起)在最近 MD_STAMPS_KEPT(16)条之内、且晚于最近一个快照时 md_stamp 返回其戳,否则 None
+    /// (与 bbo(i).rx_tsc 同一可见性:实盘与从该快照起步的回放读到同一组戳)。md_count 只作读取游标:从运行中的快照起步的回放从 0 计。
     /// 提供的默认方法返回 0 / None(不带行情戳的实现);引擎实现(hft-sequencer)覆盖二者。
     fn md_count(&self, i: InstId) -> u64;
     fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView>;

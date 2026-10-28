@@ -99,19 +99,21 @@ pub struct MemOnly {
 
 const MD_KEPT: usize = MD_STAMPS_KEPT as usize;
 
-/// Stamps of the last `MD_STAMPS_KEPT` market-data messages of one inst and their count in this
-/// process (README "只读视图" `md_count`/`md_stamp`; not in the snapshot, not cleared by
-/// `EngineClock`).
+/// Stamps of the last `MD_STAMPS_KEPT` market-data messages of one inst, the seq of each record
+/// and their count in this process (README "只读视图" `md_count`/`md_stamp`; not in the snapshot,
+/// not cleared by `EngineClock`; stamps at or before `rx_from_seq` are not visible).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct MdRing {
     pub n: u64,
     pub s: [MdStampView; MD_KEPT],
+    pub seq: [u64; MD_KEPT],
 }
 
 impl MdRing {
     pub const EMPTY: MdRing = MdRing {
         n: 0,
         s: [MdStampView::NONE; MD_KEPT],
+        seq: [0; MD_KEPT],
     };
 }
 
@@ -154,18 +156,21 @@ impl Market {
     pub fn row_mut(&mut self, i: InstId) -> Option<&mut MarketLastRow> {
         self.rows.get_mut(i.0 as usize)
     }
-    /// Records the stamps of one applied market-data message of `i` (`MdStampView::MD_*` kind).
+    /// Records the stamps of one applied market-data message of `i` (`MdStampView::MD_*` kind)
+    /// read at `seq`.
     #[inline]
-    pub fn push_md(&mut self, i: InstId, kind: u8, h: &hft_event::MarketHdr) {
+    pub fn push_md(&mut self, i: InstId, kind: u8, h: &hft_event::MarketHdr, seq: u64) {
         if let Some(r) = self.md.get_mut(i.0 as usize) {
             r.n = r.n.wrapping_add(1);
-            if let Some(x) = r.s.get_mut((r.n % MD_STAMPS_KEPT) as usize) {
+            let k = (r.n % MD_STAMPS_KEPT) as usize;
+            if let (Some(x), Some(q)) = (r.s.get_mut(k), r.seq.get_mut(k)) {
                 *x = MdStampView {
                     kind,
                     ex_ts_ns: h.ex_ts_ns,
                     sw_rx_ns: h.sw_rx_ns,
                     rx_tsc: Tsc(h.rx_tsc),
                 };
+                *q = seq;
             }
         }
     }
@@ -174,14 +179,20 @@ impl Market {
     pub fn md_count(&self, i: InstId) -> u64 {
         self.md.get(i.0 as usize).map_or(0, |r| r.n)
     }
-    /// `Views::md_stamp`: the `n`-th (1-based) stamp of `i` while among the last `MD_STAMPS_KEPT`.
+    /// `Views::md_stamp`: the `n`-th (1-based) stamp of `i` while among the last `MD_STAMPS_KEPT`
+    /// and read after `rx_from_seq` (the `bbo(i).rx_tsc` visibility: live and a replay from the
+    /// last snapshot see the same stamps).
     #[inline]
     pub fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView> {
         let r = self.md.get(i.0 as usize)?;
         if n == 0 || n > r.n || r.n - n >= MD_STAMPS_KEPT {
             return None;
         }
-        r.s.get((n % MD_STAMPS_KEPT) as usize).copied()
+        let k = (n % MD_STAMPS_KEPT) as usize;
+        if r.seq.get(k).is_none_or(|q| *q <= self.rx_from_seq) {
+            return None;
+        }
+        r.s.get(k).copied()
     }
     #[inline]
     pub fn conn(&self, v: VenueId, slot: u8) -> Option<&ConnLive> {

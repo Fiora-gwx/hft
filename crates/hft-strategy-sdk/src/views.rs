@@ -217,13 +217,15 @@ pub trait Views {
     }
     /// Market-data messages of `i` (L2 batches, exchange and top-N L2 snapshots, trades) the engine
     /// has applied in this process so far, including those of the current input; 0 = none, or an
-    /// implementation without stamps (the provided default).
+    /// implementation without stamps (the provided default). A read cursor only: a replay from a
+    /// snapshot within a run counts from 0.
     #[inline]
     fn md_count(&self, _i: InstId) -> u64 {
         0
     }
     /// Stamps of the `n`-th (1-based) of those messages while it is among the last
-    /// `MD_STAMPS_KEPT`; otherwise `None` (also the provided default).
+    /// `MD_STAMPS_KEPT` and after the last snapshot (the visibility of `bbo(i).rx_tsc`: live and a
+    /// replay from that snapshot see the same stamps); otherwise `None` (also the provided default).
     #[inline]
     fn md_stamp(&self, _i: InstId, _n: u64) -> Option<MdStampView> {
         None

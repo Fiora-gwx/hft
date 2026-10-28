@@ -338,7 +338,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
         EventKind::L2_SNAPSHOT => l2_snapshot(e, inst, drv, slot, p),
         EventKind::TRADE => {
             if let Some(t) = slot.read::<Trade>() {
-                e.market.push_md(t.h.inst, MdStampView::MD_TRADE, &t.h);
+                e.market.push_md(t.h.inst, MdStampView::MD_TRADE, &t.h, e.cur_seq);
                 if let Some(r) = e.market.row_mut(t.h.inst) {
                     r.trade_px = t.px;
                     r.trade_qty = t.qty;
@@ -694,7 +694,7 @@ fn l2_batch<'a, D: Driver<S>, S: StrategySet>(
         b.apply_batch(&h, &levels);
         e.trace.rec("book.apply_batch", u64::from(i.0), n as u64);
     }
-    e.market.push_md(i, MdStampView::MD_BATCH, &h.h);
+    e.market.push_md(i, MdStampView::MD_BATCH, &h.h, e.cur_seq);
     after_book(e, inst, drv, i, &h.h)?;
     p.market = Some(MarketEv::Book { inst: i });
     Ok(())
@@ -720,7 +720,7 @@ fn l2_snapshot<'a, D: Driver<S>, S: StrategySet>(
             .rec("book.apply_snapshot", u64::from(i.0), u64::from(h.origin));
     }
     if h.origin != L2SnapHdr::KEYFRAME {
-        e.market.push_md(i, MdStampView::MD_SNAPSHOT, &h.h);
+        e.market.push_md(i, MdStampView::MD_SNAPSHOT, &h.h, e.cur_seq);
     }
     if h.origin == L2SnapHdr::TOP_N {
         after_book(e, inst, drv, i, &h.h)?;
