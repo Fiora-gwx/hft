@@ -3,6 +3,10 @@
 p50_ns = 1000
 p99_ns = 3000
 
+["strategies/binary-maker/tick_comp"]
+p50_ns = 5000
+p99_ns = 10000
+
 ["strategies/binary-maker/tick_fire"]
 p50_ns = 1000
 p99_ns = 3000

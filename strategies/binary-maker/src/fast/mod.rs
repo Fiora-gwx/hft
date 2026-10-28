@@ -4,11 +4,19 @@
 //! cancelled when undercut or when the reference moves its fair value against it, and a bid that
 //! completes pairs rests no higher than the pair-cost limit; with `fv_limit`, bids are also capped
 //! by the strategy's own fair value (anchored to the Up mid, moved by the reference, the inventory
-//! and a direction forecast). No allocation after `new`/`on_params`; snapshots are keyed by
-//! `GroupId`.
+//! and a direction forecast); with `comp_skip`/`comp_dir`, a composite direction score per token
+//! skips the token it is against and lets the one it favours hold more inventory (`comp`); with
+//! `load_gate_ns`/`mdslow_gate_ns`, the previous minute's feed lag stops quoting (`lag`). No
+//! allocation after `new`/`on_params`; snapshots are keyed by `GroupId`.
 #![deny(clippy::float_arithmetic)]
 
+pub mod comp;
+pub mod lag;
+
 use hft_strategy_sdk::prelude::*;
+
+use comp::{BidSide, Own, ScoreIn, SecHist, SlotHist, Trades};
+use lag::LagGate;
 
 use crate::norm::{cdf, inv_cdf};
 use crate::params::BinaryMakerParams;
@@ -51,6 +59,17 @@ pub struct FvAnchor {
     pub off: i64,
     pub off_ok: bool,
     pub off_ens: i64,
+}
+
+/// Composite scores of the current window's two tokens (README "规则" 10), cached for
+/// `comp_every_ms`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompCache {
+    pub ok: bool,
+    pub win: i64,
+    pub utc_ns: i64,
+    /// Up, Down (`Rate` standard deviations).
+    pub z: [i64; 2],
 }
 
 /// Quote state of one slot leg.
@@ -120,6 +139,15 @@ pub struct Fast {
     pub ref_imb: i64,
     /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
     pub fv: FvAnchor,
+    /// Per slot leg (quote order): per-second mid and best bid, consumed market-data stamps.
+    pub hist: Vec<SlotHist>,
+    /// Reference 2 × mid per second (score).
+    pub ref_x2: Box<SecHist>,
+    /// Large prints of the slot legs (score).
+    pub trades: Box<Trades>,
+    pub comp: CompCache,
+    /// Feed-lag statistics (venue-load gates).
+    pub lag: LagGate,
 }
 
 impl Fast {
@@ -138,6 +166,11 @@ impl Fast {
                 win: i64::MIN,
                 ..FvAnchor::default()
             },
+            hist: Vec::with_capacity(cap),
+            ref_x2: Box::default(),
+            trades: Box::default(),
+            comp: CompCache::default(),
+            lag: LagGate::new(),
         };
         f.on_params(p, groups);
         f
@@ -186,10 +219,222 @@ impl Fast {
                 .unwrap_or(fresh);
             self.quotes.push(kept);
         }
+        // Score histories follow the slot insts (rebuilt when they change).
+        if !self
+            .hist
+            .iter()
+            .map(|h| h.inst)
+            .eq(self.quotes.iter().map(|q| q.inst))
+        {
+            self.hist.clear();
+            self.hist
+                .extend(self.quotes.iter().map(|q| SlotHist::new(q.inst)));
+        }
+        self.comp.ok = false;
+    }
+
+    /// Composite score on (`comp_skip` or `comp_dir` set).
+    pub fn comp_on(&self) -> bool {
+        let d = self.p.defaults();
+        d.comp_skip.0 > 0 || d.comp_dir.0 > 0
+    }
+
+    /// Venue-load gates on.
+    pub fn lag_on(&self) -> bool {
+        let d = self.p.defaults();
+        d.load_gate_ns > 0 || d.mdslow_gate_ns > 0
+    }
+
+    /// Before the rules (README "规则" 10, 11): the reference 2 × mid of the second, every slot
+    /// book's 2 × mid and best bid of the second, large prints; the slot insts' new market-data
+    /// stamps into the lag statistics.
+    fn observe<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, utc_ns: i64) {
+        let sec = utc_ns.div_euclid(1_000_000_000);
+        if self.comp_on() {
+            match *ev {
+                EventRef::Bbo { inst, b, .. } if inst == self.reference => {
+                    if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
+                        self.ref_x2.put(sec, b.bid_px.0.saturating_add(b.ask_px.0));
+                    }
+                }
+                EventRef::Trade { inst, t, .. } => {
+                    let unit_qty = 10i64.saturating_pow(u32::from(v.inst(inst).qty_exp.unsigned_abs()));
+                    let min = i64::from(self.p.defaults().comp_flow_min_shares).saturating_mul(unit_qty);
+                    if t.qty.0 >= min && self.hist.iter().any(|h| h.inst == inst) {
+                        let q = if t.side == Side::Buy { t.qty.0 } else { -t.qty.0 };
+                        self.trades.push(utc_ns, inst, q);
+                    }
+                }
+                _ => {}
+            }
+            for h in self.hist.iter_mut() {
+                let b = v.book(h.inst);
+                if b.status() != BookStatus::Live {
+                    continue;
+                }
+                if let (Some(x), Some(y)) = (b.best(Side::Buy), b.best(Side::Sell))
+                    && x.px.0 < y.px.0
+                {
+                    h.mid_x2.put(sec, x.px.0.saturating_add(y.px.0));
+                    h.bid.put(sec, x.px.0);
+                }
+            }
+        }
+        if self.lag_on() {
+            // New stamps of all slot insts, in receive order (at most MD_STAMPS_KEPT per inst).
+            const MAX: usize = MD_STAMPS_KEPT as usize * 16;
+            let mut new = [(0i64, 0i64); MAX];
+            let mut n = 0usize;
+            for h in self.hist.iter_mut() {
+                let count = v.md_count(h.inst);
+                let from = h
+                    .md_seen
+                    .saturating_add(1)
+                    .max(count.saturating_sub(MD_STAMPS_KEPT - 1));
+                for k in from..=count {
+                    let Some(m) = v.md_stamp(h.inst, k) else { continue };
+                    let ex_ms = m.ex_ts_ns / 1_000_000;
+                    if ex_ms == 0 || m.sw_rx_ns <= 0 {
+                        continue;
+                    }
+                    if let Some(x) = new.get_mut(n) {
+                        *x = (
+                            m.sw_rx_ns,
+                            m.sw_rx_ns.saturating_sub(ex_ms.saturating_mul(1_000_000)),
+                        );
+                        n += 1;
+                    }
+                }
+                h.md_seen = count;
+            }
+            if let Some(new) = new.get_mut(..n) {
+                new.sort_unstable();
+                for (rx, lag) in new.iter() {
+                    self.lag.push(*rx, *lag);
+                }
+            }
+            self.lag.tick(utc_ns);
+        }
+    }
+
+    /// Our resting bid of quote `i` in the current window `start` as the venue book shows it
+    /// (`comp_excl_own`): price and remaining quantity of an acknowledged order.
+    fn own_bid<V: Views>(&self, v: &V, i: usize, start: i64) -> Own {
+        if !self.p.defaults().comp_excl_own {
+            return None;
+        }
+        let q = self.quotes.get(i)?;
+        if !matches!(q.state, QState::Live | QState::Cancelling) || q.win != start {
+            return None;
+        }
+        let o = v.order(q.r?)?;
+        matches!(
+            o.state,
+            OrderStateView::Live | OrderStateView::PendingCancel | OrderStateView::PendingAmend
+        )
+        .then_some((o.px.0, o.qty.0.saturating_sub(o.filled.0).max(0)))
+    }
+
+    /// Composite score of token quote `x` against its complement `o` (README "规则" 10).
+    pub fn comp_score<V: Views>(&self, v: &V, x: usize, o: usize, start: i64, utc_ns: i64) -> Option<i64> {
+        let d = self.p.defaults();
+        let (qx, qo) = (self.quotes.get(x)?, self.quotes.get(o)?);
+        let hx = self.hist.get(x)?;
+        let hot = v.inst(qx.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+        let bx = BidSide::read(&v.book(qx.inst), self.own_bid(v, x, start));
+        let bo = BidSide::read(&v.book(qo.inst), self.own_bid(v, o, start));
+        let implied = self
+            .vol
+            .sigma(d.vol_min_samples as usize)
+            .map(|s| (i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE)) as i64);
+        let f = comp::features(&ScoreIn {
+            x: &bx,
+            o: &bo,
+            hx,
+            ref_x2: &self.ref_x2,
+            trades: &self.trades,
+            x_inst: qx.inst,
+            o_inst: qo.inst,
+            is_up: x.is_multiple_of(2),
+            utc_ns,
+            implied,
+            unit_px,
+            unit_qty,
+        });
+        Some(comp::score(&f, &self.comp_mu(), &self.comp_sd()))
+    }
+
+    /// `comp_*_mu` in feature order.
+    pub fn comp_mu(&self) -> [i64; comp::N_FEAT] {
+        let d = self.p.defaults();
+        [
+            d.comp_imb1_mu.0,
+            d.comp_imb5_mu.0,
+            d.comp_mom30_mu.0,
+            d.comp_mom60_mu.0,
+            d.comp_bret15_mu.0,
+            d.comp_bret60_mu.0,
+            d.comp_flow30_mu.0,
+            d.comp_bdrop1_mu.0,
+        ]
+    }
+
+    /// `comp_*_sd` in feature order.
+    pub fn comp_sd(&self) -> [i64; comp::N_FEAT] {
+        let d = self.p.defaults();
+        [
+            d.comp_imb1_sd.0,
+            d.comp_imb5_sd.0,
+            d.comp_mom30_sd.0,
+            d.comp_mom60_sd.0,
+            d.comp_bret15_sd.0,
+            d.comp_bret60_sd.0,
+            d.comp_flow30_sd.0,
+            d.comp_bdrop1_sd.0,
+        ]
+    }
+
+    /// Scores of the current window's tokens (`up` = Up quote index), recomputed at most every
+    /// `comp_every_ms` while quoting; cleared otherwise.
+    fn comp_update<V: Views>(&mut self, v: &V, quoting: bool, start: i64, up: usize, utc_ns: i64) {
+        let dn = up.wrapping_add(1);
+        let books = [up, dn].iter().all(|&i| {
+            self.quotes
+                .get(i)
+                .is_some_and(|q| v.book(q.inst).status() != BookStatus::Uninit)
+        });
+        if !(self.comp_on() && quoting && books) {
+            self.comp.ok = false;
+            return;
+        }
+        let every = i64::from(self.p.defaults().comp_every_ms) * 1_000_000;
+        if self.comp.ok && self.comp.win == start && utc_ns.saturating_sub(self.comp.utc_ns) < every {
+            return;
+        }
+        match (
+            self.comp_score(v, up, dn, start, utc_ns),
+            self.comp_score(v, dn, up, start, utc_ns),
+        ) {
+            (Some(zu), Some(zd)) => {
+                self.comp = CompCache {
+                    ok: true,
+                    win: start,
+                    utc_ns,
+                    z: [zu, zd],
+                };
+            }
+            _ => self.comp.ok = false,
+        }
     }
 
     pub fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
         self.outcomes(ctx);
+        let now = v.now();
+        if now.clock_ok {
+            self.observe(ev, v, now.utc_ns);
+        }
         match *ev {
             EventRef::Bbo { inst, b, .. } if inst == self.reference => {
                 if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
@@ -384,7 +629,9 @@ impl Fast {
             -1
         };
         let left_ms = (start + w) * 1_000 - utc_ms;
-        let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms);
+        // Venue-load gates (README "规则" 11): the previous minute's feed lag closes quoting.
+        let (load, slow) = self.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
+        let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms) && !load && !slow;
         // Shares and average cost of the current window's Up and Down legs.
         let pos = |q: Option<&Quote>| {
             q.and_then(|q| {
@@ -434,6 +681,8 @@ impl Fast {
         } else {
             None
         };
+        self.comp_update(v, quoting, start, up, now.utc_ns);
+        let comp = self.comp;
         let requote = i64::from(d.requote_ms) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
         let nochase = i64::from(d.nochase_ms) * 1_000_000;
@@ -491,13 +740,25 @@ impl Fast {
             });
             let cent = (unit_px / 100).max(1);
             let fv_cap = fv_px.map(|f| f.div_euclid(cent) * cent);
-            let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+            // Composite score (README "规则" 10): skip the token it is against; the one it favours
+            // may hold up to dir_cap_shares net.
+            let z = (comp.ok && comp.win == start && i / 2 == up / 2)
+                .then(|| comp.z.get(i % 2).copied())
+                .flatten();
+            let skip = d.comp_skip.0 > 0 && z.is_some_and(|z| z < -d.comp_skip.0);
+            let cap_shares = if d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0) {
+                d.dir_cap_shares
+            } else {
+                d.inv_max_shares
+            };
+            let cap = i64::from(cap_shares).saturating_mul(unit_qty);
             // The net after this clip fills completely stays within the cap (a short fill such as
             // 9.99 of 10 shares no longer admits a whole further clip).
             let clip = i64::from(d.clip_shares).saturating_mul(unit_qty);
             let target = match (mine && live, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
+                        && !skip
                         && b >= lo
                         && b <= hi
                         && own_q.saturating_sub(other_q).saturating_add(clip) <= cap
@@ -512,7 +773,7 @@ impl Fast {
             let since = now.engine_ns.saturating_sub(q.last_ens);
             match q.state {
                 QState::Live => {
-                    let mut cancel = !(mine && live);
+                    let mut cancel = !(mine && live) || skip;
                     let mut cooled = false;
                     if !cancel && d.fv_cancel.0 > 0 {
                         let x = self.dfv(&q);

@@ -13,7 +13,7 @@ use binary_maker::{BinaryMaker, BinaryMakerParams};
 use common::*;
 use hft_strategy_sdk::params::{RawParams, SchemaView};
 use hft_strategy_sdk::prelude::*;
-use hft_strategy_sdk::testing::ev;
+use hft_strategy_sdk::testing::{MockViews, ev};
 use hft_testkit::sdk_mock::StrategyHarness;
 
 #[global_allocator]
@@ -894,7 +894,7 @@ fn bmk_021_forecast() {
 fn bmk_022_schema_v5() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 5, "BMK-022.1");
+    assert!(schema.version() >= 5, "BMK-022.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-022.1");
     let want: [(&str, i64); 9] = [
         ("fv_limit", 0),
@@ -949,4 +949,622 @@ fn bmk_023_forecast_drift() {
         vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
         "BMK-023.2"
     );
+}
+
+// ------------------------------------------------------------------------------------------- v7
+
+/// Schema v6 fields (README "参数"), in order.
+const V6_FIELDS: [(&str, i64); 24] = [
+    ("comp_skip", 0),
+    ("comp_dir", 0),
+    ("dir_cap_shares", 20),
+    ("comp_every_ms", 250),
+    ("comp_flow_min_shares", 50),
+    ("comp_excl_own", 1),
+    ("comp_imb1_mu", 6_035),
+    ("comp_imb1_sd", 674_103_869),
+    ("comp_imb5_mu", 3_815),
+    ("comp_imb5_sd", 382_699_882),
+    ("comp_mom30_mu", -1_799),
+    ("comp_mom30_sd", 165_941_588),
+    ("comp_mom60_mu", -5_917),
+    ("comp_mom60_sd", 224_952_723),
+    ("comp_bret15_mu", -28_103),
+    ("comp_bret15_sd", 919_829_667),
+    ("comp_bret60_mu", -24_869),
+    ("comp_bret60_sd", 968_755_915),
+    ("comp_flow30_mu", -49_610),
+    ("comp_flow30_sd", 6_260_786_978),
+    ("comp_bdrop1_mu", 1_550_071),
+    ("comp_bdrop1_sd", 3_031_529_770),
+    ("load_gate_ns", 0),
+    ("mdslow_gate_ns", 0),
+];
+
+#[test]
+fn bmk_024_schema_v6() {
+    use hft_strategy_sdk::params::n_fields_at;
+    let schema = BinaryMaker::DESC.schema;
+    assert_eq!(schema.version(), 6, "BMK-024.1");
+    assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
+    assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
+    assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
+    for (k, (name, default)) in V6_FIELDS.iter().enumerate() {
+        let f = schema.field(32 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 6, *default), "BMK-024.2");
+    }
+}
+
+#[test]
+fn bmk_025_integer_logarithm() {
+    use binary_maker::fast::comp::{atanh2, ln_rate, ln_ratio};
+    // Exact values (the README's arithmetic; the offline port reproduces them).
+    assert_eq!(ln_rate(1_000_000_000), 0, "BMK-025.1");
+    assert_eq!(ln_rate(2_000_000_000), 693_147_181, "BMK-025.1");
+    assert_eq!(ln_rate(10_000_000_000), 2_302_585_091, "BMK-025.1");
+    assert_eq!(ln_rate(31_000_000_000), 3_433_987_198, "BMK-025.1");
+    assert_eq!(ln_rate(999_999_999), 0, "BMK-025.1 below 1");
+    assert_eq!(ln_ratio(10_001, 10_000), 99_994, "BMK-025.2");
+    assert_eq!(ln_ratio(10_000, 10_001), -99_994, "BMK-025.2");
+    assert_eq!(ln_ratio(0, 10_000), 0, "BMK-025.2");
+    assert_eq!(atanh2(-300_000_000), -619_039_204, "BMK-025.3");
+    // Within 2e-8 of the true logarithm over a range of shares.
+    for shares in [1i128, 7, 50, 999, 123_456, 10_000_000] {
+        let x = 1_000_000_000 + shares * 1_000_000_000;
+        let want = ((1 + shares) as f64).ln() * 1e9;
+        let got = ln_rate(x) as f64;
+        assert!((got - want).abs() <= 20.0, "BMK-025.4 {shares}: {got} vs {want}");
+    }
+}
+
+fn lv(px: i64, shares: i64) -> Level {
+    Level {
+        px: Px(px),
+        qty: Qty(shares * 1_000_000),
+    }
+}
+
+#[test]
+fn bmk_026_composite_score() {
+    use binary_maker::fast::comp::{self, BidSide, ScoreIn, SecHist, SlotHist, Trades};
+    let mut v = MockViews::new(fixture());
+    let (x, o) = (SLOTS[2], SLOTS[3]);
+    MockViews::book(
+        &mut v,
+        x,
+        &[lv(453, 30), lv(450, 120), lv(447, 40), lv(440, 60), lv(420, 200)],
+        &[lv(470, 100)],
+    );
+    MockViews::book(
+        &mut v,
+        o,
+        &[lv(540, 80), lv(530, 50), lv(500, 100)],
+        &[lv(560, 100)],
+    );
+    // Our 30 shares at 0.453 are the whole level: the best bid as the score sees it is 0.450.
+    let bx = BidSide::read(&Views::book(&v, x), Some((453, 30_000_000)));
+    let bo = BidSide::read(&Views::book(&v, o), None);
+    assert_eq!(
+        (bx.best(), bx.top_size(), bx.depth5(10)),
+        (Some(450), 120_000_000, 380_000_000),
+        "BMK-026.1"
+    );
+    assert_eq!(
+        (bo.best(), bo.top_size(), bo.depth5(10)),
+        (Some(540), 80_000_000, 230_000_000),
+        "BMK-026.1"
+    );
+    let mut hx = SlotHist::new(x);
+    hx.mid_x2.put(1000, 920);
+    hx.mid_x2.put(969, 900);
+    hx.mid_x2.put(938, 880);
+    hx.bid.put(1000, 453);
+    hx.bid.put(998, 460);
+    let mut r = SecHist::default();
+    r.put(1000, 20_010_000);
+    r.put(985, 20_000_000);
+    r.put(940, 19_990_000);
+    let mut t = Trades::default();
+    let s = 1_000_000_000i64;
+    t.push(969 * s, x, 500_000_000);
+    t.push(975 * s, x, 100_000_000);
+    t.push(990 * s, o, 60_000_000);
+    t.push(995 * s, x, -70_000_000);
+    t.push(996 * s, SLOTS[0], 1_000_000_000);
+    let input = |hx: &SlotHist, r: &SecHist| {
+        comp::features(&ScoreIn {
+            x: &bx,
+            o: &bo,
+            hx,
+            ref_x2: r,
+            trades: &t,
+            x_inst: x,
+            o_inst: o,
+            is_up: true,
+            utc_ns: 1_000_400_000_000,
+            implied: Some(139_000),
+            unit_px: 1_000,
+            unit_qty: 1_000_000,
+        })
+    };
+    let f = input(&hx, &r);
+    assert_eq!(
+        f,
+        [
+            Some(200_000_000),
+            Some(245_901_639),
+            Some(10_000_000),
+            Some(20_000_000),
+            Some(928_539_016),
+            Some(928_772_947),
+            Some(-3_433_987_198),
+            Some(-700_000_000),
+        ],
+        "BMK-026.2"
+    );
+    let p = params(|_| {});
+    let h = harness(&p);
+    let fast = &h.strategy().fast;
+    assert_eq!(
+        comp::score(&f, &fast.comp_mu(), &fast.comp_sd()),
+        1_192_797_279,
+        "BMK-026.3"
+    );
+    // .4 no history: the momentum and reference returns are missing (add 0), the best-bid change
+    // is 0.
+    let f = input(&SlotHist::new(x), &SecHist::default());
+    assert_eq!(
+        f,
+        [
+            Some(200_000_000),
+            Some(245_901_639),
+            None,
+            None,
+            None,
+            None,
+            Some(-3_433_987_198),
+            Some(0),
+        ],
+        "BMK-026.4"
+    );
+    assert_eq!(
+        comp::score(&f, &fast.comp_mu(), &fast.comp_sd()),
+        525_800_236,
+        "BMK-026.4"
+    );
+    // .5 the prints kept: at least comp_flow_min_shares (50) of a slot inst, signed by the taker
+    // side, at the event's UTC time; only while the score is on.
+    let trade = |h: &mut StrategyHarness<BinaryMaker>, t: i64, inst: InstId, sh: i64, side: Side| {
+        h.views_mut().at_engine_ns(t);
+        let tv = TradeView {
+            px: Px(450),
+            qty: Qty(sh * 1_000_000),
+            side,
+            ex_ts_ns: t,
+        };
+        h.feed(&ev::trade(inst, 2, tv).as_ref());
+    };
+    for (row, p) in [("on", comp_params(&[])), ("off", params(|_| {}))] {
+        let mut h = harness(&p);
+        trade(&mut h, 10_000_000_000, SLOTS[2], 49, Side::Buy);
+        trade(&mut h, 11_000_000_000, SLOTS[2], 50, Side::Buy);
+        trade(&mut h, 12_000_000_000, SLOTS[3], 80, Side::Buy);
+        trade(&mut h, 13_000_000_000, SLOTS[2], 60, Side::Sell);
+        let net = h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 0);
+        let want = if row == "on" { -90_000_000 } else { 0 };
+        assert_eq!(net, want, "BMK-026.5 {row}");
+        assert_eq!(
+            h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 12_000_000_001),
+            if row == "on" { -60_000_000 } else { 0 },
+            "BMK-026.5 {row} window"
+        );
+    }
+}
+
+/// v7 rules on, the best-bid imbalance decisive (`comp_imb1_sd` 0.1), then `extra`.
+fn comp_params(extra: &[(&str, i64)]) -> BinaryMakerParams {
+    let mut f: Vec<(&str, i64)> = vec![
+        ("comp_skip", 500_000_000),
+        ("comp_dir", 500_000_000),
+        ("comp_imb1_sd", 100_000_000),
+    ];
+    f.extend_from_slice(extra);
+    params_with(&f)
+}
+
+/// Pair 1's books with bid 0.450 of `up` and `dn` shares (ask 0.470).
+fn pair_books(h: &mut StrategyHarness<BinaryMaker>, up: i64, dn: i64) {
+    h.views_mut().book(SLOTS[2], &[lv(450, up)], &[lv(470, 100)]);
+    h.views_mut().book(SLOTS[3], &[lv(450, dn)], &[lv(470, 100)]);
+}
+
+/// `warm(400, 399, 1)` with pair 1's bid sizes `up`/`dn`.
+fn warm_sized(h: &mut StrategyHarness<BinaryMaker>, up: i64, dn: i64) -> hft_testkit::sdk_mock::CtxCapture {
+    for k in 0..400i64 {
+        h.views_mut().at_engine_ns(k * 1_000_000_000);
+        ref_quote(h.views_mut(), if k % 2 == 0 { 10_000_000 } else { 10_001_000 });
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+    }
+    pair_books(h, up, dn);
+    h.views_mut().at_engine_ns(399_500_000_000);
+    ref_quote(h.views_mut(), 10_000_500);
+    let b = h.views_mut().bbo_of(R);
+    h.feed(&ev::bbo(R, 6, b).as_ref())
+}
+
+#[test]
+fn bmk_027_score_skips_the_token_it_is_against() {
+    // .1 Up bid 10 shares against Down 190: Up skipped, Down quoted.
+    let mut h = harness(&comp_params(&[]));
+    let out = warm_sized(&mut h, 10, 190);
+    let c = h.strategy().fast.comp;
+    assert!(
+        c.ok && c.win == 300 && c.z[0] < -500_000_000 && c.z[1] > 500_000_000,
+        "BMK-027.1 {c:?}"
+    );
+    assert_eq!(placed(&out), vec![(SLOTS[3], Px(450))], "BMK-027.1");
+    // .2 balanced books: both quoted; .3 the Up side thins out at 399.6 s: the score is still the
+    // cached one (no cancel); .4 at 399.8 s it is recomputed and the Up bid is cancelled.
+    let mut h = harness(&comp_params(&[]));
+    let out = warm_sized(&mut h, 100, 100);
+    assert_eq!(
+        placed(&out),
+        vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
+        "BMK-027.2"
+    );
+    for (i, slot) in [(2usize, 11u32), (3, 12)] {
+        set_quote(
+            &mut h,
+            i,
+            binary_maker::fast::QState::Live,
+            slot,
+            300,
+            399_500_000_000,
+        );
+    }
+    pair_books(&mut h, 10, 190);
+    h.views_mut().at_engine_ns(399_600_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert!(
+        cancels(&out).is_empty() && out.places().count() == 0,
+        "BMK-027.3 {:?}",
+        out.items
+    );
+    assert_eq!(h.strategy().fast.comp.utc_ns, 399_500_000_000, "BMK-027.3 cached");
+    h.views_mut().at_engine_ns(399_800_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-027.4");
+    assert_eq!(out.places().count(), 0, "BMK-027.4");
+    assert_eq!(
+        h.strategy().fast.comp.utc_ns,
+        399_800_000_000,
+        "BMK-027.4 recomputed"
+    );
+    // .5 comp_skip 0: the same books quote both tokens.
+    let mut h = harness(&comp_params(&[("comp_skip", 0)]));
+    let out = warm_sized(&mut h, 10, 190);
+    assert_eq!(
+        placed(&out),
+        vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
+        "BMK-027.5"
+    );
+    // .6 comp_every_ms 0: recomputed on every decision (399.6 s cancels at once).
+    let mut h = harness(&comp_params(&[("comp_every_ms", 0)]));
+    warm_sized(&mut h, 100, 100);
+    for (i, slot) in [(2usize, 11u32), (3, 12)] {
+        set_quote(
+            &mut h,
+            i,
+            binary_maker::fast::QState::Live,
+            slot,
+            300,
+            399_500_000_000,
+        );
+    }
+    pair_books(&mut h, 10, 190);
+    h.views_mut().at_engine_ns(399_600_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-027.6");
+}
+
+#[test]
+fn bmk_028_direction_cap() {
+    // clip 5, cap 10, dir_cap 20; long 10 Down. The score favours Down (Up 10 shares vs Down 190).
+    let base = [("clip_shares", 5), ("inv_max_shares", 10)];
+    let run = |extra: &[(&str, i64)], down: i64| {
+        let mut f = base.to_vec();
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, down, 450);
+        let out = warm_sized(&mut h, 10, 190);
+        placed(&out)
+    };
+    // .1 10 + 5 ≤ 20: Down quoted (Up skipped).
+    assert_eq!(run(&[], 10), vec![(SLOTS[3], Px(450))], "BMK-028.1");
+    // .2 comp_dir 0: the cap is inv_max_shares (10 + 5 > 10): nothing.
+    assert_eq!(run(&[("comp_dir", 0)], 10), vec![], "BMK-028.2");
+    // .3 16 + 5 > 20: nothing.
+    assert_eq!(run(&[], 16), vec![], "BMK-028.3");
+    // .4 15 + 5 = 20: Down quoted.
+    assert_eq!(run(&[], 15), vec![(SLOTS[3], Px(450))], "BMK-028.4");
+}
+
+#[test]
+fn bmk_029_own_bid_left_out_of_the_imbalance() {
+    use binary_maker::fast::QState;
+    // Live Up quote (slot 11) of 10 shares at 0.450 acknowledged; the Up book's 0.450 holds 20
+    // shares, the Down book's 20.
+    let up_order = |filled: i64, state| OrderView {
+        r: order_ref(11),
+        group: gid(2),
+        inst: SLOTS[2],
+        side: Side::Buy,
+        tif: Tif::PostOnly,
+        class: IntentClass::Open,
+        px: Px(450),
+        qty: Qty(10_000_000),
+        filled: Qty(filled),
+        state,
+        tag: binary_maker::fast::tag_of(2),
+    };
+    let z = |excl: i64, o: Option<OrderView>| {
+        let mut h = harness(&comp_params(&[("comp_excl_own", excl)]));
+        warm_sized(&mut h, 20, 20);
+        set_quote(&mut h, 2, QState::Live, 11, 300, 399_500_000_000);
+        if let Some(o) = o {
+            h.views_mut().set_order(o);
+        }
+        // Recomputed at 399.8 s (after comp_every_ms).
+        h.views_mut().at_engine_ns(399_800_000_000);
+        h.feed(&ev::book(SLOTS[2], 2).as_ref());
+        let c = h.strategy().fast.comp;
+        assert_eq!(c.utc_ns, 399_800_000_000, "BMK-029 recomputed");
+        c.z[0]
+    };
+    let even = z(1, None);
+    // .1 our 10 shares out: Up 10 vs Down 20 (imbalance −1/3).
+    let mine = z(1, Some(up_order(0, OrderStateView::Live)));
+    assert!(mine < even - 1_000_000_000, "BMK-029.1 {mine} vs {even}");
+    // .2 4 shares filled: 6 left out (Up 14 vs 20) — between the two.
+    let part = z(1, Some(up_order(4_000_000, OrderStateView::Live)));
+    assert!(mine < part && part < even, "BMK-029.2 {part}");
+    // .3 not acknowledged yet, or comp_excl_own 0: nothing left out.
+    assert_eq!(
+        z(1, Some(up_order(0, OrderStateView::PendingNew))),
+        even,
+        "BMK-029.3"
+    );
+    assert_eq!(z(0, Some(up_order(0, OrderStateView::Live))), even, "BMK-029.3");
+}
+
+#[test]
+fn bmk_030_lag_quantiles() {
+    use binary_maker::fast::lag::{LagGate, quantile_x10};
+    assert_eq!(
+        quantile_x10(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9),
+        Some(91),
+        "BMK-030.1"
+    );
+    assert_eq!(quantile_x10(&[1, 2, 3, 4], 5), Some(25), "BMK-030.1");
+    assert_eq!(quantile_x10(&[7], 9), Some(70), "BMK-030.1");
+    assert_eq!(quantile_x10(&[], 5), None, "BMK-030.1");
+    let s = 1_000_000_000i64;
+    let mut g = LagGate::new();
+    // Minute 1 (60..119 s): second 60 lags 10..=19 ms (p90 18.1, median 14.5), second 61 one 30 ms
+    // sample (p90 = median = 30), second 62 lags 1, 3 ms (p90 2.8, median 2).
+    for k in 0..10 {
+        g.push(60 * s + k * 1_000_000, (10 + k) * 1_000_000);
+    }
+    g.push(61 * s, 30_000_000);
+    g.push(62 * s + 5, 3_000_000);
+    g.push(62 * s + 9, 1_000_000);
+    // A sample of an already closed second is dropped.
+    g.push(61 * s + 1, 99_000_000);
+    assert_eq!(g.late, 1, "BMK-030.2");
+    // UTC enters minute 2: the minute closes. Medians ×100 ns: p90s {18.1, 30, 2.8} → 18.1 ms,
+    // medians {14.5, 30, 2} → 14.5 ms.
+    g.tick(120 * s + 1);
+    assert_eq!(
+        (g.done_min, g.done_p90, g.done_p50),
+        (1, 1_810_000_000, 1_450_000_000),
+        "BMK-030.3"
+    );
+    assert_eq!(
+        g.gates(130 * s, 18_100_000, 0),
+        (true, false),
+        "BMK-030.4 at the threshold"
+    );
+    assert_eq!(g.gates(130 * s, 18_100_001, 0), (false, false), "BMK-030.4");
+    assert_eq!(g.gates(130 * s, 0, 14_499_999), (false, true), "BMK-030.4");
+    assert_eq!(
+        g.gates(130 * s, 0, 14_500_000),
+        (false, false),
+        "BMK-030.4 not above"
+    );
+    // .5 only the previous minute counts: in minute 3 the gates are open.
+    assert_eq!(g.gates(180 * s, 1, 1), (false, false), "BMK-030.5");
+}
+
+/// `warm(400, 399, 1)` with `n` market-data stamps of `U1` per second in seconds `from..=to`,
+/// each with lag `lag_ms(second)` ms; params `p`.
+fn warm_lag(
+    p: &BinaryMakerParams,
+    from: i64,
+    to: i64,
+    lag_ms: impl Fn(i64, i64) -> i64,
+) -> Vec<(InstId, Px)> {
+    let mut h = harness(p);
+    for k in 0..400i64 {
+        if (from..=to).contains(&k) {
+            for j in 0..3 {
+                let rx = k * 1_000_000_000 + j * 200_000_000;
+                h.views_mut().md_push(
+                    SLOTS[2],
+                    MdStampView {
+                        kind: MdStampView::MD_BATCH,
+                        ex_ts_ns: rx - lag_ms(k, j) * 1_000_000,
+                        sw_rx_ns: rx,
+                        rx_tsc: Tsc(0),
+                    },
+                );
+            }
+        }
+        h.views_mut().at_engine_ns(k * 1_000_000_000 + 900_000_000);
+        ref_quote(h.views_mut(), if k % 2 == 0 { 10_000_000 } else { 10_001_000 });
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+    }
+    for i in [SLOTS[2], SLOTS[3]] {
+        slot_book(h.views_mut(), i, 450, 470);
+    }
+    h.views_mut().at_engine_ns(399_950_000_000);
+    ref_quote(h.views_mut(), 10_000_500);
+    let b = h.views_mut().bbo_of(R);
+    placed(&h.feed(&ev::bbo(R, 6, b).as_ref()))
+}
+
+#[test]
+fn bmk_031_venue_load_gates() {
+    let both = vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))];
+    let load = params_with(&[("load_gate_ns", 12_688_500)]);
+    // The decision at 399.95 s (minute 6) reads minute 5 (300–359 s).
+    // .1 13 ms lags in minute 5: closed. .2 12 ms: open.
+    assert_eq!(warm_lag(&load, 300, 359, |_, _| 13), vec![], "BMK-031.1");
+    assert_eq!(warm_lag(&load, 300, 359, |_, _| 12), both, "BMK-031.2");
+    // .3 per-second lags 5, 5, 20 ms: p90 17 ms ≥ 12.6885 although the median is 5.
+    assert_eq!(
+        warm_lag(&load, 300, 359, |_, j| if j == 2 { 20 } else { 5 }),
+        vec![],
+        "BMK-031.3"
+    );
+    // .4 13 ms only in minute 4 (240–299 s), nothing in minute 5: open.
+    assert_eq!(warm_lag(&load, 240, 299, |_, _| 13), both, "BMK-031.4");
+    // .5 the slow feed: medians 41 ms closed, 40 ms (not above) open; load gate off.
+    let slow = params_with(&[("mdslow_gate_ns", 40_000_000)]);
+    assert_eq!(warm_lag(&slow, 300, 359, |_, _| 41), vec![], "BMK-031.5");
+    assert_eq!(warm_lag(&slow, 300, 359, |_, _| 40), both, "BMK-031.5");
+    // .6 both gates off: 100 ms lags change nothing.
+    assert_eq!(warm_lag(&params(|_| {}), 300, 359, |_, _| 100), both, "BMK-031.6");
+}
+
+#[test]
+fn bmk_032_gate_cancels_resting_quotes() {
+    use binary_maker::fast::QState;
+    // Quotes live at 0.450 placed with the gate open (12 ms in minute 5); minute 6 sees 13 ms;
+    // at 420.5 s (minute 7) both are pulled.
+    let p = params_with(&[("load_gate_ns", 12_688_500)]);
+    let mut h = harness(&p);
+    let push = |h: &mut StrategyHarness<BinaryMaker>, k: i64, ms: i64| {
+        for j in 0..3 {
+            let rx = k * 1_000_000_000 + j * 200_000_000;
+            h.views_mut().md_push(
+                SLOTS[2],
+                MdStampView {
+                    kind: MdStampView::MD_TRADE,
+                    ex_ts_ns: rx - ms * 1_000_000,
+                    sw_rx_ns: rx,
+                    rx_tsc: Tsc(0),
+                },
+            );
+        }
+    };
+    for k in 0..421i64 {
+        push(&mut h, k, if k >= 360 { 13 } else { 12 });
+        h.views_mut().at_engine_ns(k * 1_000_000_000 + 900_000_000);
+        // Constant from 399 s: no fair-value cancel of the quotes placed at 400.9 s.
+        let mid = if k >= 399 {
+            10_000_500
+        } else if k % 2 == 0 {
+            10_000_000
+        } else {
+            10_001_000
+        };
+        ref_quote(h.views_mut(), mid);
+        let b = h.views_mut().bbo_of(R);
+        let out = h.feed(&ev::bbo(R, 6, b).as_ref());
+        if k == 399 {
+            for i in [SLOTS[2], SLOTS[3]] {
+                slot_book(h.views_mut(), i, 450, 470);
+            }
+        }
+        if k == 400 {
+            assert_eq!(out.places().count(), 2, "BMK-032 placed at 400.9 s");
+            for (i, slot) in [(2usize, 11u32), (3, 12)] {
+                set_quote(&mut h, i, QState::Live, slot, 300, 400_900_000_000);
+            }
+        }
+        if (401..420).contains(&k) {
+            assert!(cancels(&out).is_empty(), "BMK-032 kept at {k}");
+        }
+        if k == 420 {
+            assert_eq!(cancels(&out), vec![11, 12], "BMK-032.1");
+        }
+    }
+}
+
+#[test]
+fn bmk_033_v7_off_is_v6() {
+    // The v7 fields other than the switches (comp_skip, comp_dir, load_gate_ns, mdslow_gate_ns)
+    // changed: every decision equals the defaults' through warm-up, fills, cancels, a reference
+    // move, book changes and large prints.
+    let script = |p: &BinaryMakerParams| {
+        let mut h = harness(p);
+        let mut all = vec![warm_sized(&mut h, 10, 190)];
+        let mut t = 399_500_000_000i64;
+        for step in 0..40i64 {
+            t += 150_000_000;
+            h.views_mut().at_engine_ns(t);
+            let out = match step % 5 {
+                0 => {
+                    pair_books(&mut h, 10 + step, 190 - step);
+                    h.feed(&ev::book(SLOTS[2], 2).as_ref())
+                }
+                1 => {
+                    ref_quote(h.views_mut(), 10_000_500 + step * 200);
+                    let b = h.views_mut().bbo_of(R);
+                    h.feed(&ev::bbo(R, 6, b).as_ref())
+                }
+                2 => {
+                    let tv = TradeView {
+                        px: Px(450),
+                        qty: Qty(80_000_000),
+                        side: Side::Sell,
+                        ex_ts_ns: t,
+                    };
+                    h.feed(&ev::trade(SLOTS[2], 2, tv).as_ref())
+                }
+                3 => {
+                    h.views_mut().md_push(
+                        SLOTS[3],
+                        MdStampView {
+                            kind: MdStampView::MD_BATCH,
+                            ex_ts_ns: t - 90_000_000,
+                            sw_rx_ns: t,
+                            rx_tsc: Tsc(0),
+                        },
+                    );
+                    h.feed(&ev::book(SLOTS[3], 3).as_ref())
+                }
+                _ => update_at(&mut h, t, 3, 12, OrderUpdateKind::Cancelled),
+            };
+            all.push(out);
+        }
+        all
+    };
+    let v6 = script(&params(|_| {}));
+    let off = script(&params_with(&[
+        ("dir_cap_shares", 1),
+        ("comp_every_ms", 0),
+        ("comp_flow_min_shares", 0),
+        ("comp_excl_own", 0),
+        ("comp_imb1_mu", 900_000_000),
+        ("comp_imb1_sd", 1),
+        ("comp_bdrop1_sd", 1),
+    ]));
+    assert!(
+        v6.iter().map(|c| c.places().count()).sum::<usize>() > 0,
+        "BMK-033 script places"
+    );
+    assert_eq!(v6, off, "BMK-033.1");
 }
