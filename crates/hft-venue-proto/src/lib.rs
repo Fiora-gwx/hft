@@ -177,6 +177,10 @@ pub trait VenueProtocol: Sized + 'static {
     type GwCtx;
     /// Non-sensitive frame templates of one (venue, account); credentials are borrowed (contract 7).
     type Templates;
+    /// Live accounts of this venue may share one egress IP (hft-core `SharedAccountIp` does not
+    /// apply): the exchange's IP limits queue rather than reject, and its order limits are per
+    /// key (Polymarket).
+    const SHARED_EGRESS_IP: bool = false;
     /// After `CancelAll` the gw queries the open-order list once (contract 29).
     const CANCEL_ALL_SWEEP: bool = false;
     /// Insts one BBO refresh request may cover (contract 24); `u16::MAX` = request length only.

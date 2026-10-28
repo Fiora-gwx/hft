@@ -30,7 +30,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 概要 | VPR-122、VPR-150 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| `VenueProtocol`(静态分派) | VPR-010–VPR-016、VPR-126、VPR-048、VPR-063、VPR-073、VPR-080、VPR-083、VPR-087、VPR-097、VPR-099、VPR-112、VPR-114、VPR-122、VPR-152 |
+| `VenueProtocol`(静态分派) | VPR-010–VPR-016、VPR-126、VPR-048、VPR-063、VPR-073、VPR-080、VPR-083、VPR-087、VPR-097、VPR-099、VPR-112、VPR-114、VPR-122、VPR-152、VPR-153 |
 | 辅助类型 | VPR-001–VPR-007、VPR-128、VPR-133、VPR-020、VPR-030–VPR-035、VPR-066、VPR-073、VPR-080、VPR-082、VPR-083、VPR-089、VPR-090、VPR-093、VPR-097、VPR-110、VPR-118、VPR-119 |
 | 解码输出 sink | VPR-040–VPR-042、VPR-122 |
 | 实现方必须遵守的契约 | VPR-012、VPR-013、VPR-020–VPR-022、VPR-030、VPR-045、VPR-049、VPR-050、VPR-060–VPR-129、VPR-130、VPR-133–VPR-139 |
@@ -226,6 +226,18 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | VPR-015.3 | `session_keepalive_request(…)` | `Ok(false)`;`path_query == b"/keep"` |
 | VPR-015.4 | `decode_rest(…, &RestOrigin{what: Order, …}, 200, b"{}", …)` | `Err(DecodeErr::UnknownClass)`;sink 记录数 0 |
 | VPR-015.5 | `CANCEL_ALL_SWEEP`;`BBO_SNAPSHOT_BATCH` | `false`;1 |
+
+### VPR-153 出口 IP 共用声明的默认值
+
+- 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)
+- 级别:unit
+- 里程碑:M3
+- 前置:假协议 `FakeSpot`、`FakePerp`(都不覆盖该项)
+- 步骤:
+  1. 读两者的 `SHARED_EGRESS_IP`
+- 期望:
+  - 都是 `false`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_153_shared_egress_ip_default`
 
 ### VPR-016 default_caps 经注入的资产表解析平台币
 

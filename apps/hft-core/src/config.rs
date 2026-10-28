@@ -492,6 +492,26 @@ pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
     Ok(c)
 }
 
+/// `SharedAccountIp` (README "多账户"): two Live accounts of venue `venue` on one egress IP,
+/// unless its protocol declares `SHARED_EGRESS_IP` (`shared_ok`). `accounts` = (account, src_ip).
+pub fn shared_account_ip(
+    venue: &str,
+    shared_ok: bool,
+    accounts: &[(u8, std::net::Ipv4Addr)],
+) -> Option<Error> {
+    if shared_ok {
+        return None;
+    }
+    accounts.iter().enumerate().find_map(|(i, (a, ip))| {
+        accounts[..i].iter().find(|(_, other)| other == ip).map(|(b, _)| {
+            Error::config(
+                "SharedAccountIp",
+                format!("venues.{venue}: accounts {b} and {a} share one src_ip"),
+            )
+        })
+    })
+}
+
 pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     load_timed(path, dry, crate::startup::Serial::default())
 }
@@ -658,6 +678,15 @@ pub fn load_timed(
                     "AccountCapacity",
                     "one live account per venue in this assembly",
                 ));
+            }
+            // This assembly has one egress IP per venue: every account of it uses `src_ip`.
+            if let Some(ip) = v.src_ip {
+                let rows: Vec<(u8, std::net::Ipv4Addr)> =
+                    v.accounts.iter().map(|k| (k.account, ip)).collect();
+                if let Some(e) = shared_account_ip(name, crate::venues::shared_egress_ip(&v.protocol), &rows)
+                {
+                    errors.push(e);
+                }
             }
             for task in [format!("feed:{name}"), format!("conn-builder:{name}")] {
                 tasks.push(task);

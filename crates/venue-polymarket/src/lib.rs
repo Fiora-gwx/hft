@@ -82,6 +82,9 @@ impl VenueProtocol for PolymarketClob {
     type FeedCtx = FeedCtx;
     type GwCtx = GwCtx;
     type Templates = Templates;
+    /// IP limits are Cloudflare throttling (queued, not rejected); order limits are per key
+    /// (README "VenueCaps 默认值").
+    const SHARED_EGRESS_IP: bool = true;
     const SUB_ACKS: bool = false;
     const REST_PLACE_BINDS_ID: bool = true;
     /// Every order op is REST (README "下单"): eight connections, one kept for cancels.

@@ -94,7 +94,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `GwSharesThread` / `BboSharesWithMd` | 2 | 线程计划加载校验第 4、13 条 |
 | `SimOnHotCore` | 2 | `sim` 实例的线程绑在 `host.hot_cpus` 内的核(第 8 条;`sim` 实例出现 `Spin` 为 `ThreadPlan` 第 8 条) |
 | `ThreadPlan` | 2 | 线程计划加载校验的其余各条(详情为条号;线程名超长或重复、`nice` 用在绑核线程、未知 task 名等语法错误为第 0 条) |
-| `EgressIpOverlap` / `SharedAccountIp` | 2 | 出口 IP 不在本实例列表、列表相交或 `gw:`/`acct-fetch` 用了 `prod_bulk`([主机资源隔离](#主机资源隔离slice核与出口-ip));同一 venue 的两个 Live 账户共用一个 `gw.src_ip`([多账户](#多账户)) |
+| `EgressIpOverlap` / `SharedAccountIp` | 2 | 出口 IP 不在本实例列表、列表相交或 `gw:`/`acct-fetch` 用了 `prod_bulk`([主机资源隔离](#主机资源隔离slice核与出口-ip));同一 venue 的两个 Live 账户共用一个 `gw.src_ip`,而该 venue 的协议没有声明 `SHARED_EGRESS_IP`([多账户](#多账户)) |
 | `CapacityShrink` | 2 | 步 5 恢复后的占用超过 EngineConfig 容量 |
 | `TombstoneKeep` / `TimerCapacity` | 2 | 装配期交叉校验的另两项:OMS `tombstone_keep_ms` 小于某个有 gw 的 venue 的 `venues.<v>.gw.id_tomb_ms`;`max_timers` 不大于按装配结果算出的引擎定时器需求 `engine_timer_demand`(与 `Sequencer::boot` 返回的 `BootError::TimerCapacity` 同一判定,后者同样以此码名退出 2;[hft-sequencer 定时器](../../crates/hft-sequencer/README.md#定时器)、[内存与 journal 段](#内存与-journal-段按主机类唯一归属)) |
 | `ExecConfig` | 2 | 装配时 hft-exec 拒绝执行配置(`ExecConfigError` 的任一值,详情为值名;[hft-exec](../../crates/hft-exec/README.md)) |
@@ -701,7 +701,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 
 - 每个 `[[accounts]]` 是一个 `AccountId(u8)`。账户列表、账户名(`label`)、类型(`Live` | `Sim(SimAccountCfg)`)、`is_prod` 与绑定的策略实例(`bound_instance`)的**唯一归属**是 refdata 的 `AccountMeta`,每 (account, venue) 的交易所 UID(`venue_uid`)在 refdata 的 `AccountVenues`([hft-refdata](../../crates/hft-refdata/README.md));配置只按 `id`/`label` 引用并核对一致。**一个账户只绑定一个策略实例**;不存在多个系统或多个策略共用一个交易所账户的情形,账户上的全部挂单与仓位都属于该策略实例;一个交易所子账户(同一 `venue_uid`)只登记在一个 `AccountId` 下。账户名前缀规则见[实例角色](#实例角色prod-与-sim)。
 - **一个账户在同一交易所只用一个市场**(现货或永续):账户的 venue 集合中不得有两个 `exchange` 相同的 VenueId,Sim 账户同样适用(refdata 加载失败 `SameExchangeMarkets`,规则归 [hft-refdata](../../crates/hft-refdata/README.md))。同所现货与永续共用钱包的情形因此不出现;跨所两腿由同一账户在两个交易所各用一个市场完成。
-- **Live 账户**:交易所子账户——测试网/模拟盘账户(`is_prod = false`,dev2 联调与 M7 延迟验收)或新开的正式实盘子账户(`is_prod = true`,M8 起);每 venue 一组交易 key(无提现权限、IP 白名单;会话 key 与 REST key 各自核对 UID),独立 `RiskParams` 行、独立 kill、独立死手刷新;下单连接按 (venue, account) 建,一个 `gw-<venue>` 任务轮询该 venue 下所有 Live 账户的主/备连接;每 (venue, account) 固定出口 IP(`src_ip`,共享 IP 的配置加载时拒绝)。reconciler 用只读 key,kill-switch 用独立的撤单 key([python/AGENTS.md](../../python/AGENTS.md) 的持 key 划分)。
+- **Live 账户**:交易所子账户——测试网/模拟盘账户(`is_prod = false`,dev2 联调与 M7 延迟验收)或新开的正式实盘子账户(`is_prod = true`,M8 起);每 venue 一组交易 key(无提现权限、IP 白名单;会话 key 与 REST key 各自核对 UID),独立 `RiskParams` 行、独立 kill、独立死手刷新;下单连接按 (venue, account) 建,一个 `gw-<venue>` 任务轮询该 venue 下所有 Live 账户的主/备连接;每 (venue, account) 固定出口 IP(`src_ip`):同一 venue 的两个 Live 账户共用一个 IP 时加载拒绝(`SharedAccountIp`),协议声明 `SHARED_EGRESS_IP` 的 venue(Polymarket:按 IP 的限制只排队不拒绝,下单限额按 key 计,[venue-polymarket](../../crates/venue-polymarket/README.md#venuecaps-默认值))除外。reconciler 用只读 key,kill-switch 用独立的撤单 key([python/AGENTS.md](../../python/AGENTS.md) 的持 key 划分)。
 - **Sim 账户**:没有任何 key、死手与出口 IP;只在 `sim` 实例里;订单经 `out-sim` 进 sim-gw(sim-gw 沿 seq journal 推进,把行情记录(`Bbo`、`Trade`、`MarkPrice`、`Funding`,以及交易所来源的 `L2Snapshot`(含多段)与 `L2Batch`,引擎快照的 keyframe 簿不算)交给模拟交易所,在每个成功订单决定处等它的 out-sim 命令;不对应订单决定的命令(`decision_seq = 0`:`SimSettle`、`SimReset`、`SimTransfer`)在 journal 已读到末尾且没有等待中的决定时从环头取出执行,不等下一笔订单);其余(风控档、kill、模式、执行层)与 Live 相同。开通流程见 [launch](../../docs/runbooks/launch.md)。
 - 行情连接按 venue 共享,不按账户复制。每账户的限速令牌桶在 gw 与风控各记一份(发送侧计数在 gw,准入在 sequencer)。
 - client order id 的编解码归 [hft-types](../../crates/hft-types/README.md)、分配语义归 [hft-oms](../../crates/hft-oms/README.md)。
@@ -949,6 +949,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 - **core 行情不含增量深度**:首次上线只有 BBO、成交、标记价/指数价、资金费与可选的分档深度(TopN);需要全深度的策略启用可选扩展前,按内存表的增量预算与线程计划(`c16` 不支持)复核。
 - **sim 实例的行情口径**:`sim` 实例有自己的行情连接与出口 IP,与 `prod` 同机但看到的行情时刻仍可能不同;模拟与实盘的校准以各自 journal 的口径为准([hft-sim 与正式实盘并行校准](../../crates/hft-sim/README.md#与正式实盘并行校准))。
 - 冷启动不自动恢复(干净 Drain 重启与只含 Sim 账户的实例除外,见启动步 8):`prod` 实例夜间崩溃后要等交易员 `Resume{Recovery}`;这是有意的代价。
+- **每 venue 至多一个 Live 账户**:当前装配每 venue 只有一个出口 IP 键(`src_ip`),账户基线、gw REST 池与 conn-builder 的账户只取该 venue 的第一个账户,所以网络模式下一个 venue 有两个以上 Live 账户时退出 2(`AccountCapacity`);[多账户](#多账户)的 `SharedAccountIp` 判定(`config::shared_account_ip`)已按 (账户, 出口 IP) 接入加载校验。同一 venue 的两个账户今天要用两个 hft-core 进程(各自的配置、journal、ctl socket 与线程计划;Polymarket 可以用同一个 `src_ip`)。
 - 配置不支持热重载:改 `[venues]`/`[accounts]`/`[sim]`/核分配与 `paths.ctl_principals` 的内容必须重启。
 - **毒丸守卫与 systemd 启动限制**:单元的 `StartLimitBurst=3`/`StartLimitIntervalSec=600` 计入原始那次启动;原始启动后 600 s 内发生的崩溃若使步 5 的重放反复崩溃,systemd 在守卫跳过尾部的那次启动之前截停单元(`ProcessDown` P0,人工按 `--recover-from-snapshot` 处置)。这是安全方向的代价:守卫的自动跳过尾部只在运行超过 600 s 之后的崩溃上生效。
 

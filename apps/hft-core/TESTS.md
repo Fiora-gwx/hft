@@ -53,7 +53,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
 | 优雅退出与 kill 语义 | CORE-300–CORE-314、CORE-429 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
-| 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
+| 多账户 | CORE-330、CORE-168、CORE-441、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
 | 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445 |
@@ -1817,6 +1817,24 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-168.9 | `host.egress` 指向不存在的文件 | 恰好 {`FileRead`} |
 | CORE-168.10 | `c32_prod()` 的 `venues.binance-usdm.gw.accounts = [bn-1, bn-2]`,`gw.src_ip` 两个账户都是 `10.0.1.10` | 恰好 {`SharedAccountIp`} |
 | CORE-168.11 | 同上,`bn-2` 改为 `10.0.1.11` | 空 |
+| CORE-168.12 | `c32_prod()` 的 `venues.polymarket-clob.gw.accounts = [pm-1, pm-2]`,`gw.src_ip` 两个账户都是 `10.0.1.10`(协议声明 `SHARED_EGRESS_IP`) | 空 |
+
+### CORE-441 同一 venue 的 Live 账户共用出口 IP:只有协议声明 `SHARED_EGRESS_IP` 时允许
+
+- 规则:[多账户](README.md#多账户)、[命令行与退出码](README.md#命令行与退出码)
+- 级别:table
+- 里程碑:M3
+- 前置:`config::shared_account_ip(venue, shared_ok, &[(account, src_ip)])`;`support::write` 的配置(venue `public` = `binance-spot`)与 Polymarket 实盘做市配置(Cargo feature `polymarket`,venue `pm`)
+- 实现:`apps/hft-core/tests/config.rs::core_441_shared_account_ip`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-441.1 | `shared_ok = false`,账户 1、2 都是 10.0.1.10 | `Some(SharedAccountIp)` |
+| CORE-441.2 | `shared_ok = false`,账户 2 改为 10.0.1.11;只有账户 1 | 都是 `None` |
+| CORE-441.3 | `shared_ok = true`,账户 1、2 都是 10.0.1.10 | `None` |
+| CORE-441.4 | `venues::shared_egress_ip` | `binance-spot`、`binance-usdm` 为 `false`;`polymarket-clob` 为 `true` |
+| CORE-441.5 | `public` 改为网络模式的两个 Live 账户(同一 `src_ip`),`load(…, false)` | 含 `AccountCapacity` 与 `SharedAccountIp` |
+| CORE-441.6 | Polymarket 实盘配置再加一个账户 2,`load(…, false)` | 含 `AccountCapacity`,不含 `SharedAccountIp` |
 
 ### CORE-169 snap-fetch 复用第一条 `stream = md` 的 `src_ip`,acct-fetch 复用该账户的 `gw.src_ip`
 
