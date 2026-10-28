@@ -1287,3 +1287,104 @@ fn core_435_live_polymarket_daily_loss_option() {
         "CORE-435.4"
     );
 }
+
+/// Raw default value of binary-maker field `name` in a `StrategyParams` blob.
+#[cfg(feature = "polymarket")]
+fn maker_field(blob: &[u8], name: &str) -> i64 {
+    use hft_event::StrategyParamsHdr;
+    use hft_strategy_sdk::StrategySet;
+    use zerocopy::TryFromBytes;
+    let (h, _) = StrategyParamsHdr::try_read_from_prefix(blob).unwrap();
+    let desc = hft_core::Strategies::kinds()
+        .iter()
+        .find(|d| d.kind_id == h.kind_id)
+        .unwrap();
+    let ix = hft_strategy_sdk::params::field_ix(desc.schema, name).unwrap();
+    let at = blob.len() - h.body_len as usize + 8 + 8 * usize::from(ix);
+    i64::from_le_bytes(blob[at..at + 8].try_into().unwrap())
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_439_polymarket_maker_param_values() {
+    let set =
+        |kv: &[(&str, i64)]| -> Vec<(String, i64)> { kv.iter().map(|(k, v)| (k.to_string(), *v)).collect() };
+    let load = |path: &std::path::Path| match hft_core::config::load(path, true) {
+        Ok(l) => l.configs.params[0].0.clone(),
+        Err(e) => panic!("CORE-439: {e:?}"),
+    };
+    // .1 the maker simulation: values set after the defaults.
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write_polymarket_maker_sim_with(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &set(&[("pair_margin", -20_000_000), ("fv_limit", 1)]),
+    );
+    let b = load(&path);
+    assert_eq!(
+        (
+            maker_field(&b, "pair_margin"),
+            maker_field(&b, "fv_limit"),
+            maker_field(&b, "enabled")
+        ),
+        (-20_000_000, 1, 1),
+        "CORE-439.1"
+    );
+    // .2 the live maker: after PM_LIVE_PARAMS (clip_shares 5 → 7; inv_max_shares stays 10).
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+    };
+    let path = support::write_polymarket_maker_live_with(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+        &set(&[("clip_shares", 7)]),
+    );
+    let b = match hft_core::config::load(&path, false) {
+        Ok(l) => l.configs.params[0].0.clone(),
+        Err(e) => panic!("CORE-439.2: {e:?}"),
+    };
+    assert_eq!(
+        (maker_field(&b, "clip_shares"), maker_field(&b, "inv_max_shares")),
+        (7, 10),
+        "CORE-439.2"
+    );
+    // .3 refused: not NAME=RAW, not an integer, an unknown field, outside the schema range.
+    assert!(support::parse_param("clip_shares").is_err(), "CORE-439.3");
+    assert!(support::parse_param("clip_shares=0.5").is_err(), "CORE-439.3");
+    assert_eq!(
+        support::parse_param(" clip_shares = 7 "),
+        Ok(("clip_shares".into(), 7)),
+        "CORE-439.3"
+    );
+    assert!(
+        support::check_maker_params(&set(&[("no_such_field", 1)])).is_err(),
+        "CORE-439.3"
+    );
+    assert!(
+        support::check_maker_params(&set(&[("clip_shares", 0)])).is_err(),
+        "CORE-439.3"
+    );
+    assert!(
+        support::check_maker_params(&set(&[("pair_margin", -100_000_001)])).is_err(),
+        "CORE-439.3"
+    );
+    assert_eq!(
+        support::check_maker_params(&set(&[("pair_margin", -100_000_000)])),
+        Ok(()),
+        "CORE-439.3"
+    );
+}

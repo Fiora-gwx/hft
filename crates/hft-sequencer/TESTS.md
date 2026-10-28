@@ -22,7 +22,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 使用本组件 | 不适用:见子节 |
 | 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424、SEQ-441 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
-| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
+| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
 | advisor | SEQ-030、SEQ-031、SEQ-051、SEQ-339 |
 | 实现说明 | 不适用:见子节 |
@@ -6316,3 +6316,16 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
   - 步骤 2:`quote_live` 为假
   - 步骤 3:`bbo(a1)` = 50002/50003
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_436_top_from_l2_without_bbo_connection`
+
+### SEQ-447 行情戳环:L2 批、交易所整簿与成交
+
+- 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)(`md_count`/`md_stamp`)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;s1 订阅 `a1` 的 BBO
+- 实现:`crates/hft-sequencer/tests/views.rs::seq_447_md_stamps`
+
+| 行 | Input | 期望 |
+|---|---|---|
+| SEQ-447.1 | `a1` 的 `L2Snapshot{origin = Exchange}`(`ex_ts_ns` 1 s、`sw_rx_ns` 1.010 s)、`L2Batch`(2 s / 2.012 s)、`Trade`(3 s / 3.013 s);再一条 `a1` 报价 | 在该报价的 `on_event` 中 `md_count(a1) = 3`,`md_stamp(a1, 1..=3)` 依次为 `(MD_SNAPSHOT, 1 s, 1.010 s)`、`(MD_BATCH, …)`、`(MD_TRADE, …)`,`rx_tsc` 非 0;第 0、4 条 `None` |
+| SEQ-447.2 | 再 17 条 `a1` 的 `Trade`(`ex_ts_ns` = 4 s + k) | `md_count(a1) = 20`;第 4 条 `None`,第 5 条为 `ex_ts_ns` 4 s + 1 ns 的 `MD_TRADE`,第 20 条 4 s + 16 ns;`md_count(b1) = 0` |

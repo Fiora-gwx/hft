@@ -133,6 +133,37 @@ pub struct TradeView {
     pub ex_ts_ns: i64,
 }
 
+/// Venue and receive stamps of one market-data message of an inst (its `MarketHdr`), kept by the
+/// engine for `Views::md_stamp`: an L2 batch, an exchange or top-N L2 snapshot (also the exchange
+/// snapshots that deliver no `EventRef::Book`), or a public trade.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct MdStampView {
+    /// `MD_BATCH`, `MD_SNAPSHOT` or `MD_TRADE`.
+    pub kind: u8,
+    /// `MarketHdr.ex_ts_ns`: the venue's message time (UTC ns; 0 = the venue gave none).
+    pub ex_ts_ns: i64,
+    /// `MarketHdr.sw_rx_ns`: the kernel software receive stamp (CLOCK_REALTIME ns; 0 = unavailable).
+    pub sw_rx_ns: i64,
+    /// `MarketHdr.rx_tsc`: the receiving thread's TSC (this run; `Now::utc_of` converts it).
+    pub rx_tsc: Tsc,
+}
+
+impl MdStampView {
+    /// No message (all zero).
+    pub const NONE: MdStampView = MdStampView {
+        kind: 0,
+        ex_ts_ns: 0,
+        sw_rx_ns: 0,
+        rx_tsc: Tsc(0),
+    };
+    /// An `L2Batch`.
+    pub const MD_BATCH: u8 = 1;
+    /// An `L2Snapshot` of origin exchange or top-N (keyframes are engine state, not market data).
+    pub const MD_SNAPSHOT: u8 = 2;
+    /// A `Trade`.
+    pub const MD_TRADE: u8 = 3;
+}
+
 /// One public-market liquidation (not this account's).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct LiquidationView {

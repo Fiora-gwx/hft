@@ -1,4 +1,4 @@
-//! `MockViews` (SDK-127, SDK-129, SDK-194, SDK-195).
+//! `MockViews` (SDK-127, SDK-129, SDK-194, SDK-195, SDK-213).
 
 #![allow(
     clippy::disallowed_types,
@@ -173,4 +173,66 @@ fn sdk_195_mock_setters() {
         Qty(1_000_000_000),
         "SDK-195.10"
     );
+}
+
+#[test]
+fn sdk_213_mock_orders_and_md_stamps() {
+    let mut v = gt3_views();
+    let r = OrderRef::new(V1, A1, 7, 2);
+    let o = OrderView {
+        r,
+        group: G1,
+        inst: I1,
+        side: Side::Buy,
+        tif: hft_types::Tif::PostOnly,
+        class: IntentClass::Open,
+        px: Px(450),
+        qty: Qty(5_000_000),
+        filled: Qty(1_000_000),
+        state: OrderStateView::Live,
+        tag: 1,
+    };
+    v.set_order(o);
+    assert_eq!(Views::order(&v, r), Some(o), "SDK-213.1");
+    assert_eq!(
+        Views::order(&v, OrderRef::new(V1, A1, 7, 3)),
+        None,
+        "SDK-213.1 other gen"
+    );
+    v.clear_order(r);
+    assert_eq!(Views::order(&v, r), None, "SDK-213.2");
+    assert_eq!(
+        (Views::md_count(&v, I1), Views::md_stamp(&v, I1, 1)),
+        (0, None),
+        "SDK-213.3"
+    );
+    for k in 1..=20i64 {
+        v.md_push(
+            I1,
+            MdStampView {
+                kind: MdStampView::MD_BATCH,
+                ex_ts_ns: k,
+                sw_rx_ns: 100 + k,
+                rx_tsc: Tsc(0),
+            },
+        );
+    }
+    assert_eq!(Views::md_count(&v, I1), 20, "SDK-213.4");
+    assert_eq!(
+        Views::md_stamp(&v, I1, 4),
+        None,
+        "SDK-213.4 older than the last 16"
+    );
+    assert_eq!(
+        Views::md_stamp(&v, I1, 5).map(|m| m.ex_ts_ns),
+        Some(5),
+        "SDK-213.4"
+    );
+    assert_eq!(
+        Views::md_stamp(&v, I1, 20).map(|m| m.sw_rx_ns),
+        Some(120),
+        "SDK-213.4"
+    );
+    assert_eq!(Views::md_stamp(&v, I1, 21), None, "SDK-213.4 not yet");
+    assert_eq!(Views::md_count(&v, I2), 0, "SDK-213.4 other inst");
 }

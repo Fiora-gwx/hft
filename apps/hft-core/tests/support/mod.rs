@@ -685,6 +685,7 @@ pub fn write_polymarket_sim(
         2,
         false,
         None,
+        &[],
     )
 }
 
@@ -703,6 +704,22 @@ pub fn write_polymarket_maker_sim(
     src_ip: &str,
     bind_device: &str,
 ) -> PathBuf {
+    write_polymarket_maker_sim_with(root, hot, user, pipeline, src_ip, bind_device, &[])
+}
+
+/// `write_polymarket_maker_sim` with binary-maker parameter values `params` (field name, raw value;
+/// `pm_sim_config --param`, checked by `check_maker_params`) set after the defaults.
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub fn write_polymarket_maker_sim_with(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    params: &[(String, i64)],
+) -> PathBuf {
     write_pm(
         root,
         hot,
@@ -714,7 +731,44 @@ pub fn write_polymarket_maker_sim(
         3,
         true,
         None,
+        params,
     )
+}
+
+/// `NAME=RAW` of `pm_sim_config --param` → (name, raw i64).
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub fn parse_param(s: &str) -> Result<(String, i64), String> {
+    let (k, v) = s
+        .split_once('=')
+        .ok_or_else(|| format!("--param {s}: expected NAME=RAW"))?;
+    let v = v
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| format!("--param {s}: RAW must be an integer (schema raw units)"))?;
+    Ok((k.trim().to_string(), v))
+}
+
+/// Every `(name, raw)` names a field of the maker's parameter schema and lies within its
+/// `[min, max]`.
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub fn check_maker_params(params: &[(String, i64)]) -> Result<(), String> {
+    use hft_strategy_sdk::StrategySet;
+    use hft_strategy_sdk::params::SchemaView;
+    let desc = Strategies::kinds()
+        .iter()
+        .find(|d| d.name == "binary-maker")
+        .ok_or("binary-maker is not registered")?;
+    for (name, v) in params {
+        let f = hft_strategy_sdk::params::field_ix(desc.schema, name)
+            .and_then(|i| desc.schema.field(i))
+            .ok_or_else(|| format!("--param {name}: not a binary-maker parameter"))?;
+        if *v < f.min || *v > f.max {
+            return Err(format!("--param {name}={v}: outside [{}, {}]", f.min, f.max));
+        }
+    }
+    Ok(())
 }
 
 /// The live account of `write_polymarket_maker_live`.
@@ -782,6 +836,23 @@ pub fn write_polymarket_maker_live(
     bind_device: &str,
     live: &PmLive,
 ) -> PathBuf {
+    write_polymarket_maker_live_with(root, hot, user, pipeline, src_ip, bind_device, live, &[])
+}
+
+/// `write_polymarket_maker_live` with binary-maker parameter values `params` set after
+/// `PM_LIVE_PARAMS` (`pm_sim_config --live … --param`).
+#[cfg(feature = "polymarket")]
+#[allow(dead_code, clippy::too_many_arguments)]
+pub fn write_polymarket_maker_live_with(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    live: &PmLive,
+    params: &[(String, i64)],
+) -> PathBuf {
     write_pm(
         root,
         hot,
@@ -793,6 +864,7 @@ pub fn write_polymarket_maker_live(
         3,
         true,
         Some(live),
+        params,
     )
 }
 
@@ -809,6 +881,7 @@ fn write_pm(
     pairs: usize,
     maker: bool,
     live: Option<&PmLive>,
+    params: &[(String, i64)],
 ) -> PathBuf {
     use hft_venue_proto::VenueProtocol;
     std::fs::create_dir_all(root).unwrap();
@@ -1095,6 +1168,15 @@ fn write_pm(
                 .position(|i| schema.field(i).unwrap().name == name)
                 .unwrap();
             defaults[k] = value;
+        }
+    }
+    assert!(maker || params.is_empty(), "parameter values need the maker");
+    if let Err(e) = check_maker_params(params) {
+        panic!("{e}");
+    }
+    for (name, value) in params {
+        if let Some(k) = (0..schema.n_fields()).position(|i| schema.field(i).unwrap().name == *name) {
+            defaults[k] = *value;
         }
     }
     let body = encode_body(

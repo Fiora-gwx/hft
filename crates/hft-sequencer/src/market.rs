@@ -3,7 +3,7 @@
 //! `BboView` projection (README "连接活性", "只读视图").
 
 use hft_book::{BookSet, BookState, Top};
-use hft_strategy_sdk::{BboView, FundingView, RxTsSrc};
+use hft_strategy_sdk::{BboView, FundingView, MD_STAMPS_KEPT, MdStampView, RxTsSrc};
 use hft_types::{InstId, MAX_BBO_CONN_SLOTS, Px, Qty, Rate, Tsc, VenueId};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -97,11 +97,31 @@ pub struct MemOnly {
     pub funding_seq: u64,
 }
 
+const MD_KEPT: usize = MD_STAMPS_KEPT as usize;
+
+/// Stamps of the last `MD_STAMPS_KEPT` market-data messages of one inst and their count in this
+/// process (README "只读视图" `md_count`/`md_stamp`; not in the snapshot, not cleared by
+/// `EngineClock`).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct MdRing {
+    pub n: u64,
+    pub s: [MdStampView; MD_KEPT],
+}
+
+impl MdRing {
+    pub const EMPTY: MdRing = MdRing {
+        n: 0,
+        s: [MdStampView::NONE; MD_KEPT],
+    };
+}
+
 /// `MarketLast` rows (dense by `InstId`) plus BBO connection liveness.
 #[derive(Clone, Debug)]
 pub struct Market {
     pub rows: Vec<MarketLastRow>,
     pub mem: Vec<MemOnly>,
+    /// Market-data stamps (by inst) for `Views::md_count`/`md_stamp`.
+    pub md: Vec<MdRing>,
     /// `[venue][slot]`.
     pub conns: Vec<[ConnLive; SLOTS]>,
     /// `max(boot_seq, last snapshot at_seq)`: receive times at or before it are invisible.
@@ -120,6 +140,7 @@ impl Market {
             inst_venue,
             rows: vec![MarketLastRow::default(); n_insts + 1],
             mem: vec![MemOnly::default(); n_insts + 1],
+            md: vec![MdRing::EMPTY; n_insts + 1],
             conns: vec![[ConnLive::default(); SLOTS]; 256],
             rx_from_seq: 0,
             funding: vec![FundingView::EMPTY; n_insts + 1],
@@ -132,6 +153,35 @@ impl Market {
     #[inline]
     pub fn row_mut(&mut self, i: InstId) -> Option<&mut MarketLastRow> {
         self.rows.get_mut(i.0 as usize)
+    }
+    /// Records the stamps of one applied market-data message of `i` (`MdStampView::MD_*` kind).
+    #[inline]
+    pub fn push_md(&mut self, i: InstId, kind: u8, h: &hft_event::MarketHdr) {
+        if let Some(r) = self.md.get_mut(i.0 as usize) {
+            r.n = r.n.wrapping_add(1);
+            if let Some(x) = r.s.get_mut((r.n % MD_STAMPS_KEPT) as usize) {
+                *x = MdStampView {
+                    kind,
+                    ex_ts_ns: h.ex_ts_ns,
+                    sw_rx_ns: h.sw_rx_ns,
+                    rx_tsc: Tsc(h.rx_tsc),
+                };
+            }
+        }
+    }
+    /// `Views::md_count`.
+    #[inline]
+    pub fn md_count(&self, i: InstId) -> u64 {
+        self.md.get(i.0 as usize).map_or(0, |r| r.n)
+    }
+    /// `Views::md_stamp`: the `n`-th (1-based) stamp of `i` while among the last `MD_STAMPS_KEPT`.
+    #[inline]
+    pub fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView> {
+        let r = self.md.get(i.0 as usize)?;
+        if n == 0 || n > r.n || r.n - n >= MD_STAMPS_KEPT {
+            return None;
+        }
+        r.s.get((n % MD_STAMPS_KEPT) as usize).copied()
     }
     #[inline]
     pub fn conn(&self, v: VenueId, slot: u8) -> Option<&ConnLive> {

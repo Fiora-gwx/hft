@@ -223,6 +223,8 @@ pub trait DynViews {
     /// the results into a checksum (zero-allocation probe).
     fn sweep_all(&self, a: AccountId, g: GroupId, i: InstId, v: hft_types::VenueId, r: OrderRef) -> u64;
     fn group_pos(&self, a: AccountId, g: GroupId) -> hft_strategy_sdk::GroupPosView;
+    fn md_count(&self, i: InstId) -> u64;
+    fn md_stamp(&self, i: InstId, n: u64) -> Option<hft_strategy_sdk::MdStampView>;
     fn inventory(
         &self,
         a: AccountId,
@@ -254,6 +256,12 @@ impl<V: Views> DynViews for W<'_, V> {
     }
     fn order(&self, h: OrderRef) -> Option<OrderView> {
         self.0.order(h)
+    }
+    fn md_count(&self, i: InstId) -> u64 {
+        self.0.md_count(i)
+    }
+    fn md_stamp(&self, i: InstId, n: u64) -> Option<hft_strategy_sdk::MdStampView> {
+        self.0.md_stamp(i, n)
     }
     fn legs(&self, a: AccountId, g: GroupId) -> LegView {
         *self.0.legs(a, g)
@@ -346,6 +354,8 @@ impl<V: Views> DynViews for W<'_, V> {
         mix(u64::from(x.venue_ready(a, v)));
         mix(x.leverage(a, i).map_or(0, u64::from));
         mix(u64::from(x.quote_ok(a, i)));
+        mix(x.md_count(i));
+        mix(x.md_stamp(i, x.md_count(i)).map_or(0, |m| m.ex_ts_ns as u64));
         h
     }
     fn group_pos(&self, a: AccountId, g: GroupId) -> hft_strategy_sdk::GroupPosView {
