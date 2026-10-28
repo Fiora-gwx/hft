@@ -2,6 +2,7 @@
 
 Status: implemented
 
+> **负责人确认(2026-10-28)**:本变更(恢复语义:新快照节 32;决策时刻)与规格冻结期新增的用例编号 SEQ-443–SEQ-446、RT-168、CORE-437–CORE-438 获负责人确认,见 [changes.md](../../../../docs/changes.md) 2026-10-28 行。
 
 ## Problem
 
