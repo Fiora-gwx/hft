@@ -48,6 +48,7 @@ pub fn bodies() -> Vec<BodyRow> {
         row::<ClockStatus>(0),
         row::<SegmentRoll>(0),
         row::<EngineClock>(0),
+        row::<UtcAnchor>(0),
         row::<L2BatchHdr>(1),
         row::<MarginReportHdr>(1),
         row::<AccountConfigReportHdr>(1),

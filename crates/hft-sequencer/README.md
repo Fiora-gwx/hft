@@ -167,7 +167,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 | 方法 | 数据来源 |
 |---|---|
-| `now()` | `Now{tsc, engine_ns, utc_ns, seq, boot_seq, tsc_per_ms, clock_ok}`:`tsc`/`seq` = 当前 Input 的记录头;`engine_ns` 按当前运行的 `EngineClock` 基准换算(见[引擎时间](#引擎时间engine_ns));`boot_seq` = 本次运行 `Note{EpochStart}` 的 seq(处理 `EngineClock` 时写出;回放读同一记录,确定),用于不跨启动比较 TSC;`tsc_per_ms` 与 `utc_ns` 由当前段头的 `tsc_hz_milli` 与校准对(`calib_tsc`、`calib_realtime_ns`)换算——段头在 journal 里、所有驱动读同一值,所以确定;`clock_ok` = 最近一条 `Timer{ClockOk\|ClockBad}`。不读系统时钟,也不读 Meta 的 `ClockStatus` |
+| `now()` | `Now{tsc, engine_ns, utc_ns, seq, boot_seq, tsc_per_ms, clock_ok}`:`tsc`/`seq` = 当前 Input 的记录头;`engine_ns` 按当前运行的 `EngineClock` 基准换算(见[引擎时间](#引擎时间engine_ns));`boot_seq` = 本次运行 `Note{EpochStart}` 的 seq(处理 `EngineClock` 时写出;回放读同一记录,确定),用于不跨启动比较 TSC;`tsc_per_ms` 由 `EngineClock.tsc_hz_milli` 换算,`utc_ns` 是[引擎 UTC](#引擎-utc)(当前段头校准对,本运行应用过 `UtcAnchor` 后为节 32 的 UTC 线)——都来自 journal、所有驱动读同一值,所以确定;`clock_ok` = 最近一条 `Timer{ClockOk\|ClockBad}`。不读系统时钟,也不读 Meta 的 `ClockStatus` |
 | `bbo(i)`(**按值**) | 报价取 [hft-book](../hft-book/README.md) 的 `Top`;`rx_tsc` 在 `Top.seq > rx_from_seq` 时取 `Top.rx_tsc`,否则 0(`rx_from_seq` = max(`now.boot_seq`, 本次运行最近一个快照的 `at_seq`):hft-book 的快照行不含 `Top.rx_tsc`、从快照恢复后它为 0,所以早于最近快照的接收时刻对策略一律不可见,实盘与从该快照起步的回放看到同一值);`hw_rx_ns` 取本 crate `MarketLast` 的 `bbo_hw_rx_ns`(PHC 域,软件戳回退由 `bbo_flags.SW_TS` 标明,口径归 [event-model](../../docs/subsystems/event-model.md));连接健康按该 inst 的 BBO 成员连接聚合(见[连接活性](#连接活性)) |
 | `book` | hft-book 的簿 |
 | `funding`、`mark` | 本 crate 的 `MarketLast`(实时费率、下次结算时刻、实际结算周期 `interval_s` 与上一次不同的周期 `prev_interval_s`,都在节 10);`FundingView.upd_tsc` = 最近一条被应用的 `Funding` 的 `MarketHdr.rx_tsc`,按与 `bbo(i).rx_tsc` 相同的 `rx_from_seq` 规则可见(该 tsc 与其 seq 只在内存、不进快照) |
@@ -298,7 +298,7 @@ pub trait CheckpointStore {
 
 | 类 | kind | 规则 |
 |---|---|---|
-| Input | 行情(`Bbo`、`L2Batch`、`L2Snapshot{origin = TopN \| Exchange}`、`Trade`、`Funding`、`MarkPrice`…)、`OrderEvent`、`SendReport`、`PositionReport`、`BalanceReport`、`FundingSettle`(交易所推送)、`ExternalFill`、`MarginReport`、`AccountConfigReport`、`ControlCmd`、`ConfigBlob`(ctl 环到达的)、`ReconcileReport`、`Timer`(含全部环境类)、`ConnState`、`Advice`;optional:`ChainHead`、`PoolQuote`、`TxLifecycle` | 决定状态;恢复/回放/镜像喂给 sequencer |
+| Input | 行情(`Bbo`、`L2Batch`、`L2Snapshot{origin = TopN \| Exchange}`、`Trade`、`Funding`、`MarkPrice`…)、`OrderEvent`、`SendReport`、`PositionReport`、`BalanceReport`、`FundingSettle`(交易所推送)、`ExternalFill`、`MarginReport`、`AccountConfigReport`、`ControlCmd`、`ConfigBlob`(ctl 环到达的)、`ReconcileReport`、`Timer`(含全部环境类)、`UtcAnchor`、`ConnState`、`Advice`;optional:`ChainHead`、`PoolQuote`、`TxLifecycle` | 决定状态;恢复/回放/镜像喂给 sequencer |
 | Output | `OrderDecision`、`ExecDecision`、`FundingSettle{synth = 1}`、`CmdResult`、`StateSnapshot`、引导块中的 `ConfigBlob{boot}`/`L2Snapshot{Keyframe}`、`Note`(source = Sequencer/Strategy/Risk/Oms/Ledger/Exec);optional:`SwapDecision` | 由 Input 确定地产生;验证回放逐字节比对 |
 | Meta | `SegmentRoll`、`LatencySample`、`Note{Measure}`、`ClockStatus`、`HostProfile`、经输入环到达的 `Note{Venue/CtlAudit/Housekeeping/Advisor/Boot}`、`Note{InputQuarantined}` | 占 seq,**不影响状态、不参与比对**(引导块比对同样屏蔽 Meta);`OrderDecision.decided_tsc`、`SnapshotHdr` 的 `snap_tsc`/`boot_id`/`snap_utc_ns` 等测量字段按 hft-event `MEASURE_MASK` 屏蔽 |
 
@@ -384,7 +384,7 @@ g. rep-sim ≤ sim_max_per_round
 | `Sys{ConflateReport}` | 每 1 s | 写 `Note{Conflated}` 计数(驱动把上一报告以来丢弃的 `Bbo` 条数放在该 `Timer` 记录的 `deadline_tsc` 里,回放从日志读出,不依赖驱动状态) |
 | `Sys{AdvisorTick}` | 每 1 s | 只记录;advisor 以它为 Model 的时间刻度(SDK `model_tick`) |
 
-`EngineClock`(每次进程启动恰好一条、在任何其他 Input 之前)同样由实盘驱动写成 Input,见[引擎时间](#引擎时间engine_ns)。恢复、验证与镜像驱动不生成这些记录,只从日志读。
+`EngineClock`(每次进程启动恰好一条、在任何其他 Input 之前)同样由实盘驱动写成 Input,见[引擎时间](#引擎时间engine_ns);housekeeping 经 hk 环送来的 `UtcAnchor`(时钟重锚)原样写成 Input,见[引擎 UTC](#引擎-utc)。恢复、验证与镜像驱动不生成这些记录,只从日志读。
 
 ### BBO 合并与 CONFLATED
 
@@ -407,6 +407,17 @@ g. rep-sim ≤ sim_max_per_round
 3. **交给下一次运行**:`view().stop_engine_ns()` = 最后一条已应用(带 `EVENT_END`)记录的 engine_ns——恢复后即上次运行的末值,`--recover-from-snapshot` 为 `SnapshotHdr.engine_ns`,空 journal 为 0;hft-core 的实盘驱动用它填新运行的 `EngineClock.base_engine_ns`。每个快照头的 `SnapshotHdr.engine_ns` = 其所在位置的 engine_ns。Recovery 快照使用已提交的 `stop_engine_ns`,不读取尚无新 Input 的事件上下文;写完该快照后、尚未消费 EngineClock 就再次崩溃,时间仍须保持。节 25 保留旧运行的时钟基准,由新 EngineClock 切换。
 4. **运行起点**:处理 `EngineClock` 或从快照起步时调 `ledger.on_run_start(E.base_engine_ns)` 与 `risk.set_run_start(E.base_engine_ns)`:早于它的换算率、保证金报告与标记价视为过期(引擎时间不计停机,停机前的数据不能当新的用)。
 5. **谁用它**:ledger 与 risk 的持久时刻(`*_ens`)、SDK `Now.engine_ns`(策略与 hft-strat-lib 的持久状态)、Viewer 预览的 TTL、advisor 的 `AdvisorLag`。本 crate 的定时器堆与 OMS/exec 的 TSC 量只在一次运行内有效,跨运行按"停机时间不计"平移([定时器](#定时器)),与 engine_ns 同口径。
+
+### 引擎 UTC
+
+SDK `Now.utc_ns`(时刻窗口、`Settle` 的 `NotEnded`、`VenueNotice` 到期、advisor 的 Model 节拍)是**引擎 UTC**:按 journal 确定、单调不减,并经 `UtcAnchor` 输入持续对齐 CLOCK_REALTIME。启动校准的频率取自 CLOCK_MONOTONIC_RAW,它就是计数器的标称频率(Graviton 上与真实时间差约 30 ppm,一天约 2.6 s),所以只靠段头校准对换算会随运行时长线性漂移。
+
+1. **运行起点**:处理 `EngineClock` 时清除 UTC 线(节 32 不写)。此后到首条 `UtcAnchor` 之前,记录 r 的 UTC = 当前段头校准对 `(calib_tsc, calib_realtime_ns)` 按 `EngineClock.tsc_hz_milli` 换算(floor,与 SDK `EngineClockAnchor::utc_of` 同式)。
+2. **重锚**(Input [`UtcAnchor`](../hft-event/README.md#utcanchor0x050binput),体 = housekeeping 的校准对 `(tsc, realtime_ns)`、它在 CLOCK_REALTIME 上测得的计数器频率 `hz_milli`、误差界):本运行 `EngineClock` 之前的 `UtcAnchor` 不起作用。设记录头 tsc 为 t、该处原 UTC 为 `cur`;频率 `H` = 体的 `hz_milli`,为 0 或与 `EngineClock.tsc_hz_milli` 相差超过 `UTC_RATE_TOL_PPM` = 1 000 ppm 时取后者;目标 `T(x) = realtime_ns + ⌊(x − tsc) × 10^12 / H⌋`。新线(节 32 `UtcLineRow`)= `{tsc: t, utc_ns: T(t), hz_milli: H, lead_ns: max(0, cur − T(t))}`。
+3. **换算**:之后记录 r(`r.tsc ≥ t`)的 UTC = `utc_ns + e + max(0, lead_ns − ⌊e × UTC_SLEW_PPM / 10^6⌋)`,`e = ⌊(r.tsc − t) × 10^12 / H⌋`,`UTC_SLEW_PPM` = 500(内核 `adjtime` 的调速上限)。因此引擎落后时在重锚处向前跳到目标,超前时**不回跳**、以慢 500 ppm 的速度追上目标后沿目标走;重锚处的值 = `max(cur, T(t))`,全程单调不减。两个常数是记录语义的一部分(回放重算),不是可调参数。设定线时按[引擎时间](#引擎时间engine_ns)的乘数与移位预算 `H` 的乘数(`H` 在换算范围外 → `Fatal(ClockRange)`;从快照恢复时 → `SnapshotUndecodable{section: 32}`),每条 Input 的 `e` 不做 u128 除法,与定义式逐位相同。
+4. **SDK 锚点**:有 UTC 线时 `Now` 的 `EngineClockAnchor.(utc_tsc, utc_ns)` = (该记录 tsc, 线在该处的值);`Now::utc_of(t)` 以 `tsc_hz_milli` 从这一点外推,只用于接收时刻等相邻的 TSC。没有 UTC 线时锚点仍是段头校准对。
+5. **快照与起步**:UTC 线是节 32(`UtcLineRow`,32 B,行版本 1,计入 `state_hash`),只在本运行应用过 `UtcAnchor` 时写在节 25 之后;从快照起步时随节 25 一起恢复,缺失 = 无 UTC 线。它的 `tsc` 与节 25 的 `base_tsc` 一样只属于快照所在的运行(尾部重放沿用,新运行的 `EngineClock` 清除),不平移。段滚动不改 UTC 线。advisor 从快照起步时,上一条 `AdvisorTick` 的 UTC 按第 6 条从日志重算(`advisor::utc_of_record`:该 tick 所在运行的 `EngineClock` 与其后、该 tick 之前的各条 `UtcAnchor`),与连续运行逐位相同;只在该运行的 `EngineClock` 不在日志中时,改用恢复出的 UTC 线(tick 不早于线的 `tsc`)或该 tick 所在段的段头校准对。
+6. **产生者**:hft-core housekeeping 在 `Synced` 校准节拍上每 `clock.anchor_interval_ms`(默认 10 000)送一条,判定不是 `Synced` 时推迟到下一个 `Synced` 节拍(取值与节拍归 [apps/hft-core](../../apps/hft-core/README.md));测试驱动与回放只读日志。冷读者要得到与决策相同的 UTC,按本节从段头校准对与日志中的 `UtcAnchor` 重算;段头校准对与 `ClockStatus` 仍是启动校准与逐秒测量,供取证与延迟换算。
 
 ### 连接活性
 
@@ -640,14 +651,14 @@ Kill 清仓使用执行层的无链接串行订单,无需新增 OMS 链接或 He
 - **关键帧**(`StateSnapshot{purpose=Keyframe}`)**一次写完**:实盘驱动按[环境决定表](#环境决定写成-input)的 `Sys{Snapshot}` 行(时间或事件数到期、空闲轮、最大推迟 2 个周期)交出 `Timer{Sys, Snapshot}`;sequencer 处理它时在同一事件内写完整个快照,随后 `end_event`、`publish`。停顿 ≤ 300 µs,是 [latency-budget §3.1](../../docs/latency-budget.md#31-p999-记录项) 的 p99.9 记录项;写出期间到达的输入在环中等待。两种触发与最大推迟一起给出恢复重放尾部的上界(数值写在 [apps/hft-core](../../apps/hft-core/README.md) 启动步骤)。**关键帧不计算 `state_hash`**:头部该字段写 0(四种驱动相同,逐字节比对不受影响),需要它的读者从节内容按[状态哈希](#状态哈希)的规则计算。恢复、验证与镜像驱动读到 `Timer{Sys, Snapshot}` 时同样一次写完(验证驱动逐字节比对)。
 - **L2 关键帧**:每个 Live 簿的 `L2Snapshot{origin=Keyframe}` 由 `Timer{Keyframe, inst}` 在每个 `keyframe_period_ms` 窗口内均摊写出(每簿每窗口一条;引导块另有一条),不在同一时刻导出全部簿。
 - **按需**(`SnapshotNow`)、**Drain**、**Recovery** 与引导块的快照同样一次写完。
-- **写出**:64 MiB 节缓冲与 256 KiB 策略缓冲在 Engine 启动时分配并复用,避免 `mlockall(MCL_FUTURE)` 下每次 Timer 都锁页/缺页;快照仍在一个事件内原子写完。sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27,有成交记录时另有节 28,有保留的对账视图时另有节 29，再写节 30,有槽位绑定时最后写节 31)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16、28、29 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
-- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27、28、29、30、31(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
-- **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc` 与节 27 `StrategyTimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。
+- **写出**:64 MiB 节缓冲与 256 KiB 策略缓冲在 Engine 启动时分配并复用,避免 `mlockall(MCL_FUTURE)` 下每次 Timer 都锁页/缺页;快照仍在一个事件内原子写完。sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25,本运行应用过 `UtcAnchor` 时另有节 32,再写节 26、27,有成交记录时另有节 28,有保留的对账视图时另有节 29，再写节 30,有槽位绑定时最后写节 31)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16、28、29 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
+- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27、28、29、30、31、32(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
+- **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc` 与节 27 `StrategyTimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。节 25 的 `base_tsc` 与节 32 的 `UtcLineRow.tsc` 是快照所在运行的基准(`u64`),尾部重放沿用,新运行的 `EngineClock` 替换或清除,不平移。
 - **从快照起步**(恢复、验证、镜像同一流程):各组件 `restore` 之后、处理任何 Input 之前,以节 25 的 `base_engine_ns` 恢复 `risk.set_run_start`(保证金数据的新旧运行判定沿用该快照的运行起点),`rx_from_seq` = 该快照的 `at_seq`,对每个实例按生效的 `StrategyParams` 调 `ledger.on_groups_changed`、`risk.on_groups_changed`,并重算 `model_mem`、`model_ckpt`;对每个 group 以恢复出的 LegTracker 摘要调一次 `risk.on_legs`(只重建 hft-risk 的 `on_legs` 缓存;返回的 `AutoClear` 不执行、不写记录——快照之前的 Input 已对同一状态判定过);引导块与之后读到的 `L2Snapshot{origin = Keyframe}` 只写档位、不改 `restore` 读回的簿元数据([hft-book](../hft-book/README.md));再以节 10 每 inst 的 `(mark_px, mark_ens)` 调一次 `ledger.restore_marks`、以 `interval_s ≠ 0` 的行逐 inst 调 `ledger.on_funding_interval`——这些只重建不进快照的派生索引与缓存,不产生任何记录。
 
 #### 节行格式(草案,实现时以代码与编译期断言为准)
 
-当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2、节 27 v1、节 28 v1、节 29 v1、节 30 v1(节 20、25 的行格式与版本在 journal-format)。
+当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2、节 27 v1、节 28 v1、节 29 v1、节 30 v1、节 32 v1(节 20、25 的行格式与版本在 journal-format)。
 
 **节 28 `FillSeq`**(最近成交 seq):`CmdState.fill_seq` 是按 (account, inst) 的定长稠密表(启动时按 refdata 的账户数 × 品种数分配,成交路径只写不分配),`AdoptExchange` 的 `StaleReport` 守卫与 `AUTO_EXTERNAL` 前提读它。快照只写非零行,按 (account, inst) 升序;没有任何成交时整节不写,所以无成交的快照字节不变。恢复按行写回;节缺失(含早于本节的旧快照)= 空表(与旧版本恢复行为相同);行超出 refdata 维度、版本不符、`_pad` 非零、seq 为 0、inst 为 0 或乱序 → `SnapshotUndecodable{section: 28}`。本节是成交事件的派生索引,不计入 `state_hash` 与 DST `HashTrail`(与节 16 一样),但快照记录仍逐字节参与验证回放,离线快照自检(`replay_snapshot`)单独核对它的往返字节;因此从快照起步与连续回放做出相同的守卫判定。
 
@@ -696,6 +707,7 @@ Kill 清仓使用执行层的无链接串行订单,无需新增 OMS 链接或 He
                                      pub inst: InstId /* 0 = 整个 venue */, pub a: i64, pub b: i64, pub cmd_seq: u64 }      // 节 24 VenueNotices,32 B;键 (venue, inst, kind)
 // 节 20 SeqDay:last_day_rolled 的唯一归属(SeqDayRow 行格式在 journal-format)。
 // 节 25 EngineClock:当前运行的引擎时钟基准(EngineClockRow 行格式在 journal-format;见"引擎时间")。
+#[repr(C)] pub struct UtcLineRow { pub tsc: u64, pub utc_ns: i64, pub hz_milli: u64, pub lead_ns: u64 }                // 节 32 UtcLine,32 B;一行;见"引擎 UTC"
 #[repr(C)] pub struct ConnLiveRow { pub venue: VenueId, pub slot: u8, pub flags: u8 /* UP=1 RESYNC=2 */, pub _pad: [u8; 5], pub live_tsc: Tsc } // 节 26 ConnLive,16 B;键 (venue, slot);只含本次运行用过的槽
 // 每个结构旁有 const _: () = assert!(size_of::<T>() == N) 与关键字段 offset_of 断言。
 ```
@@ -846,7 +858,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 | `src/driver/{mod,live,recover,verify,mirror}.rs` | 四种驱动;`live/sched.rs` 取环顺序、让位、定时器中途检查与每轮上限,`live/env.rs` 环境决定器(含关键帧的时间与事件数触发、最大推迟),`live/feedctl.rs` `FeedCmd` 环满时的暂存续推,`live/kill.rs` 写 KillWord,`live/quarantine.rs` 毒丸隔离 |
 | `src/conflate.rs` | BBO 合并 |
 | `src/dispatch.rs` | kind 分派表、CSR 索引与 `sub_ix`(含按 `EvMask` 与引擎持仓驱动订阅的并集下发 `FeedCmd::Subscribe`)、`L2Batch` 整批应用、OMS 输出的排空顺序、`NotifyQueue` 与 `NotifyBacklog`(续推、背压) |
-| `src/clock.rs` | 引擎时钟基准、`engine_ns` 换算(乘数与移位、±1 校正、`ClockRange`)、`stop_engine_ns`、`EngineClock` 处理 |
+| `src/clock.rs` | 引擎时钟基准、`engine_ns` 换算(乘数与移位、±1 校正、`ClockRange`)、`stop_engine_ns`、`EngineClock` 处理;引擎 UTC 线(`UtcLineRow`、`UTC_SLEW_PPM`、`UTC_RATE_TOL_PPM`) |
 | `src/liveness.rs` | 按 (venue, 槽) 的连接活性、成员位图、`BboView` 按值投影 |
 | `src/strategies.rs` | 实例表、`StrategySet` 调用、Ctx 应用、`IntentHandle` 回填、`spec_seq` |
 | `src/views.rs` | `SeqViews`(SDK `Views`/`ModelViews` 实现)、`RiskView` 适配器、`LegSummary` 投影 |

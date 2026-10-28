@@ -91,7 +91,7 @@ proptest! {
             Bbo, L2Delta, Trade, Funding, MarkPrice, IndexPrice, Liquidation, OrderDecision, SendReport, OrderEvent,
             PositionReport, BalanceReport, FundingSettle, ExternalFill, ExecDecision, ChainHead, PoolQuote,
             SwapDecision, TxLifecycle, CmdResult, ReconcileReport, Timer, ConnState, LatencySample, Note, HostProfile,
-            ClockStatus, SegmentRoll, EngineClock);
+            ClockStatus, SegmentRoll, EngineClock, UtcAnchor);
     }
 }
 

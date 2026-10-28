@@ -21,7 +21,7 @@ fn evt_200_fuzz_decode_record(data: &[u8]) {
     read_fixed!(r, k; Bbo, L2Delta, Trade, Funding, MarkPrice, IndexPrice, Liquidation, OrderDecision, SendReport,
         OrderEvent, PositionReport, BalanceReport, FundingSettle, ExternalFill, ExecDecision, ChainHead, PoolQuote,
         SwapDecision, TxLifecycle, CmdResult, ReconcileReport, Timer, ConnState, LatencySample, Note, HostProfile,
-        ClockStatus, SegmentRoll, EngineClock);
+        ClockStatus, SegmentRoll, EngineClock, UtcAnchor);
     let _ = r.var::<AdviceHdr>();
     let _ = r.var::<MarginReportHdr>();
     let _ = r.var::<AccountConfigReportHdr>();

@@ -1,0 +1,36 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "realtime_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "hz_milli",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "err_ns",
+      "nullable": false,
+      "type": "UInt32"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x050B",
+    "hft.layout": "fixed 32",
+    "hft.name": "UtcAnchor",
+    "hft.schema_version": "1"
+  }
+}

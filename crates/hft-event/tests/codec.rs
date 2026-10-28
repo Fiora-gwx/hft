@@ -676,7 +676,8 @@ fixed_samples!(
     HostProfile,
     ClockStatus,
     SegmentRoll,
-    EngineClock
+    EngineClock,
+    UtcAnchor
 );
 
 fn encode_all() -> Vec<u8> {

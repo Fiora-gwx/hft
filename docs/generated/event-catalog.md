@@ -1092,6 +1092,23 @@
 
 码表:[EngineClockSource](#码表-engineclocksource)
 
+### 0x050B UtcAnchor
+
+- 编号:`0x050B`
+- 域:System
+- 角色:Input
+- 布局:fixed 32
+- schema_version:1
+- journal:seq;CRC:never
+
+| 偏移 | 字段 | 类型 | 单位 | 测量 | 说明 |
+|---|---|---|---|---|---|
+| 0 | `tsc` | `tsc` | TSC |  |  |
+| 8 | `realtime_ns` | `i64` |  |  |  |
+| 16 | `hz_milli` | `u64` |  |  | Counter frequency against CLOCK_REALTIME × 1000; 0 = not measured. |
+| 24 | `err_ns` | `u32` |  |  |  |
+| 28 | `_pad` | `pad:4` |  |  |  |
+
 ### 0x0601 RawRx
 
 - 编号:`0x0601`

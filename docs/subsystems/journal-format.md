@@ -81,7 +81,7 @@ committed_len 之后   全零(热段由内核在缺页时清零;冷副本在封�
     pub flags: u8,                          //  117 [W] RECOVERY_GAP=1(上一段尾部可能因掉电丢失)
     pub _pad0: u16,                         //  118
     pub tsc_hz_milli: u64,                  //  120 [W] TSC 频率 × 1000
-    pub calib_tsc: u64,                     //  128 [W] 校准对:TSC
+    pub calib_tsc: u64,                     //  128 [W] 校准对:TSC(本运行的启动校准对;决策 UTC 另经 Input UtcAnchor 重锚,见 hft-sequencer 引擎 UTC)
     pub calib_realtime_ns: i64,             //  136 [W] 校准对:CLOCK_REALTIME
     pub calib_phc_ns: i64,                  //  144 [W] 校准对:PHC(无则 0)
     pub calib_err_ns: u32,                  //  152 [W] 校准对误差界(hft-rt `CalibPair.err_ns`)
@@ -222,7 +222,7 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 // (t → now + (t − stop_tsc),跨开机、换机同一规则;行清单与平移规则归 hft-sequencer、hft-oms、hft-exec)。
 // 节 3 的 resume_hold_until 是登记的 TSC 字段,但不平移:recovery_end 重新设定它(规则归 hft-oms)。
 // 节 21 Gate 行的 gate_closed_tsc 同样是登记的 TSC 字段、不平移:recovery_end 把它重设为 now(规则归 hft-exec)。
-// 其余 TSC 不跨重启使用:节 26 ConnLive.live_tsc 在处理 EngineClock 时清空;节 7 不含 rx_tsc,恢复后 Top.rx_tsc 为 0(规则归 hft-book);节 16 ClockCal 只供冷读者换算、不计入 state_hash;其他节里的 *_tsc 只是测量值。
+// 其余 TSC 不跨重启使用:节 25 的 base_tsc 与节 32 的 UtcLineRow.tsc 只属于快照所在运行,新运行的 EngineClock 替换或清除;节 26 ConnLive.live_tsc 在处理 EngineClock 时清空;节 7 不含 rx_tsc,恢复后 Top.rx_tsc 为 0(规则归 hft-book);节 16 ClockCal 只供冷读者换算、不计入 state_hash;其他节里的 *_tsc 只是测量值。
 #[repr(C)] pub struct SectionHdr {    // 16 B,每节前缀;节体 8 B 对齐
     pub section: u16, pub version: u16, pub count: u32, pub len: u32, pub _rsv: u32,
 }
@@ -265,6 +265,7 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 
 | 30 | `OrderConns` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每账户/venue 实际下单与用户流 ConnId 位图；参与状态哈希，新运行清空，旧快照兼容规则归组件 |
 | 31 | `SlotBindings` | [hft-sequencer](../../crates/hft-sequencer/README.md) | `BindSlot` 绑定表:每个已绑定槽位 inst 一行(`SlotBindingRow` 64 B:venue、inst、窗口、32 字节交易所 id、命令 seq),按 inst 升序;只在非空时写出且最后写,缺失 = 空表;计入 `state_hash` |
+| 32 | `UtcLine` | [hft-sequencer](../../crates/hft-sequencer/README.md#引擎-utc) | 当前运行最近一条 `UtcAnchor` 之后的引擎 UTC 线(`UtcLineRow` 32 B:记录头 tsc、该处目标 UTC、频率、剩余超前量);只在本运行应用过 `UtcAnchor` 时写出(紧随节 25),缺失 = UTC 取段头校准对;与节 25 同属快照所在运行,新运行的 `EngineClock` 清除;计入 `state_hash` |
 
 各节的行格式与行版本只在归属 crate 登记(本页只登记节号、节名与归属;本页给出行格式的节 14、18、20、25 除外)。模拟账户的状态与实盘账户在同一组节里(按 `account` 区分);sim-gw 自身的撮合状态不进本快照,启动时由 [hft-sim](../../crates/hft-sim/README.md) 从这些节重建。未知节号的读者按 `len` 跳过;节内行格式的演进规则同事件体(只追加、零值表示未提供,`version` 递增)。行只由显式字段与 `_pad` 组成(无隐式填充,未用字节补零);不原样嵌入数据枚举(`#[repr(C, u8)]`)或标明"不以原始字节写进 journal"的类型,这类内容按字段展开(判别值 + 显式填充 + 定长载荷)。L2 档位不进 `StateSnapshot`,由紧随其后的 `L2Snapshot` 关键帧承载。
 

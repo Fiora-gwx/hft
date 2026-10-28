@@ -261,6 +261,43 @@ impl DriftTracker {
         v
     }
 
+    /// Counter frequency × 1000 against CLOCK_REALTIME: the inverse least-squares slope of the
+    /// window, `10^12 × Sxx / Sxy` (`Sxx = n·Σdx² − (Σdx)²`, `Sxy = n·Σdx·dy − Σdx·Σdy`, offsets
+    /// from the oldest pair; exact integer division in three steps). `None` with < 2 pairs or a
+    /// non-positive slope.
+    pub fn hz_milli(&self) -> Option<u64> {
+        if self.len < 2 {
+            return None;
+        }
+        let (x0, y0) = self.at(0);
+        let n = self.len as i128;
+        let (mut sx, mut sy, mut sxx, mut sxy) = (0i128, 0i128, 0i128, 0i128);
+        for i in 0..self.len {
+            let (xi, yi) = self.at(i);
+            let dx = xi as i128 - x0 as i128;
+            let dy = yi as i128 - y0 as i128;
+            sx += dx;
+            sy += dy;
+            sxx = sxx.checked_add(dx.checked_mul(dx)?)?;
+            sxy = sxy.checked_add(dx.checked_mul(dy)?)?;
+        }
+        let num = n.checked_mul(sxx)?.checked_sub(sx.checked_mul(sx)?)?;
+        let den = n.checked_mul(sxy)?.checked_sub(sx.checked_mul(sy)?)?;
+        if num <= 0 || den <= 0 {
+            return None;
+        }
+        let (num, den) = (num as u128, den as u128);
+        let (q1, r1) = (num / den, num % den);
+        let r2 = r1.checked_mul(1_000_000)?;
+        let (q2, r3) = (r2 / den, r2 % den);
+        let q3 = r3.checked_mul(1_000_000)? / den;
+        let hz = q1
+            .checked_mul(1_000_000_000_000)?
+            .checked_add(q2 * 1_000_000)?
+            .checked_add(q3)?;
+        u64::try_from(hz).ok()
+    }
+
     fn at(&self, i: usize) -> (u64, i64) {
         self.win[(self.start + i) % WINDOW]
     }

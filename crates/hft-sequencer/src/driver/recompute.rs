@@ -183,7 +183,7 @@ fn mirror<S: StrategySet>(
         .map_err(VerifyError::Boot)?;
     seq.inst.models.on = true;
     seq.inst.models.slots = (0..seq.inst.slots.len()).map(|_| ModelSlot::default()).collect();
-    seq.inst.models.prev_tick_utc = advisor::prev_tick_utc(log, start);
+    seq.inst.models.prev_tick_utc = advisor::prev_tick_utc(log, start, &seq.e);
     Ok(seq)
 }
 

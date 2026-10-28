@@ -19,7 +19,7 @@ fn dir() -> PathBuf {
 #[test]
 fn evt_173_canonical_records() {
     let recs = records();
-    assert_eq!(recs.len(), 40);
+    assert_eq!(recs.len(), 41);
     let regen = std::env::var_os("HFT_REGEN_GOLDEN").is_some();
     if regen {
         std::fs::create_dir_all(dir()).unwrap();

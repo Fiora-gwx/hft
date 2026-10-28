@@ -244,6 +244,12 @@ field = "base_tsc"
 class = 2
 reason = "engine-clock base of the previous run; the next run's EngineClock replaces it"
 
+[[tsc]]
+row = "UtcLineRow"
+field = "tsc"
+class = 2
+reason = "engine UTC line of the snapshot's run (section 32); the next run's EngineClock clears it"
+
 [[allow]]
 file = "crates/hft-venue/src/account.rs"
 lints = ["clippy::disallowed_macros"]

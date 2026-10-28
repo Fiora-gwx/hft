@@ -611,6 +611,12 @@ kind 0x050A EngineClock v1 fixed 32
   16 prev_last_seq u64
   24 source enum:EngineClockSource
   25 _pad pad:7
+kind 0x050B UtcAnchor v1 fixed 32
+  0 tsc tsc
+  8 realtime_ns i64
+  16 hz_milli u64
+  24 err_ns u32
+  28 _pad pad:4
 kind 0x0601 RawRx v1 multi 24
   0 venue id:venue
   1 conn id:conn

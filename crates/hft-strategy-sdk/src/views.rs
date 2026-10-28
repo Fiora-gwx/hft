@@ -43,7 +43,8 @@ pub struct EngineClockAnchor {
     /// `EngineClock.tsc_hz_milli` (TSC frequency in mHz); 0 = unknown (conversions degrade to the
     /// anchor values).
     pub tsc_hz_milli: u64,
-    /// UTC calibration pair of the current segment: a TSC and its UTC ns.
+    /// UTC anchor: the current segment's calibration pair, or after a `UtcAnchor` re-anchoring
+    /// the current record's TSC and its engine UTC (hft-sequencer "引擎 UTC").
     pub utc_tsc: Tsc,
     pub utc_ns: i64,
 }
@@ -106,8 +107,8 @@ pub struct Now {
     pub tsc: Tsc,
     /// Engine time: continuous across restarts, downtime not counted. Persisted times use it.
     pub engine_ns: i64,
-    /// From the current segment's calibration pair (deterministic); unusable for time decisions
-    /// when `clock_ok = false`.
+    /// Engine UTC: the journal's calibration pair re-anchored by `UtcAnchor` Inputs
+    /// (deterministic, non-decreasing); unusable for time decisions when `clock_ok = false`.
     pub utc_ns: i64,
     pub seq: u64,
     /// Seq of this run's `EpochStart`; the only cross-run Advice expiry criterion.

@@ -32,6 +32,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244、SEQ-442 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
+| 引擎 UTC | SEQ-443–SEQ-446 |
 | 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434、SEQ-440 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
@@ -1678,6 +1679,70 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 - 期望:
   - 节 25 = `{0, 1 000 000, 10^12, 100}`;新段没有 `EngineClock`;`Bbo` 的 engine_ns = 记录头 tsc − 1 000 000
 - 实现:`crates/hft-sequencer/tests/clock.rs::seq_112_roll_keeps_base`
+
+### SEQ-443 `UtcAnchor` 的重锚:落后即跳到目标,超前即按 500 ppm 减速
+
+- 规则:[引擎 UTC](README.md#引擎-utc)
+- 级别:table
+- 里程碑:M2
+- 前置:`EngineClock.tsc_hz_milli = 10^12`(1 tick = 1 ns);重锚记录头 tsc `t = 10^7`,重锚前该处引擎 UTC `cur = UTC0`
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_443_anchor_line`
+
+| 行 | `UtcAnchor`(校准对 tsc / realtime / `hz_milli`) | 期望 |
+|---|---|---|
+| SEQ-443.1 | `t` / `UTC0 + 2 ms` / 10^12 | 线 `{t, UTC0 + 2 ms, 10^12, lead 0}`;`t` 处 UTC0 + 2 ms,`t + 1 000` 处 UTC0 + 2 ms + 1 µs |
+| SEQ-443.2 | `t` / `UTC0 − 1 ms` / 10^12 | `lead = 1 ms`;`t` 处仍为 UTC0;`t + 1 s` 处 = 目标 + 1 s + 0.5 ms;`t + 2 s`、`t + 3 s` 处 = 目标 + 2 s、+ 3 s;`UTC_SLEW_PPM = 500` |
+| SEQ-443.3 | `t − 50 000` / `UTC0 + 1 ms` / 10^12 | 目标外推到 `t`:`utc_ns = UTC0 + 1.05 ms`,lead 0 |
+| SEQ-443.4 | `t` / UTC0 / 999 970 000 000(计数器慢 30 ppm) | 线频率取该值;`t + 999 970 000` 处 = UTC0 + 1 s |
+| SEQ-443.5 | `hz_milli` = 0、10^12 × 1.001 + 1 000;另 10^12 × 1.001 | 前两者线频率取 `EngineClock` 的 10^12;后者(恰在 1 000 ppm)取该值 |
+| SEQ-443.6 | 无重锚;随后一条 | 无重锚时记录 UTC = 段校准对按 `EngineClock` 频率换算;有重锚后 SDK 锚点 = `(记录 tsc, 线在该处的 UTC)` |
+
+### SEQ-444 引擎 UTC 在任意重锚序列下单调不减,重锚处取 `max(原值, 目标)`
+
+- 规则:[引擎 UTC](README.md#引擎-utc)
+- 级别:prop
+- 里程碑:M2
+- 性质:逐步读到的引擎 UTC 单调不减;重锚记录处的 UTC = `max(重锚前该处 UTC, 目标)`;引擎的乘数-移位换算与 `UtcLineRow::utc_at` 的 floor 定义式逐位相同
+- 生成:`EngineClock.tsc_hz_milli` ∈ {10^12, 1.05 × 10^12} ∪ 均匀 [15 625 000 001, 8 × 10^12];1–40 步,每步 TSC 前进均匀 [1, 5 × 10^9) tick,三分之二的步带一条重锚,其校准对使 realtime 与该处引擎 UTC 相差均匀 [−5 ms, 5 ms),频率取 `EngineClock` 的或慢 10 ppm
+- 参考:重锚前该处 UTC 与目标的较大者;上一步读数;`UtcLineRow::utc_at`(i128 定义式)
+- 例数:PR 512
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_444_line_monotone`
+
+### SEQ-445 计数器慢 30 ppm 的一天里引擎 UTC 与 CLOCK_REALTIME 之差有界
+
+- 规则:[引擎 UTC](README.md#引擎-utc)
+- 级别:integ
+- 里程碑:M2
+- 前置:假 `ClockReads`:计数器比 CLOCK_REALTIME 慢 30 ppm(12 h 时再变 1 ppm),CLOCK_MONOTONIC_RAW 按标称 1 GHz 换算计数器,每次读数 10 tick;`TscClock::calibrate_with` 启动校准(得标称频率,即 30 ppm 偏差),其校准对为段校准对
+- 步骤:
+  1. 24 h 内每 1 s:`sample_pair_with` + `DriftTracker::push`;Synced 节拍每 10 个(及首个)构造 `UtcAnchor{对, tracker.hz_milli()}`,50 µs 后在该处应用
+  2. 每 100 ms 读一次引擎 UTC 并与该时刻的 CLOCK_REALTIME 比较
+- 期望:
+  - 引擎 UTC 单调不减;首个重锚前误差 ≤ 1 ms,其后全程 ≤ 50 µs;重锚 ≥ 8 600 次
+  - 对照:只用启动校准时 24 h 后落后 > 2.5 s
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_445_day_bounded`
+
+### SEQ-446 `UtcAnchor` 是 Input:节 32、回放与新运行
+
+- 规则:[引擎 UTC](README.md#引擎-utc)、[快照](README.md#快照)
+- 级别:replay
+- 里程碑:M2
+- 前置:B0 稳态;S1 在每条 `Bbo` 上记录 `Now.{tsc, utc_ns}`
+- 输入:经 hk 环交出的 3 条 `UtcAnchor` 与其间的 `Bbo`、两个关键帧 `Timer{Sys, Snapshot}`,以及在线运行产生的完整 journal
+- 步骤:
+  1. 交出一条使引擎落后 2 ms、频率慢 30 ppm 的重锚,1 s 后一条 `Bbo`
+  2. 交出一条使引擎超前 1 ms 的重锚,其后每 1 s 一条 `Bbo` 共 4 条
+  3. 关键帧;再一条重锚与 3 条 `Bbo`;再一个关键帧
+  4. 从首个快照与从步骤 3 的关键帧各做一次验证回放
+  5. 从第二个关键帧崩溃恢复(重放尾部)
+- 期望:
+  - 重锚记录为 Input,处理后节 32 的线 = `{记录头 tsc, ..., 30 ppm 频率, lead 0}`;其后 `Bbo` 的 `Now.utc_ns` = 线在其 tsc 处的值
+  - 步骤 2 的 lead = 1 ms、重锚处 UTC 不变;各 `Bbo` 的 `Now.utc_ns` 单调不减,第 4 条 = 目标线(lead 已耗尽)
+  - 关键帧节 32 = 当时的线;启动快照(未重锚)没有节 32
+  - 两次验证回放都没有不一致,回放中 S1 看到的 `(tsc, utc_ns)` 与连续运行逐条相同
+  - 冷读者 `advisor::utc_of_record` 按日志重算的每条 `Bbo` 的 UTC 与连续运行逐条相同,含最后一条重锚之前的记录(此处按最终 UTC 线向前外推会差该重锚的步长);崩溃恢复后的 journal 中上一次运行的记录仍得到该运行的值
+  - 新运行的 `EngineClock` 之后线未设置,UTC 回到新段校准对
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_446_anchor_input_replay`
 
 ### SEQ-113 BBO 连接上各 Input 对连接活性的作用
 

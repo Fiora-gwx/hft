@@ -131,6 +131,7 @@ fn evt_070_system_layouts() {
     check!("EVT-070.10", Timer, 24, 8; timer_id @ 0, owner @ 4, _pad @ 6, group @ 8, _pad2 @ 12, deadline_tsc @ 16);
     check!("EVT-070.11", ConnState, 24, 8; venue @ 0, conn @ 1, state @ 2, role @ 3, inst @ 4, reason @ 8,
         account @ 12, _pad2 @ 13, rx_tsc @ 16);
+    check!("EVT-070.12", UtcAnchor, 32, 8; tsc @ 0, realtime_ns @ 8, hz_milli @ 16, err_ns @ 24, _pad @ 28);
 }
 
 #[test]

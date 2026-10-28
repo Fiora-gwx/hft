@@ -383,7 +383,7 @@ impl<C: Clock> Seq<C> {
                 self.meta(now, &n);
                 self.w.publish();
             }
-            HkMsg::Sys { .. } => {}
+            HkMsg::Sys { .. } | HkMsg::UtcAnchor(_) => {}
         }
     }
 

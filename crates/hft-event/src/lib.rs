@@ -74,7 +74,7 @@ pub use strategy::{
 };
 pub use system::{
     ClockStatus, ConnRole, ConnState, ConnStateKind, EngineClock, HostProfile, LatencySample, NOTE_NAMES,
-    Note, NoteLevel, NoteName, NoteSource, SegmentRoll, Timer, VField, note_code, note_name,
+    Note, NoteLevel, NoteName, NoteSource, SegmentRoll, Timer, UtcAnchor, VField, note_code, note_name,
 };
 pub use timer::{OmsTimer, SysTimer, TIMER_OWNER_STRATEGY_BASE, TimerCode, TimerErr};
 pub use var::{

@@ -57,7 +57,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
 | 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435 |
-| 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
+| 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | CORE-390 |
@@ -4289,6 +4289,36 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-418.1 | Synced、Synced、Synced(之前为 Synced) | 3 条 `ClockStatus`;0 条时钟判定 `HkMsg::Sys` |
 | CORE-418.2 | Synced、Stepped、Synced | 3 条 `ClockStatus`(第 2 条 `state = Stepped`);2 条 `HkMsg::Sys`(节拍 2、3) |
 | CORE-418.3 | Stepped、Stepped、Unsynced | 3 条 `ClockStatus`;3 条 `HkMsg::Sys` |
+
+### CORE-437 `UtcAnchor` 在 Synced 节拍上按 `clock.anchor_interval_ms` 送出
+
+- 规则:[实现说明](README.md#实现说明)(引擎 UTC 的重锚,语义归 [hft-sequencer 引擎 UTC](../../crates/hft-sequencer/README.md#引擎-utc))
+- 级别:table
+- 里程碑:M3
+- 前置:`AnchorTick::new(3)`;第 k 个节拍的校准对 `tsc = 1 000 + k × 999 970 000`、`realtime_ns = B + k × 10^9`、`err_ns = 35`,tracker 频率 `999 970 000 000`;每行一个新的状态
+- 实现:`apps/hft-core/tests/housekeeping.rs::core_437_utc_anchor_cadence`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-437.1 | 7 个 Synced | 节拍 0、3、6 各一条 `HkMsg::UtcAnchor` |
+| CORE-437.2 | Unsynced、Unsynced,其后 4 个 Synced | 节拍 2、5 |
+| CORE-437.3 | Synced、Synced、Stepped、Unsynced、Synced、Synced | 节拍 0、4(非 Synced 节拍不送,恢复后的第一个 Synced 节拍立即送) |
+| CORE-437.4 | 1 个 Synced | 体 = 该节拍的 `(tsc, realtime_ns)`、`hz_milli = 999 970 000 000`、`err_ns = 35` |
+| CORE-437.5 | `interval_ms = 1 000`,`anchor_interval_ms` = 10 000、2 500、1 | `anchor_every()` = 10、3、1 |
+
+### CORE-438 实盘 IO:驱动 UTC 取最近的 `ClockStatus`,`HkMsg::UtcAnchor` 成为 Input
+
+- 规则:[实现说明](README.md#实现说明)
+- 级别:table
+- 里程碑:M3
+- 前置:`io::Io`,启动校准对 `(tsc 1 000, B)`、1 GHz;hk 环
+- 实现:`apps/hft-core/tests/housekeeping.rs::core_438_live_io_clock`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-438.1 | 无 `ClockStatus`;`utc_of(1 000 + 5 × 10^9)` | B + 5 s(启动校准对) |
+| CORE-438.2 | hk 环交出 `ClockStatus{tsc 1 000 + 10^9, realtime B + 1 s + 30 µs}`;`utc_of(1 000 + 2 × 10^9)`;`roll_info()` | 交出的记录为 `ClockStatus`;B + 2 s + 30 µs;`roll_info().calib` 仍是启动校准对 |
+| CORE-438.3 | hk 环交出 `HkMsg::UtcAnchor` | 交出 Input `UtcAnchor`,体与消息逐字节相同 |
 
 ### CORE-419 `rt.host.mode` 决定 hard 位是拒绝启动还是只告警
 

@@ -1,4 +1,4 @@
-//! Calibration with injected readings, calibration pairs, drift tracking (RT-053 – RT-055).
+//! Calibration with injected readings, calibration pairs, drift tracking (RT-053 – RT-055, RT-168).
 
 #![allow(
     clippy::disallowed_types,
@@ -265,4 +265,44 @@ fn rt_055_drift_tracker() {
     want.extend(std::iter::repeat_n(Synced, 59));
     want.push(Synced);
     assert_eq!(got, want, "RT-055.6");
+}
+
+#[test]
+fn rt_168_drift_tracker_rate() {
+    // Counter 30 ppm slow against CLOCK_REALTIME: 999 970 000 ticks per real second.
+    let hz: u64 = 999_970_000_000;
+    let pair = |k: i64, jitter: i64| CalibPair {
+        tsc: Tsc(5_000 + (k as u128 * hz as u128 / 1_000) as u64),
+        realtime_ns: R + k * 1_000_000_000 + jitter,
+        phc_ns: 0,
+        err_ns: 0,
+    };
+    let mut t = DriftTracker::new(50_000);
+    assert_eq!(t.hz_milli(), None, "RT-168.1");
+    t.push(pair(0, 0));
+    assert_eq!(t.hz_milli(), None, "RT-168.1");
+    t.push(pair(1, 0));
+    assert_eq!(t.hz_milli(), Some(hz), "RT-168.2");
+    for k in 2..100 {
+        t.push(pair(k, 0));
+    }
+    assert_eq!(t.hz_milli(), Some(hz), "RT-168.3");
+    // ±40 ns of pair jitter over the 60-pair window: within 0.01 ppm of the true rate.
+    let mut t = DriftTracker::new(50_000);
+    for k in 0..60 {
+        t.push(pair(k, [40, -40, 0, 25, -25][k as usize % 5]));
+    }
+    let got = t.hz_milli().unwrap();
+    assert!(got.abs_diff(hz) * 100_000_000 <= hz, "RT-168.4 {got}");
+    // A counter that does not advance has no rate.
+    let mut t = DriftTracker::new(u32::MAX);
+    for k in 0..3 {
+        t.push(CalibPair {
+            tsc: Tsc(7),
+            realtime_ns: R + k * 1_000_000_000,
+            phc_ns: 0,
+            err_ns: 0,
+        });
+    }
+    assert_eq!(t.hz_milli(), None, "RT-168.5");
 }
