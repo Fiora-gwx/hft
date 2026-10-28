@@ -1740,6 +1740,7 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
   - 步骤 2 的 lead = 1 ms、重锚处 UTC 不变;各 `Bbo` 的 `Now.utc_ns` 单调不减,第 4 条 = 目标线(lead 已耗尽)
   - 关键帧节 32 = 当时的线;启动快照(未重锚)没有节 32
   - 两次验证回放都没有不一致,回放中 S1 看到的 `(tsc, utc_ns)` 与连续运行逐条相同
+  - 冷读者 `advisor::utc_of_record` 按日志重算的每条 `Bbo` 的 UTC 与连续运行逐条相同,含最后一条重锚之前的记录(此处按最终 UTC 线向前外推会差该重锚的步长);崩溃恢复后的 journal 中上一次运行的记录仍得到该运行的值
   - 新运行的 `EngineClock` 之后线未设置,UTC 回到新段校准对
 - 实现:`crates/hft-sequencer/tests/utc.rs::seq_446_anchor_input_replay`
 

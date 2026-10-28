@@ -1169,9 +1169,10 @@ pub(crate) fn restore_model<S: StrategySet>(
     Ok(None)
 }
 
-/// UTC of the last `Timer{Sys, AdvisorTick}` at or before record `ix`. `e` is the engine restored
-/// at `ix`: a tick of its run after a `UtcAnchor` takes the run's UTC line (section 32); otherwise
-/// the tick's segment calibration pair.
+/// UTC of the last `Timer{Sys, AdvisorTick}` at or before record `ix`: the tick's `Now.utc_ns`
+/// recomputed from the log (`utc_of_record`). Only when the tick's run starts before `log`, `e`
+/// (the engine restored at `ix`) gives it: its UTC line for a tick of its run after the line was
+/// set; otherwise the tick's segment calibration pair.
 pub(crate) fn prev_tick_utc(log: &Log, ix: usize, e: &Engine) -> Option<i64> {
     let k = (0..=ix).rev().find(|k| {
         log.recs.get(*k).is_some_and(|r| {
@@ -1182,10 +1183,69 @@ pub(crate) fn prev_tick_utc(log: &Log, ix: usize, e: &Engine) -> Option<i64> {
         })
     })?;
     let r = log.recs.get(k)?;
-    if e.clock.utc().is_set() && e.clock.is_set() && r.seq > e.clock.row.clock_seq {
+    if let Some(u) = utc_of_record(log, k) {
+        return Some(u);
+    }
+    if e.clock.utc().is_set()
+        && e.clock.is_set()
+        && r.seq > e.clock.row.clock_seq
+        && r.tsc >= e.clock.utc().tsc
+    {
         return Some(e.utc_at(Tsc(r.tsc)));
     }
-    let c = log.segs.get(log.seg_of(k))?;
+    segment_utc(log, k)
+}
+
+/// Engine UTC (`Now.utc_ns`) of record `ix`, recomputed from the log as hft-sequencer README
+/// "引擎 UTC" 6: the run's `EngineClock` (the last one at or before `ix`), then every `UtcAnchor`
+/// Input of the run before `ix` in order, each applied at the UTC the engine had at that record.
+/// Before the run's first `UtcAnchor`, the record's segment calibration pair. `None` when the
+/// run's `EngineClock` is not in `log`.
+pub fn utc_of_record(log: &Log, ix: usize) -> Option<i64> {
+    log.recs.get(ix)?;
+    let ec_ix = (0..=ix).rev().find(|k| {
+        log.recs
+            .get(*k)
+            .is_some_and(|x| x.kind == EventKind::ENGINE_CLOCK)
+    })?;
+    let ec_rec = log.recs.get(ec_ix)?;
+    let ec = ec_rec.read::<hft_event::EngineClock>()?;
+    let mut c = crate::clock::EngineClock::new(crate::clock::EngineClockRow {
+        base_engine_ns: ec.base_engine_ns,
+        base_tsc: ec_rec.tsc,
+        tsc_hz_milli: ec.tsc_hz_milli,
+        clock_seq: ec_rec.seq,
+    })
+    .ok()?;
+    // `Engine::utc_at` with the engine's segment clock at record `k` (log segment of `k`).
+    let engine_utc = |c: &crate::clock::EngineClock, k: usize| -> Option<i64> {
+        let t = Tsc(log.recs.get(k)?.tsc);
+        let s = log.segs.get(log.seg_of(k))?;
+        Some(c.anchor_at(t, Tsc(s.calib_tsc), s.calib_realtime_ns).utc_of(t))
+    };
+    for k in ec_ix + 1..ix {
+        let Some(x) = log.recs.get(k) else { break };
+        if x.kind != EventKind::UTC_ANCHOR || x.role() != Role::Input {
+            continue;
+        }
+        let Some(a) = x.read::<hft_event::UtcAnchor>() else {
+            continue;
+        };
+        let cur = engine_utc(&c, k)?;
+        let line = crate::clock::UtcLineRow::anchored(cur, Tsc(x.tsc), &a, c.row.tsc_hz_milli);
+        c.set_utc(line).ok()?;
+    }
+    if c.utc().is_set() {
+        engine_utc(&c, ix)
+    } else {
+        segment_utc(log, ix)
+    }
+}
+
+/// UTC of record `ix` by its segment calibration pair (no `UtcAnchor` applied in its run).
+fn segment_utc(log: &Log, ix: usize) -> Option<i64> {
+    let r = log.recs.get(ix)?;
+    let c = log.segs.get(log.seg_of(ix))?;
     let d = i128::from(r.tsc) - i128::from(c.calib_tsc);
     Some(c.calib_realtime_ns + (d * 1_000_000_000_000 / i128::from(c.tsc_hz_milli.max(1))) as i64)
 }

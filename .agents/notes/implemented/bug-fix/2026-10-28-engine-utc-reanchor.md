@@ -2,6 +2,7 @@
 
 Status: implemented
 
+
 ## Problem
 
 SDK `Now.utc_ns` 由段头校准对按 `EngineClock.tsc_hz_milli` 换算。hft-core 的段头一直写启动时的校准对,频率在启动时对 CLOCK_MONOTONIC_RAW 校准;MONOTONIC_RAW 由计数器按标称频率(aarch64 `CNTFRQ_EL0`)换算,所以校准得到的是标称频率本身。pm-strategy-euw1(c8g,Graviton)上计数器的真实频率比标称频率低约 30 ppm:19 次运行(0.3–24.7 h)的引擎 UTC − 接收 `rx_ns` 都以 30.6–30.8 ppm 线性增长,24.7 h 落后 2.7 s,而 `rx_ns` − 交易所时间一直约 10 ms。策略的 5 分钟窗口与"结束前 60 s 停止报价"按引擎 UTC 判断,长运行时整体偏移数秒。
@@ -26,6 +27,6 @@ SDK `Now.utc_ns` 由段头校准对按 `EngineClock.tsc_hz_milli` 换算。hft-c
 
 ## Consequences
 
-决策 UTC 在测试的模拟一天中(计数器慢 30 ppm、12 h 时再变 1 ppm)首次重锚后与 CLOCK_REALTIME 相差 ≤ 50 µs,首次重锚前(约 3 s)≤ 1 ms;只靠启动校准时一天落后约 2.6 s。代价是每 10 s 一条 32 B 的 Input,以及冷读者若要复现决策 UTC 必须按日志重放重锚(段头校准对仍是启动校准)。advisor 从快照起步时,上一条 AdvisorTick 若与快照之间隔着重锚,其 UTC 按恢复出的 UTC 线换算,可能与连续运行相差一次重锚的步长(微秒级)。
+决策 UTC 在测试的模拟一天中(计数器慢 30 ppm、12 h 时再变 1 ppm)首次重锚后与 CLOCK_REALTIME 相差 ≤ 50 µs,首次重锚前(约 3 s)≤ 1 ms;只靠启动校准时一天落后约 2.6 s。代价是每 10 s 一条 32 B 的 Input,以及冷读者若要复现决策 UTC 必须按日志重放重锚(段头校准对仍是启动校准)。advisor 从快照起步时,上一条 AdvisorTick 的 UTC 同样按日志重放重锚得到(不能用恢复出的 UTC 线向前外推:tick 与快照之间隔着重锚时会差一次步长,tick 属于上一次运行时会差该运行累计的漂移)。
 
 warm 线程(gw 签名时间戳、REST 截止、ctl)仍用启动时按值传入的 `TscUtc`,没有经 `SeqCell<TscUtc>` 更新,同样按 30 ppm 漂移;它们不进决策回放,单独修正。

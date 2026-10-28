@@ -2,8 +2,10 @@
 
 use hft_event::{EventKind, Role, UtcAnchor};
 use hft_rt::{CalibConfig, ClockReads, ClockVerdict, DriftTracker, Tsc, TscClock, sample_pair_with};
+use hft_sequencer::advisor::utc_of_record;
 use hft_sequencer::clock::{EngineClock, EngineClockRow, UTC_SLEW_PPM, UtcLineRow};
 use hft_sequencer::driver::live::RingId;
+use hft_sequencer::driver::replay::Log;
 use hft_sequencer::{SnapshotSel, StepOutcome};
 use hft_strategy_sdk::EventRef;
 use proptest::prelude::*;
@@ -342,6 +344,7 @@ fn seq_446_anchor_input_replay() {
     assert_eq!(secs.utc_line, l2, "SEQ-446.3");
     let first = h.snapshots().first().cloned().unwrap();
     assert!(!snap(&first).1.utc_line.is_set(), "SEQ-446.3");
+    let before3 = *seen.borrow().last().unwrap();
     h.adv(MS);
     let t3 = h.now();
     let cur = h.s.engine().utc_at(Tsc(t3));
@@ -365,6 +368,19 @@ fn seq_446_anchor_input_replay() {
     let mm = h.verify_from(Some(kf.seq));
     assert!(mm.is_empty(), "SEQ-446.4 {mm:?}");
     assert_eq!(*seen.borrow(), after_kf, "SEQ-446.4");
+    // A cold reader (the advisor's previous AdvisorTick) recomputes every Now.utc_ns from the log,
+    // also before the last UtcAnchor, where the final line extrapolated back is off by its step.
+    let bbo_at = |log: &Log, t: u64| {
+        log.recs
+            .iter()
+            .position(|r| r.kind == EventKind::BBO && r.role() == Role::Input && r.tsc == t)
+            .unwrap()
+    };
+    let log = Log::from_segments(&h.j().segments);
+    for &(tq, uq) in &live {
+        assert_eq!(utc_of_record(&log, bbo_at(&log, tq)), Some(uq), "SEQ-446.4 {tq}");
+    }
+    assert_ne!(h.s.engine().utc_at(Tsc(before3.0)), before3.1, "SEQ-446.4");
     clear_hook();
     // .5 A restart's EngineClock starts a new run from its own segment pair.
     let rr = Rerun::default();
@@ -380,5 +396,9 @@ fn seq_446_anchor_input_replay() {
         rr.utc + ((t.0 - rr.tsc) * 1_000_000_000_000 / rr.hz) as i64,
         "SEQ-446.5"
     );
+    // The previous run's records keep that run's line for a cold reader of the new journal.
+    let log = Log::from_segments(&h2.j().segments);
+    let (tl, ul) = *live.last().unwrap();
+    assert_eq!(utc_of_record(&log, bbo_at(&log, tl)), Some(ul), "SEQ-446.5");
     let _ = e0;
 }
