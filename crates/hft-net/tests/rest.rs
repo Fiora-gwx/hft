@@ -455,3 +455,89 @@ fn net_279_idle_connection_recycled() {
     assert_eq!(r.id(), ConnId(4), "NET-279.5");
     assert_eq!(p.pending_conn(42), Some(ConnId(3)), "NET-279.5");
 }
+
+/// `RestPool::<16>::with_lanes(lanes, reserve)` with `open` of its lanes installed (ids 1..).
+fn lanes(lanes: usize, reserve: usize, open: u8) -> (RestPool<16>, Vec<MemPeer>) {
+    let cfg = NetConfig {
+        rx_buf: RoleBytes::all(65536),
+        ..NetConfig::default()
+    };
+    let mut p = RestPool::<16>::with_lanes(b"a.test", &cfg, mempeer::clock(), lanes, reserve).unwrap();
+    let mut peers = Vec::new();
+    for id in 1..=open {
+        let (h, s) = rest_conn(&cfg, id);
+        p.install(h).unwrap();
+        peers.push(s);
+    }
+    (p, peers)
+}
+
+#[test]
+fn net_377_lane_count_from_constructor() {
+    let cfg = NetConfig::default();
+    let make = |n, r| RestPool::<16>::with_lanes(b"a.test", &cfg, mempeer::clock(), n, r);
+    // .1 sizes outside 1..=N, or a reserve not below the lane count, are refused.
+    for (n, r) in [(0, 0), (17, 0), (4, 4), (4, 5)] {
+        assert!(make(n, r).is_none(), "NET-377.1 {n}/{r}");
+    }
+    // .2 four lanes: four builds and installs, then the pool is full.
+    let mut p = make(4, 0).unwrap();
+    assert_eq!(p.lanes(), 4, "NET-377.2");
+    for id in 1..=5u8 {
+        let want = p.next_build(0);
+        let (h, _s) = rest_conn(&cfg, id);
+        if id <= 4 {
+            assert_eq!(want, Some(BuildWhy::Fill), "NET-377.2 {id}");
+            assert_eq!(p.install(h), Ok(ConnId(id)), "NET-377.2 {id}");
+        } else {
+            assert_eq!(want, None, "NET-377.2");
+            assert_eq!(p.install(h), Err(PoolErr::Full), "NET-377.2");
+        }
+    }
+    // .3 four concurrent requests on four connections; the fifth is Busy.
+    let (mut p, _s) = lanes(4, 0, 4);
+    let mut conns = Vec::new();
+    for tag in 1..=4 {
+        p.submit(&req(tag), 0).unwrap();
+        conns.push(p.pending_conn(tag).unwrap());
+    }
+    conns.sort();
+    conns.dedup();
+    assert_eq!(conns.len(), 4, "NET-377.3");
+    assert_eq!(p.submit(&req(5), 0), Err(RestErr::Busy), "NET-377.3");
+    assert_eq!(p.free_lanes(), 0, "NET-377.3");
+    // .4 `new` uses every lane, none reserved.
+    let p = RestPool::<3>::new(b"a.test", &cfg, mempeer::clock());
+    assert_eq!(p.lanes(), 3, "NET-377.4");
+}
+
+#[test]
+fn net_378_reserved_lanes_only_for_urgent_requests() {
+    // .1 four lanes, one reserved: three requests, the fourth is Busy with one lane free.
+    let (mut p, mut s) = lanes(4, 1, 4);
+    for tag in 1..=3 {
+        p.submit(&req(tag), 0).unwrap();
+    }
+    assert_eq!(p.submit(&req(4), 0), Err(RestErr::Busy), "NET-378.1");
+    assert_eq!(p.free_lanes(), 1, "NET-378.1");
+    assert_eq!(p.get(ConnId(4)).unwrap().sys().sendmsg, 0, "NET-378.1");
+    // .2 an urgent request takes the reserved lane; then every lane is busy.
+    p.submit_urgent(&req(10), 1).unwrap();
+    assert_eq!(p.pending_conn(10), Some(ConnId(4)), "NET-378.2");
+    assert_eq!(p.submit_urgent(&req(11), 1), Err(RestErr::Busy), "NET-378.2");
+    // .3 one response frees one lane: still reserved for urgent requests.
+    deliver(&mut p, &mut s[0], 1, OK, 2);
+    assert_eq!(p.poll(2).unwrap().unwrap().tag, 1, "NET-378.3");
+    assert_eq!(p.submit(&req(12), 3), Err(RestErr::Busy), "NET-378.3");
+    p.submit_urgent(&req(13), 3).unwrap();
+    assert_eq!(p.pending_conn(13), Some(ConnId(1)), "NET-378.3");
+    // .4 no open connection: both kinds get NoConn.
+    let (mut p, _s) = lanes(4, 1, 0);
+    assert_eq!(p.submit(&req(1), 0), Err(RestErr::NoConn), "NET-378.4");
+    assert_eq!(p.submit_urgent(&req(1), 0), Err(RestErr::NoConn), "NET-378.4");
+    // .5 reserve 0: every lane serves ordinary requests (the default).
+    let (mut p, _s) = lanes(2, 0, 2);
+    p.submit(&req(1), 0).unwrap();
+    p.submit(&req(2), 0).unwrap();
+    assert_eq!(p.submit(&req(3), 0), Err(RestErr::Busy), "NET-378.5");
+}

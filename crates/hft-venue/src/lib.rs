@@ -78,6 +78,12 @@ pub const FRAME_EVENTS_MAX: usize = 64;
 pub const SNAP_BBO_BATCH_MAX: usize = 32;
 /// gw REST endpoint pools per account.
 pub const MAX_REST_ENDPOINTS: usize = 4;
+/// Most connections of one gw REST pool (`gw.rest_conns`).
+pub const GW_REST_CONNS_MAX: usize = 16;
+/// Cancels per account waiting for a free gw REST connection (README §4 "撤单优先").
+pub const GW_REST_CANCEL_QUEUE: usize = 32;
+/// A gw REST pool: `GW_REST_CONNS_MAX` lanes, `gw.rest_conns` of them used.
+pub type GwRestPool = hft_net::RestPool<GW_REST_CONNS_MAX>;
 /// Largest chunk of one acct record's raw response.
 pub const ACCT_RAW_CHUNK: usize = 16_384;
 

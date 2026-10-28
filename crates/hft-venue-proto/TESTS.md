@@ -30,7 +30,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 概要 | VPR-122、VPR-150 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| `VenueProtocol`(静态分派) | VPR-010–VPR-016、VPR-126、VPR-048、VPR-063、VPR-073、VPR-080、VPR-083、VPR-087、VPR-097、VPR-099、VPR-112、VPR-114、VPR-122 |
+| `VenueProtocol`(静态分派) | VPR-010–VPR-016、VPR-126、VPR-048、VPR-063、VPR-073、VPR-080、VPR-083、VPR-087、VPR-097、VPR-099、VPR-112、VPR-114、VPR-122、VPR-152 |
 | 辅助类型 | VPR-001–VPR-007、VPR-128、VPR-133、VPR-020、VPR-030–VPR-035、VPR-066、VPR-073、VPR-080、VPR-082、VPR-083、VPR-089、VPR-090、VPR-093、VPR-097、VPR-110、VPR-118、VPR-119 |
 | 解码输出 sink | VPR-040–VPR-042、VPR-122 |
 | 实现方必须遵守的契约 | VPR-012、VPR-013、VPR-020–VPR-022、VPR-030、VPR-045、VPR-049、VPR-050、VPR-060–VPR-129、VPR-130、VPR-133–VPR-139 |
@@ -1705,6 +1705,19 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | VPR-151.1 | 三者对 `hft-venue-proto` 的 dev 依赖 | 都带 `features = ["testkit"]` |
 | VPR-151.2 | 三者的 dev 依赖中的 `hft-testkit` | 不存在 |
 | VPR-151.3 | 三者的 `tests/contract.rs` 引用的 `check_*` 集合 | 等于 testkit 导出的全部 `check_*`(`check_chain` 只在启用增量深度的 venue 中要求) |
+
+### VPR-152 gw REST 池的连接数与撤单保留的默认值
+
+- 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)
+- 级别:table
+- 里程碑:M3
+- 前置:假协议 `FakeSpot`、`FakePerp`(都不覆盖这两项)
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_152_gw_rest_pool_defaults`
+
+| 行 | 常量 | 期望 |
+|---|---|---|
+| VPR-152.1 | `GW_REST_CONNS` | 两者都是 2 |
+| VPR-152.2 | `GW_REST_CANCEL_RESERVE` | 两者都是 0 |
 
 ## 验收
 

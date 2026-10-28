@@ -110,7 +110,7 @@ const PLAN: [(ConnRole, u16); 4] = [
     (ConnRole::Md, 64),
     (ConnRole::Order, 16),
     (ConnRole::UserStream, 4),
-    (ConnRole::Rest, 2),
+    (ConnRole::Rest, 4),
 ];
 
 impl Drop for Net {

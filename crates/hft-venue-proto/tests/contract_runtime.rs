@@ -257,3 +257,17 @@ fn vpr_112_uid_requires_successful_signed_session_evidence() {
     malformed[2] = b'1';
     assert!(!valid_uid(&malformed));
 }
+
+#[test]
+fn vpr_152_gw_rest_pool_defaults() {
+    assert_eq!(
+        (FakeSpot::GW_REST_CONNS, FakePerp::GW_REST_CONNS),
+        (2, 2),
+        "VPR-152.1"
+    );
+    assert_eq!(
+        (FakeSpot::GW_REST_CANCEL_RESERVE, FakePerp::GW_REST_CANCEL_RESERVE),
+        (0, 0),
+        "VPR-152.2"
+    );
+}

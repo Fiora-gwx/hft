@@ -1,6 +1,7 @@
 //! Gateway-owned persistent REST lanes. Responses re-enter the same account decoder as WS.
 use super::*;
-use hft_net::{RestErr, RestPool};
+use crate::GwRestPool;
+use hft_net::RestErr;
 use hft_venue_proto::{ReqRef, RestOrigin, RestReqBuf, RestWhat, RoKind, RoQuery};
 pub(super) enum HttpError {
     Net(RestErr),
@@ -19,26 +20,57 @@ pub(super) struct Pending {
     identity: Option<ClientOrderId>,
     conn: ConnId,
 }
+/// A cancel that found no free connection (README §4 "撤单优先"): encoded again when one frees.
+#[derive(Clone, Copy)]
+pub(super) struct Queued {
+    cmd: GwCmd,
+    target: TargetRef,
+    tg: Option<u32>,
+    since: u64,
+}
 pub(super) struct Pools {
-    pub endpoints: Vec<(EndpointId, RestPool<2>)>,
+    pub endpoints: Vec<(EndpointId, GwRestPool)>,
     pending: Vec<Pending>,
+    /// In-flight requests the pools can hold (the sum of their lanes).
+    cap: usize,
+    /// FIFO, at most `GW_REST_CANCEL_QUEUE` (allocated at startup).
+    cancels: VecDeque<Queued>,
     tag: u64,
     last_idle: u64,
+}
+impl Pools {
+    /// Some pool has a free open connection and room for its request.
+    fn lane_free(&mut self) -> bool {
+        self.pending.len() < self.cap && self.endpoints.iter_mut().any(|(_, p)| p.free_lanes() > 0)
+    }
+}
+/// What became of one REST order request.
+enum Sent {
+    /// Its one `SendReport` is out.
+    Reported,
+    /// Every connection busy or none open: nothing sent, nothing reported.
+    NoLane,
+}
+fn urgent(op: GwOp) -> bool {
+    matches!(op, GwOp::Cancel | GwOp::CancelAll)
 }
 impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     /// Startup only: endpoint order must match the protocol's RestReqBuf.endpoint table.
     pub fn set_rest_pools(
         &mut self,
         account: AccountId,
-        endpoints: Vec<(EndpointId, RestPool<2>)>,
+        endpoints: Vec<(EndpointId, GwRestPool)>,
     ) -> Result<(), InitErr> {
         let a = self.acct_ix(account).ok_or(InitErr::DepsMismatch)?;
         if endpoints.is_empty() || endpoints.len() > crate::MAX_REST_ENDPOINTS || self.accts[a].http.is_some()
         {
             return Err(InitErr::DepsMismatch);
         }
+        let cap = endpoints.iter().map(|(_, p)| p.lanes()).sum();
         self.accts[a].http = Some(Pools {
-            pending: Vec::with_capacity(endpoints.len() * 2),
+            pending: Vec::with_capacity(cap),
+            cap,
+            cancels: VecDeque::with_capacity(crate::GW_REST_CANCEL_QUEUE),
             endpoints,
             tag: 0,
             last_idle: 0,
@@ -51,6 +83,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         c: GwCmd,
         origin: RestOrigin,
         wire: &RestReqBuf,
+        urgent: bool,
         now: u64,
     ) -> Result<ConnId, HttpError> {
         let weight = self
@@ -76,7 +109,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let Some(http) = &mut x.http else {
             return Err(RestErr::NoConn.into());
         };
-        if http.pending.len() == http.pending.capacity() {
+        if http.pending.len() >= http.cap {
             return Err(RestErr::Busy.into());
         }
         let tag = http.tag.wrapping_add(1);
@@ -84,7 +117,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             .endpoints
             .get_mut(usize::from(wire.endpoint))
             .ok_or(RestErr::Proto)?;
-        let conn = crate::rest::submit(&mut pool.1, wire, tag, now)?;
+        let conn = crate::rest::submit(&mut pool.1, wire, tag, urgent, now)?;
         http.tag = tag;
         http.pending.push(Pending {
             tag,
@@ -113,10 +146,113 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         );
         Ok(conn)
     }
+    /// README §4 "撤单优先": queued cancels go first; a cancel that finds no free connection
+    /// waits in the account's queue instead of failing.
     pub(super) fn order_http(&mut self, a: usize, c: GwCmd, target: TargetRef, now: u64) {
+        let tg = self.target_gen(&c);
+        self.drain_cancels(a, now);
+        // A cancel behind others, or with no connection free, waits unencoded.
+        let wait = self.accts[a]
+            .http
+            .as_mut()
+            .is_some_and(|h| !h.cancels.is_empty() || !h.lane_free());
+        let sent = if urgent(c.op) && wait {
+            Sent::NoLane
+        } else {
+            self.send_order_http(a, c, target, tg, now)
+        };
+        if let Sent::NoLane = sent {
+            if urgent(c.op) {
+                self.queue_cancel(a, c, target, tg, now);
+            } else {
+                self.report(&c, tg, NO_CONN, SendStatus::NoConn, 0, 0);
+            }
+        }
+    }
+    fn queue_cancel(&mut self, a: usize, c: GwCmd, target: TargetRef, tg: Option<u32>, now: u64) {
+        let queued = self.accts[a].http.as_mut().is_some_and(|h| {
+            let room = h.cancels.len() < crate::GW_REST_CANCEL_QUEUE;
+            if room {
+                h.cancels.push_back(Queued {
+                    cmd: c,
+                    target,
+                    tg,
+                    since: now,
+                });
+            }
+            room
+        });
+        if queued {
+            self.n.rest_cancel_queued += 1;
+        } else {
+            self.n.rest_cancel_dropped += 1;
+            self.report(&c, tg, NO_CONN, SendStatus::NoConn, 0, 0);
+        }
+    }
+    /// Sends queued cancels in order while a connection is free; a cancel that waited longer
+    /// than `gw.inflight_timeout_ms` gets the `NoConn` report. Returns whether any left the queue.
+    pub(super) fn drain_cancels(&mut self, a: usize, now: u64) -> bool {
+        let wait = self.t.ms(u64::from(self.cfg.inflight_timeout_ms));
+        let mut did = false;
+        loop {
+            let Some(h) = self.accts.get_mut(a).and_then(|x| x.http.as_mut()) else {
+                return did;
+            };
+            let Some(q) = h.cancels.front().copied() else {
+                return did;
+            };
+            if now.saturating_sub(q.since) > wait {
+                h.cancels.pop_front();
+                self.n.rest_cancel_dropped += 1;
+                self.report(&q.cmd, q.tg, NO_CONN, SendStatus::NoConn, 0, 0);
+                did = true;
+                continue;
+            }
+            if !h.lane_free() {
+                return did;
+            }
+            h.cancels.pop_front();
+            if let Sent::NoLane = self.send_order_http(a, q.cmd, q.target, q.tg, now) {
+                if let Some(h) = self.accts.get_mut(a).and_then(|x| x.http.as_mut()) {
+                    h.cancels.push_front(q);
+                }
+                return did;
+            }
+            did = true;
+        }
+    }
+    /// Every account with queued cancels (each `poll_once`).
+    pub(super) fn drain_all_cancels(&mut self, now: u64) -> bool {
+        let mut did = false;
+        for a in 0..self.accts.len() {
+            if self.accts[a].http.as_ref().is_some_and(|h| !h.cancels.is_empty()) {
+                did |= self.drain_cancels(a, now);
+            }
+        }
+        did
+    }
+    /// The earliest moment a queued cancel times out.
+    pub(super) fn cancel_deadline(&self) -> Option<u64> {
+        let wait = self.t.ms(u64::from(self.cfg.inflight_timeout_ms));
+        self.accts
+            .iter()
+            .filter_map(|x| x.http.as_ref()?.cancels.front())
+            .map(|q| q.since.saturating_add(wait).saturating_add(1))
+            .min()
+    }
+    /// Shutdown: every queued cancel gets the `NoConn` report.
+    pub(super) fn fail_queued_cancels(&mut self) {
+        for a in 0..self.accts.len() {
+            while let Some(q) = self.accts[a].http.as_mut().and_then(|h| h.cancels.pop_front()) {
+                self.n.rest_cancel_dropped += 1;
+                self.report(&q.cmd, q.tg, NO_CONN, SendStatus::NoConn, 0, 0);
+            }
+        }
+    }
+    /// Encodes and submits one order request; reports it unless no connection was free.
+    fn send_order_http(&mut self, a: usize, c: GwCmd, target: TargetRef, tg: Option<u32>, now: u64) -> Sent {
         let mut wire = RestReqBuf::default();
         let clk = self.wall(now);
-        let tg = self.target_gen(&c);
         let x = &mut self.accts[a];
         if P::encode_rest_ctx(
             self.rd,
@@ -142,7 +278,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 0,
                 0,
             );
-            return;
+            return Sent::Reported;
         }
         let origin = RestOrigin {
             what: RestWhat::Order,
@@ -153,7 +289,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }),
             inst: c.inst,
         };
-        match self.submit_http(a, c, origin, &wire, now) {
+        match self.submit_http(a, c, origin, &wire, urgent(c.op), now) {
             Ok(conn) => {
                 if c.op == GwOp::Place {
                     self.write_mirror(&c);
@@ -167,8 +303,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 self.report(&c, tg, NO_CONN, SendStatus::WriteError, e, now);
             }
             Err(HttpError::Rate) => self.report(&c, tg, NO_CONN, SendStatus::RateLimited, 0, 0),
+            Err(HttpError::Net(RestErr::Busy | RestErr::NoConn)) => return Sent::NoLane,
             Err(_) => self.report(&c, tg, NO_CONN, SendStatus::NoConn, 0, 0),
         }
+        Sent::Reported
     }
     pub(super) fn poll_http(&mut self, now: u64) -> bool {
         let idle_ticks = self.t.ms(u64::from(self.cfg.rest_idle_check_ms));
@@ -251,6 +389,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     }
                     self.decode_rest_reply(r, conn, ts, now);
                 }
+                self.drain_cancels(a, now);
                 self.drain_out(now);
             }
             if let Some(h) = &mut self.accts[a].http
@@ -317,7 +456,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             req: None,
             inst: InstId(0),
         };
-        if result.is_err() || self.submit_http(a, c, origin, &wire, now).is_err() {
+        if result.is_err() || self.submit_http(a, c, origin, &wire, false, now).is_err() {
             self.conn_state(
                 c.account,
                 ConnRole::UserStream,
@@ -352,7 +491,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             req: None,
             inst: c.inst,
         };
-        if result.is_err() || self.submit_http(a, c, origin, &wire, now).is_err() {
+        if result.is_err() || self.submit_http(a, c, origin, &wire, false, now).is_err() {
             self.conn_state(
                 c.account,
                 ConnRole::Rest,

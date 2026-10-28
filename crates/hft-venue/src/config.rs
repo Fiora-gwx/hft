@@ -28,7 +28,8 @@ impl FeedRoutes {
 /// Constructor failure of every runtime (hft-core treats it as a startup failure).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum InitErr {
-    /// A key of "取值为 0 的键" is 0; the value is the key name.
+    /// A key of "取值为 0 的键" is 0, or `gw.rest_conns`/`gw.rest_cancel_reserve` is out of range;
+    /// the value is the key name.
     Cfg(&'static str),
     /// `feed.bbo_conns × groups + 1 > MAX_BBO_CONN_SLOTS`.
     BboSlots,
@@ -214,6 +215,12 @@ pub struct GwCfg {
     pub acct_body_max: u32,
     pub unknown_evt_note_every: u32,
     pub rotate_margin_s: u32,
+    /// Connections of each gw REST pool (1..=`GW_REST_CONNS_MAX`); hft-core default
+    /// `P::GW_REST_CONNS`.
+    pub rest_conns: u8,
+    /// Free connections of each gw REST pool only cancels may take (< `rest_conns`); hft-core
+    /// default `P::GW_REST_CANCEL_RESERVE`.
+    pub rest_cancel_reserve: u8,
     /// OMS slot count N per (venue, account) table: slot ids 1..=N (0 reserved); the slot mirror
     /// holds N + 1 entries indexed by slot id.
     pub oms_slots: u32,
@@ -249,6 +256,8 @@ impl Default for GwCfg {
             acct_body_max: 262_144,
             unknown_evt_note_every: 1000,
             rotate_margin_s: 3600,
+            rest_conns: 2,
+            rest_cancel_reserve: 0,
             oms_slots: 2048,
             env: VenueEnv::Prod,
             order_endpoint: EndpointId::default(),
@@ -264,6 +273,23 @@ impl GwCfg {
             env: self.env,
             stale_guard_ms: self.stale_guard_ms,
         }
+    }
+
+    /// Startup: a gw REST pool for `host` with `rest_conns` lanes and `rest_cancel_reserve` kept
+    /// for cancels; `None` when those are out of range (`GwRuntime::new` refuses them too).
+    pub fn rest_pool(
+        &self,
+        host: &[u8],
+        net: &hft_net::NetConfig,
+        clock: hft_rt::TscClock,
+    ) -> Option<crate::GwRestPool> {
+        crate::GwRestPool::with_lanes(
+            host,
+            net,
+            clock,
+            usize::from(self.rest_conns),
+            usize::from(self.rest_cancel_reserve),
+        )
     }
 }
 

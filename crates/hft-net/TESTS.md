@@ -27,7 +27,7 @@ NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位�
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 类型总览 | NET-011、NET-287 |
-| 签名草案 | NET-001–NET-010、NET-026、NET-029、NET-042、NET-043、NET-060、NET-062–NET-066、NET-082、NET-084、NET-085、NET-100–NET-102、NET-122、NET-130、NET-150、NET-158–NET-161、NET-200、NET-202、NET-203、NET-220–NET-227、NET-240–NET-253、NET-271、NET-272、NET-274、NET-275、NET-362 |
+| 签名草案 | NET-001–NET-010、NET-026、NET-029、NET-042、NET-043、NET-060、NET-062–NET-066、NET-082、NET-084、NET-085、NET-100–NET-102、NET-122、NET-130、NET-150、NET-158–NET-161、NET-200、NET-202、NET-203、NET-220–NET-227、NET-240–NET-253、NET-271、NET-272、NET-274、NET-275、NET-362、NET-377、NET-378 |
 | 调用约束 | NET-011、NET-041、NET-065、NET-090、NET-155、NET-156、NET-180、NET-212、NET-220、NET-245、NET-287 |
 | 配置项 | NET-038、NET-044、NET-099、NET-121、NET-157、NET-199、NET-207、NET-209、NET-213、NET-250、NET-264、NET-265、NET-278、NET-279、NET-300–NET-302、NET-340–NET-342、NET-360、NET-375 |
 | 实现说明 | 不适用:见子节 |
@@ -39,7 +39,7 @@ NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位�
 | 6. 源端口预计算(`RssPlan`,可选) | NET-350–NET-353 |
 | 7. 时间戳 | NET-002、NET-080、NET-081、NET-120–NET-136、NET-274、NET-337、NET-360–NET-362、NET-370、NET-373、NET-376 |
 | 8. `ConnPool` 与轮换 | NET-240–NET-254 |
-| 9. REST 客户端 | NET-260–NET-279、NET-336 |
+| 9. REST 客户端 | NET-260–NET-279、NET-336、NET-377、NET-378 |
 | 10. 内存 | NET-285、NET-287 |
 | 11. 源文件规划 | NET-164、NET-080 |
 | 延迟与资源契约 | NET-086、NET-267、NET-285、NET-286、NET-320–NET-331 |
@@ -2778,6 +2778,37 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
 - 通过标准:`hw_ts_reads / ts_reads ≥ 0.999`(PHC 不可用时本项不适用,写明原因)
 - 证据:`NET-376-<host>-<日期>.txt`,归入门槛 ⑩ 的证据目录
 - 实现:`tests/host/NET-376.sh`
+
+### NET-377 with_lanes 只用前 lanes 条通道
+
+- 规则:[9. REST 客户端](README.md#9-rest-客户端)(通道数与保留)、[签名草案](README.md#签名草案)
+- 级别:table
+- 里程碑:M3
+- 前置:`MemPeer`;`RestPool::<16>`;`rx_buf = 65536`
+- 实现:`crates/hft-net/tests/rest.rs::net_377_lane_count_from_constructor`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| NET-377.1 | `with_lanes(lanes, reserve)`,(`lanes`, `reserve`) ∈ {(0, 0), (17, 0), (4, 4), (4, 5)} | 都是 `None` |
+| NET-377.2 | `with_lanes(4, 0)`;5 次 `next_build(0)` 各接一次 `install(h_k)`(k = 1..5) | `lanes() = 4`;前 4 次 `Some(Fill)`、`Ok(k)`;第 5 次 `None`、`Err(PoolErr::Full)` |
+| NET-377.3 | `with_lanes(4, 0)`,4 条连接已交接;连续 `submit` 5 次 | 前 4 个在 4 条不同的连接上;第 5 个 `Err(Busy)`;`free_lanes() = 0` |
+| NET-377.4 | `RestPool::<3>::new` | `lanes() = 3` |
+
+### NET-378 保留的通道只给 submit_urgent
+
+- 规则:[9. REST 客户端](README.md#9-rest-客户端)(通道数与保留)、[签名草案](README.md#签名草案)
+- 级别:table
+- 里程碑:M3
+- 前置:`MemPeer`;`RestPool::<16>`;`with_lanes(4, 1)`,连接 1–4 已交接(第 4、5 行另述)
+- 实现:`crates/hft-net/tests/rest.rs::net_378_reserved_lanes_only_for_urgent_requests`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| NET-378.1 | `submit` 3 次(tag 1–3),再 `submit`(tag 4) | 前 3 个 `Ok`;第 4 个 `Err(Busy)`;`free_lanes() = 1`;连接 4 的 `sendmsg` 仍为 0 |
+| NET-378.2 | `submit_urgent`(tag 10);再 `submit_urgent`(tag 11) | tag 10 在连接 4 上;tag 11 `Err(Busy)` |
+| NET-378.3 | tag 1 的应答交出;`submit`(tag 12);`submit_urgent`(tag 13) | `Err(Busy)`;tag 13 在连接 1 上 |
+| NET-378.4 | `with_lanes(4, 1)`,没有交接任何连接;`submit`、`submit_urgent` | 都是 `Err(NoConn)` |
+| NET-378.5 | `with_lanes(2, 0)`,2 条连接;`submit` 3 次 | 前 2 个 `Ok`;第 3 个 `Err(Busy)` |
 
 ## 验收
 

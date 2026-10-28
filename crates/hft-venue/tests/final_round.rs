@@ -521,7 +521,7 @@ fn ven_320_redaction_scan_across_account_and_gateway_paths() {
         A1,
         vec![(
             EndpointId(0),
-            RestPool::new(b"a.test", &net::net_cfg(), mempeer::clock()),
+            RestPool::with_lanes(b"a.test", &net::net_cfg(), mempeer::clock(), 2, 0).unwrap(),
         )],
     )
     .unwrap();

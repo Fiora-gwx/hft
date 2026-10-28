@@ -144,6 +144,10 @@ pub struct GwCounters {
     pub delivered: u64,
     /// Idle rounds in which `VenueProtocol::gw_idle` did work (README §4 step 8).
     pub idle_work: u64,
+    /// REST cancels queued for a free connection, and those that failed while or instead of
+    /// waiting (queue full, waited longer than `gw.inflight_timeout_ms`).
+    pub rest_cancel_queued: u64,
+    pub rest_cancel_dropped: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -439,6 +443,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             if v == 0 {
                 return Err(InitErr::Cfg(k));
             }
+        }
+        if cfg.rest_conns == 0 || usize::from(cfg.rest_conns) > crate::GW_REST_CONNS_MAX {
+            return Err(InitErr::Cfg("gw.rest_conns"));
+        }
+        if cfg.rest_cancel_reserve >= cfg.rest_conns {
+            return Err(InitErr::Cfg("gw.rest_cancel_reserve"));
         }
         let rd = deps.rd;
         if accts
@@ -810,6 +820,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             ls.did_work = true;
             self.handover(h, now);
         }
+        ls.did_work |= self.drain_all_cancels(now);
         let aux = self.round.is_multiple_of(u64::from(self.cfg.aux_every));
         self.round = self.round.wrapping_add(1);
         let reserve = usize::from(self.cfg.cmds_per_loop);
@@ -2434,7 +2445,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     req: None,
                     inst: InstId(0),
                 };
-                if self.submit_http(a, c, origin, &wire, now).is_err() {
+                if self.submit_http(a, c, origin, &wire, false, now).is_err() {
                     ok = false;
                 }
             }
@@ -2996,7 +3007,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
 
     fn deadline(&self) -> Option<u64> {
         let to = self.t.ms(u64::from(self.cfg.inflight_timeout_ms));
-        let mut d = None;
+        let mut d = self.cancel_deadline();
         for f in self.inflight.iter() {
             d = min_deadline(d, f.sent.saturating_add(to).saturating_add(1));
         }
@@ -3109,6 +3120,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
 
     /// Retires every connection (shutdown: hft-core drain); returns how many.
     pub fn retire_all(&mut self, now: u64) -> usize {
+        self.fail_queued_cancels();
         let mut n = 0;
         for a in 0..self.accts.len() {
             let ids: Vec<ConnId> = self

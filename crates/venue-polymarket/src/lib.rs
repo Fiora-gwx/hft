@@ -84,6 +84,9 @@ impl VenueProtocol for PolymarketClob {
     type Templates = Templates;
     const SUB_ACKS: bool = false;
     const REST_PLACE_BINDS_ID: bool = true;
+    /// Every order op is REST (README "下单"): eight connections, one kept for cancels.
+    const GW_REST_CONNS: u8 = 8;
+    const GW_REST_CANCEL_RESERVE: u8 = 1;
 
     fn default_caps(asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
         caps::default_caps(VENUE, asset)

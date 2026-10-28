@@ -51,11 +51,13 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "feed",
                 "net",
                 "presign",
+                "gw",
             ],
         ),
         "venue_feed" => (&[], &["raw", "depth_conns"]),
         "venue_net" => (&[], &["rest_timeout_ms", "rest_max_idle_ms"]),
         "venue_presign" => (&["below", "above", "step", "max_age_ms"], &[]),
+        "venue_gw" => (&[], &["rest_conns", "rest_cancel_reserve"]),
         "feed_raw" => (&[], &["bbo", "md"]),
         "account_io" => (
             &[
@@ -137,6 +139,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ("venue", "feed") => Some("venue_feed"),
             ("venue", "net") => Some("venue_net"),
             ("venue", "presign") => Some("venue_presign"),
+            ("venue", "gw") => Some("venue_gw"),
             ("venue_feed", "raw") => Some("feed_raw"),
             ("journal", "raw_feed" | "raw_gw") => Some("journal_size"),
             _ => None,

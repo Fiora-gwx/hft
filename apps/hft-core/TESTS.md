@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-445 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4478,6 +4478,21 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-429.2 | 一个返回 `Boom` | 返回 `Boom` |
 | CORE-429.3 | `persist` 不退出 | 2 s 内返回 `ShutdownStuck`(退出码 134,`detail` 含 `persist`) |
 | CORE-429.4 | `feed` 返回 `Boom`,`persist` 不退出 | 返回 `Boom`(首个原因) |
+
+### CORE-440 gw REST 池的连接数与撤单保留按 venue 配置(`venues.<v>.gw`)
+
+- 规则:[配置文件字段](README.md#配置文件字段);键的语义归 [hft-venue 配置项](../../crates/hft-venue/README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置(venue `public` = `binance-spot`);`write_polymarket_maker_live`(Cargo feature `polymarket`)
+- 实现:`apps/hft-core/tests/config.rs::core_440_gw_rest_conns_and_cancel_reserve`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-440.1 | 未配置 | `gw_rest_defaults("binance-spot")` = (2, 0);生效 (2, 0) |
+| CORE-440.2 | `[venues.public.gw] rest_conns = 4`、`rest_cancel_reserve = 1` | 加载成功;生效 (4, 1) |
+| CORE-440.3 | `rest_conns = 0`;`rest_conns = 17`;`rest_conns = 2`、`rest_cancel_reserve = 2`;未知键 `conns` | 前三者含 `BadValue`;最后一个 `ConfigParse` |
+| CORE-440.4 | Polymarket 实盘做市配置(不写 `venues.pm.gw`) | 加载成功;`gw_rest_defaults("polymarket-clob")` = (8, 1);生效 (8, 1) |
 
 ## 验收
 

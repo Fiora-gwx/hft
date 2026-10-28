@@ -110,8 +110,13 @@ struct Lane {
     idle_since: Option<u64>,
 }
 
+/// `N` is the lane capacity; `lanes[..active]` are used (README §9 "通道数与保留").
 pub struct RestPool<const N: usize = 2> {
     lanes: [Lane; N],
+    /// Lanes in use; the others are never built, installed or given a receive buffer.
+    active: usize,
+    /// Free open lanes `submit` leaves to `submit_urgent`.
+    reserve: usize,
     host: Box<[u8]>,
     tx: Box<[u8]>,
     clock: TscClock,
@@ -124,6 +129,8 @@ impl<const N: usize> core::fmt::Debug for RestPool<N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RestPool")
             .field("capacity", &N)
+            .field("lanes", &self.active)
+            .field("reserve", &self.reserve)
             .field(
                 "pending",
                 &self.lanes.iter().filter(|l| l.pending.is_some()).count(),
@@ -134,21 +141,41 @@ impl<const N: usize> core::fmt::Debug for RestPool<N> {
 }
 
 impl<const N: usize> RestPool<N> {
-    /// Startup only. Capacity includes HTTP headers; reserve one TLS record's 22-byte overhead.
+    /// Startup only: all `N` lanes, none reserved. Capacity includes HTTP headers; reserve one
+    /// TLS record's 22-byte overhead.
     pub fn new(host: &[u8], cfg: &NetConfig, clock: TscClock) -> Self {
+        Self::build(host, cfg, clock, N, 0)
+    }
+
+    /// Startup only: `lanes` connections (1..=N), of which `reserve` (< `lanes`) free ones are
+    /// left to `submit_urgent`; `None` outside those ranges.
+    pub fn with_lanes(
+        host: &[u8],
+        cfg: &NetConfig,
+        clock: TscClock,
+        lanes: usize,
+        reserve: usize,
+    ) -> Option<Self> {
+        ((1..=N).contains(&lanes) && reserve < lanes).then(|| Self::build(host, cfg, clock, lanes, reserve))
+    }
+
+    fn build(host: &[u8], cfg: &NetConfig, clock: TscClock, active: usize, reserve: usize) -> Self {
+        let rx = cfg.rx_buf.rest.saturating_sub(22) as usize;
         Self {
-            lanes: std::array::from_fn(|_| Lane {
+            lanes: std::array::from_fn(|i| Lane {
                 id: ConnId(0),
                 fd: -1,
                 h: None,
                 retired: None,
                 pending: None,
                 result: None,
-                buf: vec![0; cfg.rx_buf.rest.saturating_sub(22) as usize].into_boxed_slice(),
+                buf: vec![0; if i < active { rx } else { 0 }].into_boxed_slice(),
                 len: 0,
                 ts: None,
                 idle_since: None,
             }),
+            active,
+            reserve,
             host: host.into(),
             tx: vec![0; cfg.tx_buf.saturating_sub(22).min(16_384) as usize].into_boxed_slice(),
             clock,
@@ -159,8 +186,7 @@ impl<const N: usize> RestPool<N> {
     }
 
     pub fn install(&mut self, mut h: Handoff) -> Result<ConnId, PoolErr> {
-        let lane = self
-            .lanes
+        let lane = self.lanes[..self.active]
             .iter_mut()
             .find(|l| l.h.is_none() && l.retired.is_none() && l.pending.is_none())
             .ok_or(PoolErr::Full)?;
@@ -183,8 +209,7 @@ impl<const N: usize> RestPool<N> {
 
     pub fn next_build(&mut self, _now_tsc: u64) -> Option<BuildWhy> {
         if !self.building
-            && self
-                .lanes
+            && self.lanes[..self.active]
                 .iter()
                 .any(|l| l.h.is_none() && l.retired.is_none() && l.pending.is_none())
         {
@@ -208,19 +233,44 @@ impl<const N: usize> RestPool<N> {
             .conn()
     }
 
+    /// Lane count in use (`N` for `new`).
+    pub fn lanes(&self) -> usize {
+        self.active
+    }
+
+    /// Open connections without a request in flight.
+    pub fn free_lanes(&mut self) -> usize {
+        let mut n = 0;
+        for l in &mut self.lanes[..self.active] {
+            n += usize::from(l.pending.is_none() && ready(l));
+        }
+        n
+    }
+
+    /// A request that may not take the last `reserve` free lanes (`Busy` then).
     pub fn submit(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr> {
+        self.submit_with(req, now_tsc, self.reserve)
+    }
+
+    /// A request that may take any free lane, the reserved ones included.
+    pub fn submit_urgent(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr> {
+        self.submit_with(req, now_tsc, 0)
+    }
+
+    fn submit_with(&mut self, req: &RestReq<'_>, now_tsc: u64, keep: usize) -> Result<ReqTag, RestErr> {
         let mut open = false;
-        let idx = self
-            .lanes
-            .iter_mut()
-            .position(|l| {
-                let ready =
-                    l.h.as_mut()
-                        .and_then(Handoff::conn)
-                        .is_some_and(|c| c.phase() == ConnPhase::Open);
-                open |= ready;
-                ready && l.pending.is_none()
-            })
+        let mut free = 0;
+        let mut idx = None;
+        for (i, l) in self.lanes[..self.active].iter_mut().enumerate() {
+            let r = ready(l);
+            open |= r;
+            if r && l.pending.is_none() {
+                free += 1;
+                idx = idx.or(Some(i));
+            }
+        }
+        let idx = idx
+            .filter(|_| free > keep)
             .ok_or(if open { RestErr::Busy } else { RestErr::NoConn })?;
         let n = match encode(req, &self.host, &mut self.tx) {
             Ok(n) => n,
@@ -312,8 +362,9 @@ impl<const N: usize> RestPool<N> {
     /// outstanding, so the pool keeps its other connection while the replacement is built.
     pub fn idle_check(&mut self, now_tsc: u64) -> u8 {
         let mut count = 0u8;
-        let mut recycle = self.max_idle_ns > 0 && !self.building && self.lanes.iter().all(|l| l.h.is_some());
-        for lane in &mut self.lanes {
+        let lanes = &mut self.lanes[..self.active];
+        let mut recycle = self.max_idle_ns > 0 && !self.building && lanes.iter().all(|l| l.h.is_some());
+        for lane in lanes {
             if lane.pending.is_some() {
                 continue;
             }
@@ -385,6 +436,12 @@ impl<const N: usize> RestPool<N> {
             l.len = 0;
         }
     }
+}
+
+fn ready(l: &mut Lane) -> bool {
+    l.h.as_mut()
+        .and_then(Handoff::conn)
+        .is_some_and(|c| c.phase() == ConnPhase::Open)
 }
 
 fn retire(lane: &mut Lane, why: ErrBits) {

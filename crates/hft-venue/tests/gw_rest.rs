@@ -2,7 +2,7 @@ use crate::support::{
     gwh::*,
     mempeer, net,
     rd::*,
-    stub::{self, Stub, V_BINDS_ID, V_REST_CANCEL_ALL, V_SWEEP},
+    stub::{self, Stub, V_BINDS_ID, V_REST_CANCEL_ALL, V_REST_ORDERS, V_SWEEP},
 };
 use hft_event::{GwOp, OrderEventKind, RepMsg, SendStatus};
 use hft_net::{ConnId, EndpointId, RestPool};
@@ -10,11 +10,20 @@ fn setup<const V: u32>() -> Gh<Stub<2048, V>> {
     setup_net::<V>(net::net_cfg())
 }
 fn setup_net<const V: u32>(cfg: hft_net::NetConfig) -> Gh<Stub<2048, V>> {
+    setup_lanes::<V>(g0(), cfg, 2, 0)
+}
+/// One REST pool of `lanes` connections (114, 115, …), `reserve` of them kept for cancels.
+fn setup_lanes<const V: u32>(
+    gw: hft_venue::GwCfg,
+    cfg: hft_net::NetConfig,
+    lanes: usize,
+    reserve: usize,
+) -> Gh<Stub<2048, V>> {
     stub::set_cfg(|c| c.rest_query = true);
-    let mut h = gw_full::<Stub<2048, V>>(g0(), &[A1], GhOpts::default());
-    let pool = RestPool::new(b"a.test", &cfg, mempeer::clock());
+    let mut h = gw_full::<Stub<2048, V>>(gw, &[A1], GhOpts::default());
+    let pool = RestPool::with_lanes(b"a.test", &cfg, mempeer::clock(), lanes, reserve).unwrap();
     h.rt.set_rest_pools(A1, vec![(EndpointId(0), pool)]).unwrap();
-    h.open(3000, 2);
+    h.open(3000, lanes);
     h.reps();
     h
 }
@@ -626,4 +635,220 @@ fn ven_402_idle_rest_lane_rebuilt_before_an_order_uses_it() {
     assert_eq!(reports(&h.reps())[0].status, SendStatus::Written, "VEN-402.4");
     assert_eq!(sent(&mut h, fresh) + sent(&mut h, b[0]), before + 1, "VEN-402.4");
     assert!(h.rt.conn(r0).is_none() && h.rt.conn(r1).is_none(), "VEN-402.4");
+}
+
+/// Answers the request in flight on `conn` (status 200) and polls it out.
+fn answer<const V: u32>(h: &mut Gh<Stub<2048, V>>, conn: ConnId, now: u64) {
+    let msg = b"HTTP/1.1 200 Result\r\nContent-Length: 2\r\n\r\nok";
+    let wire = h.net.peer(conn).records(&[msg]);
+    mempeer::deliver(h.rt.conn(conn).unwrap(), now, now, wire);
+    for n in 0..8 {
+        h.poll(now + n);
+    }
+}
+/// Four REST connections (114–117), one kept for cancels; every order op over REST.
+fn rest_orders(gw: hft_venue::GwCfg) -> Gh<Stub<2048, V_REST_ORDERS>> {
+    let mut h = setup_lanes::<V_REST_ORDERS>(
+        gw,
+        hft_net::NetConfig {
+            rest_timeout_ms: 60_000,
+            ..net::net_cfg()
+        },
+        4,
+        1,
+    );
+    for id in 114..=117 {
+        assert!(h.rt.conn(ConnId(id)).is_some(), "REST connection {id}");
+    }
+    h
+}
+/// Places of slots 1..=3 written on three connections; returns those connections.
+fn three_places(h: &mut Gh<Stub<2048, V_REST_ORDERS>>, now: u64) -> Vec<ConnId> {
+    for slot in 1..=3 {
+        let p = h.place(A1, slot, 1, S1, false);
+        h.cmd(p);
+    }
+    h.poll(now);
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), 3);
+    assert!(r.iter().all(|r| r.status == SendStatus::Written));
+    r.iter().map(|r| r.conn).collect()
+}
+
+#[test]
+fn ven_405_rest_pool_size_and_reserve_checked() {
+    use hft_venue::{GwCfg, InitErr};
+    let gw = |cfg: GwCfg| gw_with::<Stub<2048, 0>, 2048>(cfg, &[A1], GhOpts::default()).map(|_| ());
+    // .1 the defaults: two connections, none reserved.
+    let d = GwCfg::default();
+    assert_eq!((d.rest_conns, d.rest_cancel_reserve), (2, 0), "VEN-405.1");
+    // .2 out of range: refused by GwRuntime::new and by GwCfg::rest_pool.
+    for (conns, reserve, key) in [
+        (0, 0, "gw.rest_conns"),
+        (17, 0, "gw.rest_conns"),
+        (4, 4, "gw.rest_cancel_reserve"),
+    ] {
+        let cfg = GwCfg {
+            rest_conns: conns,
+            rest_cancel_reserve: reserve,
+            ..g0()
+        };
+        assert_eq!(gw(cfg).unwrap_err(), InitErr::Cfg(key), "VEN-405.2");
+        assert!(
+            cfg.rest_pool(b"a.test", &net::net_cfg(), mempeer::clock())
+                .is_none(),
+            "VEN-405.2"
+        );
+    }
+    // .3 sixteen connections, fifteen reserved: accepted; the pool has sixteen lanes.
+    let cfg = GwCfg {
+        rest_conns: 16,
+        rest_cancel_reserve: 15,
+        ..g0()
+    };
+    assert!(gw(cfg).is_ok(), "VEN-405.3");
+    let pool = cfg
+        .rest_pool(b"a.test", &net::net_cfg(), mempeer::clock())
+        .unwrap();
+    assert_eq!(pool.lanes(), 16, "VEN-405.3");
+}
+
+#[test]
+fn ven_406_places_leave_the_reserved_connection_to_cancels() {
+    let mut h = rest_orders(g0());
+    // .1 three places on three connections; the fourth place finds only the reserved one.
+    let used = three_places(&mut h, 4000);
+    let p = h.place(A1, 4, 1, S1, false);
+    h.cmd(p);
+    h.poll(4001);
+    let r = reports(&h.reps());
+    assert_eq!(
+        (r.len(), r[0].status, r[0].conn),
+        (1, SendStatus::NoConn, ConnId(0)),
+        "VEN-406.1"
+    );
+    assert!(h.rt.mirror(4).is_none_or(|m| !m.live), "VEN-406.1");
+    // .2 a cancel takes the reserved connection at once.
+    let c = h.targeted(GwOp::Cancel, A1, 1);
+    h.cmd(c);
+    h.poll(4002);
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), 1, "VEN-406.2");
+    assert_eq!(
+        (r[0].op, r[0].status, r[0].target_slot.0),
+        (GwOp::Cancel, SendStatus::Written, 1),
+        "VEN-406.2"
+    );
+    assert!(!used.contains(&r[0].conn), "VEN-406.2");
+    assert_eq!(h.rt.counters().rest_cancel_queued, 0, "VEN-406.2");
+}
+
+#[test]
+fn ven_407_cancels_wait_for_a_free_connection_in_order() {
+    let mut h = rest_orders(g0());
+    let used = three_places(&mut h, 4000);
+    let c = h.targeted(GwOp::Cancel, A1, 1);
+    h.cmd(c);
+    h.poll(4001);
+    let first = reports(&h.reps())[0].conn;
+    // .1 every connection busy: two cancels wait (no report, nothing encoded or sent).
+    stub::take_log();
+    for slot in [2, 3] {
+        let c = h.targeted(GwOp::Cancel, A1, slot);
+        h.cmd(c);
+    }
+    h.poll(4002);
+    assert!(reports(&h.reps()).is_empty(), "VEN-407.1");
+    assert!(stub::calls("encode_rest").is_empty(), "VEN-407.1");
+    assert_eq!(h.rt.counters().rest_cancel_queued, 2, "VEN-407.1");
+    // .2 a place behind them is not sent ahead of them.
+    let p = h.place(A1, 5, 1, S1, false);
+    h.cmd(p);
+    h.poll(4003);
+    assert_eq!(statuses(&h.reps()), vec![SendStatus::NoConn], "VEN-407.2");
+    // .3 one connection frees: the first queued cancel (slot 2) is written on it.
+    answer(&mut h, used[0], 5000);
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), 1, "VEN-407.3");
+    assert_eq!(
+        (r[0].target_slot.0, r[0].status, r[0].conn),
+        (2, SendStatus::Written, used[0]),
+        "VEN-407.3"
+    );
+    assert!(r[0].sent_tsc.0 >= 5000, "VEN-407.3");
+    // .4 the next frees: slot 3 follows.
+    answer(&mut h, first, 6000);
+    let r = reports(&h.reps());
+    assert_eq!(
+        r.iter()
+            .map(|r| (r.target_slot.0, r.status, r.conn))
+            .collect::<Vec<_>>(),
+        vec![(3, SendStatus::Written, first)],
+        "VEN-407.4"
+    );
+    let cancels = stub::calls("encode_rest")
+        .iter()
+        .filter(|c| c.arg == "Cancel")
+        .count();
+    assert_eq!(cancels, 2, "VEN-407.4");
+    assert_eq!(h.rt.counters().rest_cancel_dropped, 0, "VEN-407.4");
+}
+
+#[test]
+fn ven_408_queued_cancel_fails_when_the_queue_is_full_or_waits_too_long() {
+    const MS: u64 = 1_000_000;
+    const WAIT: u64 = 10_000 * MS;
+    let mut h = rest_orders(hft_venue::GwCfg {
+        inflight_timeout_ms: 10_000,
+        ..g0()
+    });
+    let used = three_places(&mut h, 4000);
+    let c = h.targeted(GwOp::Cancel, A1, 1);
+    h.cmd(c);
+    h.poll(4001);
+    h.reps();
+    // .1 GW_REST_CANCEL_QUEUE cancels wait; one more gets NoConn at once (one each 150 ms,
+    // inside the account's order rate).
+    let n = hft_venue::GW_REST_CANCEL_QUEUE as u64;
+    let at = |k: u64| 1000 * MS + k * 150 * MS;
+    for k in 0..=n {
+        let c = h.targeted(GwOp::Cancel, A1, 2);
+        h.cmd(c);
+        h.poll(at(k));
+    }
+    let r = reports(&h.reps());
+    assert_eq!(
+        r.iter().map(|r| (r.status, r.conn)).collect::<Vec<_>>(),
+        vec![(SendStatus::NoConn, ConnId(0))],
+        "VEN-408.1"
+    );
+    let k = h.rt.counters();
+    assert_eq!((k.rest_cancel_queued, k.rest_cancel_dropped), (n, 1), "VEN-408.1");
+    // .2 past gw.inflight_timeout_ms (10 000 ms here) each waiting cancel gets NoConn; a
+    // connection freed afterwards carries none of them.
+    h.poll(at(0) + WAIT);
+    assert!(reports(&h.reps()).is_empty(), "VEN-408.2");
+    h.poll(at(n - 1) + WAIT + 1);
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), n as usize, "VEN-408.2");
+    assert!(
+        r.iter()
+            .all(|r| r.status == SendStatus::NoConn && r.target_slot.0 == 2),
+        "VEN-408.2"
+    );
+    stub::take_log();
+    let t = at(n) + WAIT + 1000 * MS;
+    answer(&mut h, used[0], t);
+    assert!(reports(&h.reps()).is_empty(), "VEN-408.2");
+    assert!(stub::calls("encode_rest").is_empty(), "VEN-408.2");
+    // .3 shutdown: a cancel still waiting gets NoConn.
+    let c = h.targeted(GwOp::Cancel, A1, 3);
+    h.cmd(c);
+    h.poll(t + 10);
+    let c = h.targeted(GwOp::Cancel, A1, 3);
+    h.cmd(c);
+    h.poll(t + 11);
+    assert_eq!(statuses(&h.reps()), vec![SendStatus::Written], "VEN-408.3");
+    h.rt.retire_all(t + 12);
+    assert_eq!(statuses(&h.reps()), vec![SendStatus::NoConn], "VEN-408.3");
 }
