@@ -88,6 +88,10 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | 基准名 | 组件 | 预算出处 | 用例 |
 |---|---|---|---|
 | `archiver_convert_seq_1h` | journal-archiver | [journal-archiver 延迟与资源契约](../apps/journal-archiver/README.md#延迟与资源契约) | ARC-155 |
+| `pm/encode_place_signed` | venue-polymarket | [venue-polymarket 延迟与资源契约](../crates/venue-polymarket/README.md#延迟与资源契约) | PMK-036 |
+| `pm/encode_cancel` | venue-polymarket | [venue-polymarket 延迟与资源契约](../crates/venue-polymarket/README.md#延迟与资源契约) | PMK-036 |
+| `pm/encode_place_presigned` | venue-polymarket | [venue-polymarket 延迟与资源契约](../crates/venue-polymarket/README.md#延迟与资源契约) | PMK-036 |
+| `pm/presign_step` | venue-polymarket | [venue-polymarket 延迟与资源契约](../crates/venue-polymarket/README.md#延迟与资源契约) | PMK-036 |
 | `bench_acct_decode_bitget` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-505 |
 | `bench_acct_decode_position_risk` | venue-binance | [venue-binance 延迟与资源契约](../crates/venue-binance/README.md#延迟与资源契约) | BIN-508 |
 | `bench_classify_bitget` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-500 |

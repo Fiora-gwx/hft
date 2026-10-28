@@ -1388,3 +1388,95 @@ fn core_439_polymarket_maker_param_values() {
         "CORE-439.3"
     );
 }
+
+/// `venues.<v>.presign`: decimal step, Polymarket only, values in range.
+#[test]
+fn core_445_venue_presign() {
+    use hft_core::config::PresignOpts;
+    // .1 the step text in 1e-6 USDC.
+    let step = |s: &str| {
+        PresignOpts {
+            below: 3,
+            above: 1,
+            step: s.into(),
+            max_age_ms: 30_000,
+        }
+        .step_e6()
+    };
+    assert_eq!(
+        ["0.01", "1", ".5", "0", "0.0000001", "-1", "", "0.0a"].map(step),
+        [
+            Some(10_000),
+            Some(1_000_000),
+            Some(500_000),
+            None,
+            None,
+            None,
+            None,
+            None
+        ],
+        "CORE-445.1"
+    );
+    let table = |below: u32, above: u32, step: &str, age: u32| {
+        format!(
+            "\n[venues.VENUE.presign]\nbelow = {below}\nabove = {above}\nstep = \"{step}\"\nmax_age_ms = {age}\n"
+        )
+    };
+    // .2 a venue other than polymarket-clob refuses it.
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        format!("{text}{}", table(3, 1, "0.01", 30_000).replace("VENUE", "public")),
+    )
+    .unwrap();
+    let e = hft_core::config::load(&path, true).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "BadValue"), "CORE-445.2 {e:?}");
+    // .3 the live Polymarket configuration: in range loads, out of range is refused.
+    #[cfg(feature = "polymarket")]
+    {
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+            day_loss_carry: None,
+            daily_loss_abs: None,
+            daily_loss_max_resumes: None,
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot2"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        let base = std::fs::read_to_string(&pm).unwrap();
+        let with = |t: String| std::fs::write(&pm, format!("{base}{}", t.replace("VENUE", "pm"))).unwrap();
+        with(table(3, 1, "0.01", 30_000));
+        let l = match hft_core::config::load(&pm, false) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-445.3 {e:?}"),
+        };
+        let p = l.cfg.venues["pm"].presign.clone().unwrap();
+        assert_eq!(
+            (p.below, p.above, p.step_e6(), p.max_age_ms),
+            (3, 1, Some(10_000), 30_000),
+            "CORE-445.3"
+        );
+        for (below, above, step, age) in [
+            (4, 4, "0.01", 30_000),
+            (3, 1, "0", 30_000),
+            (3, 1, "0.01", 999),
+            (3, 1, "0.01", 240_001),
+        ] {
+            with(table(below, above, step, age));
+            let e = hft_core::config::load(&pm, false).unwrap_err();
+            assert!(
+                e.iter().any(|e| e.code == "BadValue"),
+                "CORE-445.3 {below} {above} {step} {age}: {e:?}"
+            );
+        }
+    }
+}

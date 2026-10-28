@@ -251,6 +251,8 @@ pub struct GwCtx {
     pub dedup: hft_venue_proto::TradeIdRing<128>,
     /// `bind_order_wire` bindings (inst, id), last one per inst.
     pub bound: Vec<(InstId, [u8; 32])>,
+    /// Units of idle work left for `gw_idle` (each call that finds one uses it and returns true).
+    pub idle_left: u32,
 }
 
 /// Fields of a `|`-separated line (fixed array, no allocation).
@@ -562,6 +564,15 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         }
         ctx.bound.push((inst, *id));
         Ok(())
+    }
+
+    fn gw_idle(_rd: &RefData, t: &Tpl, ctx: &mut GwCtx, _cred: &Credential, _clk: &WallClock) -> bool {
+        log("gw_idle", || format!("{t:?}"));
+        if ctx.idle_left == 0 {
+            return false;
+        }
+        ctx.idle_left -= 1;
+        true
     }
 
     /// `V_BINDS_ID` only; refuses an id starting with 0xFF like `bind_wire`.

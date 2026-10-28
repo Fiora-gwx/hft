@@ -37,6 +37,31 @@ pub(crate) struct Keys<'a> {
 }
 
 pub(crate) fn keys(cred: &Credential) -> Result<Keys<'_>, ProtoErr> {
+    let k = l2_keys(cred)?;
+    Ok(Keys {
+        api_secret: k.api_secret,
+        wallet: k.wallet()?,
+        deposit: k.deposit,
+    })
+}
+
+/// The parts of `Credential.secret` a request needs without the wallet key's derivation (the
+/// public key costs a curve multiplication): the API secret and the Deposit Wallet; the key text
+/// stays borrowed until an order is signed.
+pub(crate) struct L2Keys<'a> {
+    pub api_secret: &'a str,
+    pub deposit: [u8; 20],
+    key: &'a str,
+}
+
+impl L2Keys<'_> {
+    /// The wallet (EOA) key: derives its address.
+    pub(crate) fn wallet(&self) -> Result<Wallet, ProtoErr> {
+        Wallet::from_hex(self.key).map_err(|_| ProtoErr::Cfg)
+    }
+}
+
+pub(crate) fn l2_keys(cred: &Credential) -> Result<L2Keys<'_>, ProtoErr> {
     if !matches!(cred.alg, SignAlg::Secp256k1 | SignAlg::HmacSha256) {
         return Err(ProtoErr::Cfg);
     }
@@ -46,16 +71,21 @@ pub(crate) fn keys(cred: &Credential) -> Result<Keys<'_>, ProtoErr> {
     else {
         return Err(ProtoErr::Cfg);
     };
-    let wallet = Wallet::from_hex(key).map_err(|_| ProtoErr::Cfg)?;
     let deposit = parse_addr(deposit).ok_or(ProtoErr::Cfg)?;
-    if api_secret.is_empty() || cred.api_key.is_empty() || cred.passphrase.is_empty() {
+    if api_secret.is_empty() || key.trim().is_empty() || cred.api_key.is_empty() || cred.passphrase.is_empty()
+    {
         return Err(ProtoErr::Cfg);
     }
-    Ok(Keys {
+    Ok(L2Keys {
         api_secret,
-        wallet,
         deposit,
+        key,
     })
+}
+
+/// The wallet key of `k` signs for this account (`Templates.eoa`), deriving it once.
+pub(crate) fn signer(k: &L2Keys<'_>, t: &Templates) -> Option<Wallet> {
+    k.wallet().ok().filter(|w| w.address() == t.eoa)
 }
 
 /// `0x` + 40 hex digits.
@@ -168,8 +198,9 @@ pub(crate) fn encode(
     out: &mut RestReqBuf,
 ) -> Result<(), EncodeErr> {
     *out = RestReqBuf::default();
-    let k = keys(cred).map_err(|_| EncodeErr::Unsupported(c.op))?;
-    if k.wallet.address() != t.eoa || k.deposit != t.wallet {
+    // The wallet key is derived only to sign an order (a curve multiplication, README "预签名").
+    let k = l2_keys(cred).map_err(|_| EncodeErr::Unsupported(c.op))?;
+    if k.deposit != t.wallet {
         return Err(EncodeErr::Unsupported(c.op));
     }
     match c.op {
@@ -226,13 +257,67 @@ fn cancel_token(ctx: &GwCtx, c: &GwCmd, out: &mut RestReqBuf) -> Result<(), Enco
     out.body.push(b"\"}").map_err(of)
 }
 
-/// Writes the signed `POST /order`; returns the order hash (the exchange's `orderID`).
+/// Side code and amounts (1e-6) of an order of `qty` at `px` on `inst`: a buy pays USDC
+/// (`makerAmount` = px·qty) for shares (`takerAmount` = qty), a sell the reverse. `None` when
+/// not a whole number of 1e-6 units.
+pub(crate) fn amounts(
+    rd: &RefData,
+    inst: hft_types::InstId,
+    side: Side,
+    px: i64,
+    qty: i64,
+) -> Option<(u8, u64, u64)> {
+    let row = rd.inst(inst);
+    // shares = qty·10^(qty_exp+6); USDC = px·qty·10^(px_exp+qty_exp+6).
+    let qe = i32::from(row.qty_exp) + 6;
+    let ue = i32::from(row.px_exp) + i32::from(row.qty_exp) + 6;
+    let shares = scaled(i128::from(qty), qe)?;
+    let usdc = scaled(i128::from(px) * i128::from(qty), ue)?;
+    Some(match side {
+        Side::Buy => (0, usdc, shares),
+        Side::Sell => (1, shares, usdc),
+    })
+}
+
+/// Signs a V2 order of the account's Deposit Wallet (signature type 3) into `sig`; returns its
+/// hash (the exchange's `orderID`) and the signature length.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sign_v2(
+    w: &Wallet,
+    t: &Templates,
+    token_id: &[u8; 32],
+    side: u8,
+    maker_amount: u64,
+    taker_amount: u64,
+    salt: u64,
+    ts_ms: u64,
+    sig: &mut [u8; 512],
+) -> ([u8; 32], usize) {
+    let o = OrderV2 {
+        salt,
+        maker: t.wallet,
+        signer: t.wallet,
+        token_id: *token_id,
+        maker_amount,
+        taker_amount,
+        side,
+        signature_type: 3,
+        timestamp_ms: ts_ms,
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let n = sign::sign_order_1271(w, &t.domain, CHAIN_ID, &o, sig);
+    (sign::order_digest(&t.domain, &o), n)
+}
+
+/// Writes the signed `POST /order`; returns the order hash (the exchange's `orderID`). Uses the
+/// matching pre-signed order when there is one (README "预签名"), else signs now.
 #[allow(clippy::too_many_arguments)]
 fn place(
     rd: &RefData,
     t: &Templates,
-    ctx: &GwCtx,
-    k: &Keys<'_>,
+    ctx: &mut GwCtx,
+    k: &L2Keys<'_>,
     cred: &Credential,
     c: &GwCmd,
     clk: &WallClock,
@@ -255,38 +340,44 @@ fn place(
     let token = ctx.token_of(c.inst).ok_or(EncodeErr::UnknownInst)?;
     let token_s = core::str::from_utf8(token).map_err(|_| EncodeErr::UnknownInst)?;
     let token_id = sign::parse_u256(token_s).ok_or(EncodeErr::UnknownInst)?;
-    // Amounts in 1e-6: shares = qty·10^(qty_exp+6); USDC = px·qty·10^(px_exp+qty_exp+6).
-    let qe = i32::from(row.qty_exp) + 6;
-    let ue = i32::from(row.px_exp) + i32::from(row.qty_exp) + 6;
-    let shares = scaled(i128::from(c.qty.0), qe).ok_or(EncodeErr::FieldOverflow)?;
-    let usdc = scaled(i128::from(c.px.0) * i128::from(c.qty.0), ue).ok_or(EncodeErr::FieldOverflow)?;
-    let (side, maker_amount, taker_amount, side_s): (u8, u64, u64, &[u8]) = match c.side {
-        Side::Buy => (0, usdc, shares, b"BUY"),
-        Side::Sell => (1, shares, usdc, b"SELL"),
-    };
+    let (side, maker_amount, taker_amount) =
+        amounts(rd, c.inst, c.side, c.px.0, c.qty.0).ok_or(EncodeErr::FieldOverflow)?;
+    let side_s: &[u8] = if side == 0 { b"BUY" } else { b"SELL" };
     let now_ms = u64::try_from(clk.unix_ms).map_err(|_| EncodeErr::FieldOverflow)?;
-    // Unique per order and below 2^53 (the body carries it as a JSON number).
-    let salt = (now_ms & ((1 << 33) - 1)) << 20 | u64::from(c.slot.0 & 0xF_FFFF);
-    let o = OrderV2 {
-        salt,
-        maker: t.wallet,
-        signer: t.wallet,
-        token_id,
-        maker_amount,
-        taker_amount,
-        side,
-        signature_type: 3,
-        timestamp_ms: now_ms,
-        metadata: [0; 32],
-        builder: [0; 32],
-    };
     let mut sig = [0u8; 512];
-    let n = sign::sign_order_1271(&k.wallet, &t.domain, CHAIN_ID, &o, &mut sig);
+    let (salt, ts, hash, n) = match ctx.pre.take(c.inst, &token_id, c.side, c.px.0, c.qty.0, now_ms) {
+        Some(p) => {
+            sig = p.sig;
+            (p.salt, p.ts_ms, p.hash, usize::from(p.sig_len))
+        }
+        None => {
+            // `timestamp` is the V2 nonce: unique per account (README "下单").
+            let ts = ctx.pre.next_ts(now_ms);
+            // Below 2^53 (the body carries it as a JSON number).
+            let salt = (ts & ((1 << 33) - 1)) << 20 | u64::from(c.slot.0 & 0xF_FFFF);
+            let w = signer(k, t).ok_or(EncodeErr::Unsupported(c.op))?;
+            let (hash, n) = sign_v2(
+                &w,
+                t,
+                &token_id,
+                side,
+                maker_amount,
+                taker_amount,
+                salt,
+                ts,
+                &mut sig,
+            );
+            (salt, ts, hash, n)
+        }
+    };
+    ctx.pre.anchor(c.inst, c.side, c.px.0, c.qty.0);
+    let token = ctx.token_of(c.inst).ok_or(EncodeErr::UnknownInst)?;
     let mut sig_hex = [0u8; 1026];
     let sig_hex =
         sign::hex_bytes(sig.get(..n).unwrap_or(&[]), &mut sig_hex).ok_or(EncodeErr::FieldOverflow)?;
     let mut maker = [0u8; 42];
     let maker = sign::checksum_address(&t.wallet, &mut maker);
+    // Not signed: the GTD lifetime counts from the place, also for a pre-signed order.
     let expiration = now_ms / 1000 + u64::from(t.gtd_s);
     out.method = Method::Post;
     out.path_query.push(b"/order").map_err(of)?;
@@ -309,7 +400,7 @@ fn place(
         b"\",\"expiration\":\"",
         dec(expiration, &mut n4).as_bytes(),
         b"\",\"signatureType\":3,\"timestamp\":\"",
-        dec(now_ms, &mut n5).as_bytes(),
+        dec(ts, &mut n5).as_bytes(),
         b"\",\"metadata\":\"0x0000000000000000000000000000000000000000000000000000000000000000\"",
         b",\"builder\":\"0x0000000000000000000000000000000000000000000000000000000000000000\"",
         b",\"signature\":\"",
@@ -323,7 +414,7 @@ fn place(
     for p in parts {
         out.body.push(p).map_err(of)?;
     }
-    Ok(sign::order_digest(&t.domain, &o))
+    Ok(hash)
 }
 
 /// Decimal text of `v` in `buf`.

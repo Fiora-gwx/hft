@@ -26,6 +26,7 @@ status: impl
   - [签名](#签名)
   - [凭证](#凭证)
   - [下单](#下单)
+  - [预签名](#预签名)
   - [用户流事件表](#用户流事件表)
   - [累计量与费用来源](#累计量与费用来源)
   - [结果未知码表](#结果未知码表)
@@ -55,11 +56,16 @@ pub const TOKEN_MAX: usize = 80;
 pub enum ReportClass { Push, Ignorable, Unknown }
 pub struct Templates { pub account: AccountId, pub eoa: [u8; 20], pub wallet: [u8; 20], pub domain: [u8; 32], pub gtd_s: u32 }
 pub const GTD_S: u32 = 300;
-pub struct GwCtx;                          // 每账户:token 绑定、本进程订单的哈希(含签出时的 client id)与累计成交
+pub struct GwCtx;                          // 每账户:token 绑定、本进程订单的哈希(含签出时的 client id)与累计成交、预签名订单
 impl GwCtx {
     pub fn token_of(&self, inst: InstId) -> Option<&[u8]>;
     pub fn order_hash(&self, exch_order_id: u64) -> Option<[u8; 32]>;
+    pub fn set_presign(&mut self, p: Presign);   // 启动期;不调用 = 关(默认)
+    pub fn presigned(&self) -> usize;            // 当前持有的预签名订单数
 }
+pub struct Presign { pub below: u8, pub above: u8, pub step_e6: u32, pub max_age_ms: u32 }
+impl Presign { pub fn new(below: u8, above: u8, step_e6: u32, max_age_ms: u32) -> Option<Presign>; }
+pub const PRESIGN_PRICES: usize = 8;
 ```
 
 ### 端点
@@ -172,7 +178,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 | op | 请求 | 说明 |
 |---|---|---|
-| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`salt` = (毫秒时间戳低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字),`timestamp` = 毫秒时间戳。签名 = 存款钱包签名(类型 3)。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
+| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`timestamp` = 毫秒时间戳,每账户严格递增(同一毫秒的第二单取上一单 + 1:V2 以它代替 nonce,须唯一);`salt` = (`timestamp` 低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字)。签名 = 存款钱包签名(类型 3);有匹配的[预签名](#预签名)订单时用它(`timestamp`、`salt`、签名取自该单),否则当场签名。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
 | `Cancel` | `DELETE /order {"orderID":"0x…"}`:哈希按 `exch_order_id` 取,没有(REST 回执未到)时取编码 `Place` 时为目标 client id 记下的哈希,不等回执;都没有(重启前的订单):`DELETE /cancel-market-orders {"asset_id":<token>}` | 后者撤该账户在该代币上的全部挂单;本 venue 的策略每个代币至多一张挂单。回执未到时按哈希发出的撤单记在 `GwCtx`(先撤后到的处理见下方"先撤后到") |
 | `CancelAll` | `inst ≠ 0`:`DELETE /cancel-market-orders {"asset_id"}`;`inst = 0`:`DELETE /cancel-all` | |
 | `Query` | `GET /data/order/<哈希>` | 哈希按 `exch_order_id` 取;没有(REST 回执未到,槽在 `Unknown`)时取编码 `Place` 时为目标 client id(epoch、账户、槽、代都相同)记下的哈希;都没有 → `UnknownTarget` |
@@ -204,6 +210,16 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | 同上 | 无应答或 5xx(结果未知) | 无;之后查单得 `LIVE`/`DELAYED` 时先 `CancelReject{EARLY}` |
 | `not_canceled`,回执已到且为 `live`/`delayed` | — | `CancelReject{EARLY}` |
 | `not_canceled`,其余(回执后发出的撤单、已终态) | — | `CancelReject{GONE}` |
+
+### 预签名
+
+当场签名一单约 84–92 µs(钱包私钥派生地址一次曲线乘法、ECDSA 签名一次,[延迟与资源契约](#延迟与资源契约)),都在 gw 线程上。开启预签名后,gw 在空闲的轮次([hft-venue §4](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构) 第 8 步,`gw_idle`)提前签好 `Place` 可能用到的订单,`Place` 只填请求体(约 4 µs)。默认关;hft-core 的 `venues.<v>.presign` 开启([配置文件字段](../../apps/hft-core/README.md#配置文件字段))。
+
+- **签什么**:每个 inst 以它最近一次 `Place` 的方向、数量与价格为锚,签锚价 −`below`…+`above` 个 `step` 的各价位(`below + 1 + above ≤ PRESIGN_PRICES`;价格须在 (0, 1) 内,`step_e6` 是 1e-6 USDC,须是该 inst 价格单位的整数倍)。签名结构里没有 `expiration` 与 `postOnly`,两者在下单时写入请求体(GTD 寿命从下单时算)。每账户至多 256 张预签名订单(开启时分配一次),满了替换最旧的一张;最多 64 个 inst 有锚。
+- **用哪张**:`Place` 的 inst、代币、方向、价格与数量都相同,且签名后不超过 `max_age_ms` 的那张;用过即删除(每张只用一次,哈希一经下单或撤单即作废,见[先撤后到](#下单))。没有匹配的照常当场签名。`salt` 低 20 位为 0(签名时不知道槽号);`timestamp` 是签名时刻,与当场签名的订单共用同一递增序列,所以全账户唯一。
+- **刷新**:一张签名后达到 `max_age_ms` 的 3/4 即重签(同价位的旧单被替换);`max_age_ms` 取 1 000–240 000 ms。签名时刻作为 `timestamp`;交易所是否对过旧的 `timestamp` 拒单未实测,`max_age_ms` 取值以实测为准。
+- **作废**:inst 改绑代币或解绑(`BindWire`)时清掉该 inst 的锚与预签名订单。
+- **空闲工作**:每次 `gw_idle` 至多签一张(约 85–95 µs,与当场签名相同)。全部新鲜时返回 `false`,不占用 gw;在途命令最多因此等一张签名的时间,不比当场签名更差。
 
 ### 用户流事件表
 
@@ -272,6 +288,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | `src/bind.rs` | 绑定表与合成序号(固定容量,构造时分配一次) |
 | `src/md.rs` | 分类、`peek`、三种消息的解码 |
 | `src/session.rs` | 路由、端点、订阅帧、心跳、用户频道登录帧 |
+| `src/presign.rs` | 预签名订单的存放、锚与空闲签名([预签名](#预签名)) |
 | `src/caps.rs` | `VenueCaps`、限速、过期与死手默认值 |
 | `src/sign.rs` | EIP-712 订单与 L1 认证摘要、secp256k1 签名、L2 HMAC、地址([签名](#签名)) |
 
@@ -283,7 +300,16 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 ## 延迟与资源契约
 
-无基准门槛(optional,尚未进入上线门槛)。解码不分配;去重表在 `FeedCtx::with_capacity` 时分配两张 512 KiB 的表,换代时清一张;`book` 解码用两段 1000 档的 `Level` 栈数组(各 16 KiB)。2026-10-19 录制的 400 帧样本全部解码通过,重建簿的最优价与交易所给出的 `best_bid`/`best_ask` 一致([PMK-011](TESTS.md#pmk-011-实采窗口重建的最优价与交易所一致))。
+下单与撤单的编码在 gw 线程上(`decided_tsc` → `sent_tsc` 的 `egress` 段),基准只报告(`gate = "report"`;数值为参考机预算,开发机 x86-64 实测:当场签名的下单 84–92 µs、预签名的下单 3.8–4.2 µs、撤单 0.8 µs,此前撤单每次也派生钱包地址,约 35 µs):
+
+| 入口 | p50 | p99 | 基准名 |
+|---|---|---|---|
+| `encode_rest_ctx(Place)`,当场签名 | ≤ 150 µs | ≤ 300 µs | `pm/encode_place_signed` |
+| `encode_rest_ctx(Cancel)`(按哈希;不派生钱包地址) | ≤ 3 µs | ≤ 10 µs | `pm/encode_cancel` |
+| `encode_rest_ctx(Place)`,有匹配的预签名订单 | ≤ 10 µs | ≤ 30 µs | `pm/encode_place_presigned` |
+| `gw_idle` 签一张预签名订单 | ≤ 150 µs | ≤ 300 µs | `pm/presign_step` |
+
+其余无基准门槛(optional,尚未进入上线门槛)。解码不分配;去重表在 `FeedCtx::with_capacity` 时分配两张 512 KiB 的表,换代时清一张;`book` 解码用两段 1000 档的 `Level` 栈数组(各 16 KiB)。2026-10-19 录制的 400 帧样本全部解码通过,重建簿的最优价与交易所给出的 `best_bid`/`best_ask` 一致([PMK-011](TESTS.md#pmk-011-实采窗口重建的最优价与交易所一致))。
 
 ## 测试与验收
 
@@ -291,7 +317,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 ## 依赖
 
-允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`;外部 `sonic-rs` 0.5、`serde`(与其他 venue crate 同版本);签名用 `k256` 0.13(`ecdsa`)、`sha3` 0.10(keccak-256)、`hmac` 0.12、`sha2` 0.10、`base64` 0.22(后三者与 venue-bitget 同版本)。dev:`hft-venue-proto`(`testkit`)、`serde_json`(仅金样比对)。禁止依赖运行时、I/O 与任何 `strategies/*`。
+允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`;外部 `sonic-rs` 0.5、`serde`(与其他 venue crate 同版本);签名用 `k256` 0.13(`ecdsa`)、`sha3` 0.10(keccak-256)、`hmac` 0.12、`sha2` 0.10、`base64` 0.22(后三者与 venue-bitget 同版本)。dev:`hft-venue-proto`(`testkit`)、`serde_json`(仅金样比对)、`criterion`(基准)。禁止依赖运行时、I/O 与任何 `strategies/*`。
 
 ## 延伸阅读
 

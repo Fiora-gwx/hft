@@ -89,6 +89,19 @@ pub trait VenueProtocol: Sized + 'static {
         let _ = ctx;
         Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out)
     }
+    /// One bounded unit of the account's idle-time preparation in `GwCtx` (contract 32; Polymarket
+    /// pre-signs orders). The gw calls it only in a poll round with no other work, at most once
+    /// per round; `true` = did work. No frames, no events. The default does nothing.
+    fn gw_idle(
+        rd: &RefData,
+        t: &Self::Templates,
+        ctx: &mut Self::GwCtx,
+        cred: &Credential,
+        clk: &WallClock,
+    ) -> bool {
+        let _ = (rd, t, ctx, cred, clk);
+        false
+    }
     fn ro_request_signed(
         rd: &RefData,
         t: &Self::Templates,

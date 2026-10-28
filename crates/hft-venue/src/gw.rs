@@ -142,6 +142,8 @@ pub struct GwCounters {
     pub bind_failed: u64,
     /// `Deliver` reports sent.
     pub delivered: u64,
+    /// Idle rounds in which `VenueProtocol::gw_idle` did work (README §4 step 8).
+    pub idle_work: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -257,6 +259,8 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     accept_prev: bool,
     prev_epoch: u16,
     round: u64,
+    /// Account whose `gw_idle` runs in the next idle round (round-robin).
+    idle_next: usize,
     cmds_done: u64,
     venue_insts: Box<[InstId]>,
     /// `BindWire` part 0 waiting for its part 1, per inst.
@@ -563,6 +567,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             accept_prev: false,
             prev_epoch: 0,
             round: 0,
+            idle_next: 0,
             cmds_done: 0,
             venue_insts: venue_insts.into_boxed_slice(),
             bind_pend: Vec::with_capacity(BIND_PEND_CAP),
@@ -883,6 +888,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         ls.frames = frames;
         ls.cmds = u16::try_from(cmds).unwrap_or(u16::MAX);
         ls.did_work |= frames > 0 || cmds > 0 || maint;
+        // 8. Idle round: one bounded unit of the venue's idle work for one account (round-robin).
+        if !ls.did_work && !self.accts.is_empty() {
+            let a = self.idle_next % self.accts.len();
+            self.idle_next = (a + 1) % self.accts.len();
+            let clk = self.wall(now);
+            let x = &mut self.accts[a];
+            if P::gw_idle(self.rd, &x.tpl, &mut x.ctx, &x.rest_credential, &clk) {
+                self.n.idle_work += 1;
+                ls.did_work = true;
+            }
+        }
         ls.next_deadline = self.deadline();
         self.last = ls;
         ls
