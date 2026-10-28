@@ -2,6 +2,8 @@
 
 Status: implemented
 
+> **负责人确认(2026-10-28)**:本变更(下单签名时间戳与截止)与规格冻结期新增的用例编号 RT-169–RT-172、VEN-404 获负责人确认,见 [changes.md](../../../../docs/changes.md) 2026-10-28 行。
+
 ## Problem
 
 hft-rt README 规定 warm 读者经 `SeqCell<TscUtc>` 取 TSC → UTC 换算、由 housekeeping 每次校准后更新,但实现里没有这条分发:hft-core 在启动时 `clock.tsc_utc(&clock.base)` 按值交给 gw、feed、snap-fetch、acct 连接、ctl-gateway,conn-builder 与 persist 直接用 `TscClock::to_utc_ns`(启动校准对)。启动频率对 CLOCK_MONOTONIC_RAW 校准,得到的是计数器的标称频率;Graviton 上真实频率低约 30 ppm,这些线程的墙钟与引擎 UTC(修正前)一样每天落后约 2.6 s。它们不进决策回放,但离开进程:Binance 签名请求的 `timestamp` 与 `recvWindow`(gw 以 `gw.stale_guard_ms` = 1 500 ms 收紧,约 14 h 后 −1021)、Bitget/OKX 的时间戳、Polymarket 的 L2 `POLY_TIMESTAMP`、订单 `timestamp` 与 GTD `expiration`、ctl 命令的过期判断(签发方是 CLOCK_REALTIME)。引擎 UTC 的修正见 [引擎 UTC 重锚](2026-10-28-engine-utc-reanchor.md)。
