@@ -233,7 +233,7 @@ ENUMS = {
     "ReconItem": {1: "Position", 2: "Balance", 3: "OpenOrder", 4: "UnknownResolved", 5: "Summary", 6: "Funding"},
     "ReconOrderStatus": {0: "Other", 1: "New", 2: "PartiallyFilled", 3: "Filled", 4: "Cancelled", 5: "Rejected", 6: "Expired", 7: "NotFound"},
     "ReconSeverity": {1: "Ignore", 2: "Warn"},
-    "RejectClass": {0: "OTHER", 1: "GONE"},
+    "RejectClass": {0: "OTHER", 1: "GONE", 2: "EARLY"},
     "RollMark": {1: "End", 2: "Begin", 3: "BootDone"},
     "RollReason": {1: "Hourly", 2: "Size", 3: "Startup", 4: "Recovery", 5: "Manual", 6: "RecoverFromSnapshot"},
     "RunMode": {1: "Shadow", 3: "CloseOnly", 4: "Live"},

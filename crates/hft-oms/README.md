@@ -346,7 +346,7 @@ pub struct OrderSlot {                 // 128 B = 2 条缓存行
                                        //        HIST_WAIT=256(NotFound 已过 grace、等成交历史确认)ALARMED=512(本次 Unknown 已按 unknown_alarm_ms 升级)
                                        //        REST_QUERY=2048(查询不支持或预算耗尽,等待 reconciler;快照保存)
                                        //        AGED=1024(本次 Live 已发过 Aged)
-                                       //        CANCEL_HELD=4096(拥有者对未确认订单的撤单已挂起,见"状态机";快照保存);其余预留
+                                       //        CANCEL_HELD=4096(拥有者对未确认订单的撤单已挂起,或 Unknown 槽收到 `EARLY` 撤单拒绝,见"状态机"与"回报处理表";快照保存);其余预留
     pub reject_code: u32,              // 108 交易所原始码或 LocalReject 码
     pub t_state: Tsc,                  // 112 进入当前状态时的事件 tsc(sweep 用;进快照的已登记 TSC 字段,见"恢复")
     pub seq_last: u64,                 // 120 最后一次改变本槽的事件 seq
@@ -482,6 +482,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 | `Fill`(cum==qty) | → Filled(fill-before-ack,置 `FILL_BEFORE_ACK`) | → Filled | → Filled | → Filled | → Filled | Cancelled 时 → Filled + 异常;Filled dup |
 | `CancelAck` / `Expired` | → Cancelled(撤掉未确认的单) | → Cancelled(交易所主动撤/IOC 余量) | → Cancelled | → Cancelled | → Cancelled | dup |
 | `CancelReject` 原因=已成交/不存在 | — | — | 若 `filled==qty` → Filled;否则 → Unknown + 查询(不重试撤单) | 同左 | 保持,继续查询 | dup |
+| `CancelReject` 原因=撤单早到(`EARLY`) | — | — | 若 `filled==qty` → Filled;否则重发撤单(→ `PendingCancel`,迁移原因 `CancelReq`,不记延迟戳) | — | 置 `CANCEL_HELD`(收敛为 Live 时发出撤单);`filled==qty` → Filled | dup |
 | `CancelReject` 其他原因 | — | — | → Live(拥有者/sweep 决定是否再撤) | — | 保持 | dup |
 | `AmendAck` | — | 异常 | — | → Live,`px/qty := pending` | → Live,取事件内 px/qty | dup |
 | `AmendReject` | — | 异常 | — | → Live(原价量);原因=已成交同 CancelReject | 保持 | dup |
@@ -496,7 +497,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 - 任何状态收到 `Ack` 而槽的 `exch_order_id = 0` 时记下它;收到 `Ack` 或成交即置 `ACKED`。`QueryResult` 收敛为 `Live` 时 `px/qty` 取事件内的值。
 - `Unknown` 收到 `PartialFill` 时回到 `prev_state`(`prev_state ∈ {PendingCancel, PendingAmend}`),否则回到 `Live`。
 - "终态"列中 `Rejected` 与 `Cancelled` 同样处理(应用增量、异常 Note 并请求对账;`Fill` → `Filled`)。
-- "原因=已成交/不存在"由 venue 协议按其 `codes.rs` 判定,经 `OrderEvent.detail = GONE` 给出;`QueryResult` 的订单状态同样取 `OrderEvent.detail`(码与 `ReconcileReport.order_status` 相同:New=1 … NotFound=7)。字段布局归 [hft-event](../hft-event/README.md)。
+- "原因=已成交/不存在"由 venue 协议按其 `codes.rs` 判定,经 `OrderEvent.detail = GONE` 给出;"撤单早到"(`detail = EARLY`)= 撤单先于订单到达交易所而未撤到、该订单随后已挂上(只有撤单不必等 Ack 的 venue 产出,[hft-venue-proto 契约 28](../hft-venue-proto/README.md#实现方必须遵守的契约)),拥有者的撤单意图仍在,所以 OMS 再撤一次;`QueryResult` 的订单状态同样取 `OrderEvent.detail`(码与 `ReconcileReport.order_status` 相同:New=1 … NotFound=7)。字段布局归 [hft-event](../hft-event/README.md)。
 - `Reject` 仅在槽内 `filled = 0` 且回报 `cum_filled = 0` 时把非终态槽变为 `Rejected`,包括 Ack 之后及撤改在途;释放在途并保留交易所拒绝码。有成交证据时不以 Reject 释放剩余在途,先按累计量应用真实增量并写 `OmsAnomaly{Table}`;已有终态不回退,重复回报不重复入账。
 - 交易所 `Reject` 给拥有者 `OrderUpdate::Rejected{bits: 0, venue_code: reject_code}`;`Rejected(NOT_FOUND)` = 状态 `Rejected`、`reject_code = 0`,迁移原因 `NotFoundExpire`(过期保护定终态)或 `Reconcile`(成交历史确认),给拥有者 `Rejected{bits: 0, venue_code: 0}`。
 

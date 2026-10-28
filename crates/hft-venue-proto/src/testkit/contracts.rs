@@ -34,7 +34,8 @@ pub fn check_detail<P: VenueProtocol>(
             let valid = match e.what {
                 K::Fill | K::PartialFill => [Side::Buy as u8, Side::Sell as u8].contains(&e.detail),
                 K::QueryResult => (1..=7).contains(&e.detail),
-                K::CancelReject | K::AmendReject => e.detail <= 1,
+                K::CancelReject => e.detail <= 2,
+                K::AmendReject => e.detail <= 1,
                 _ => e.detail == 0,
             };
             if !valid {
