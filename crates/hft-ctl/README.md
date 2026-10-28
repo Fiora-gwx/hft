@@ -49,7 +49,7 @@ impl<S: StrategySet, R: CtlRing, J: ResultSource> Gateway<S, R, J> {
                refdata_check: RefdataAssemblyCheck,        // 装配处提供:hft-core 启动步 2 的同一组装配校验函数,ReplaceRefdata 用
                risk_decode: RiskDecode,                    // 装配处提供:hft-risk 的 RiskParams 解码与作用域检查(Err = BadValue/OutOfScope),SetRisk 用
                active_params: Vec<ParsedConfig<S>>,        // 装配处另行解码的启动时生效 StrategyParams(每 (实例, 账户) 一份),SetParams 的比较基准
-               journal: J /* CmdResult 源:seq journal 读者 */, clock: UtcClock /* hft-rt 发布线的读者 */, engine: EngineInfo) -> Result<Gateway<S, R, J>, GatewayError>;
+               journal: J /* CmdResult 源:seq journal 读者 */, clock: impl Into<UtcClock> /* hft-rt 发布线的读者;TscUtc → 固定线 */, engine: EngineInfo) -> Result<Gateway<S, R, J>, GatewayError>;
     pub fn adopt(&mut self, stream: UnixStream, uid: u32); // 接受后、SO_PEERCRED 之后的路径;测试以 socket pair 注入凭证
 }
 pub trait CtlRing { fn fits(&mut self, lens: &[usize]) -> bool; fn write_all(&mut self, recs: &[Rec]) -> bool; } // 一个请求的全部记录一次写入或一条不写

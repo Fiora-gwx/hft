@@ -183,7 +183,7 @@ pub const UTC_RATE_TOL_PPM: u64 = 1_000;  // 实测频率偏离启动校准超�
 #[derive(Clone)] pub struct UtcClock { /* &'static SeqCell<TscUtc> + 本读者最近一次读到的线 + 上次结果 */ }  // Send,非 Sync:每线程一个
 impl UtcClock {
     pub fn shared(clock: &TscClock, horizon_ms: u32) -> (UtcClock, UtcPublisher); // 启动期:进程唯一的线(初值 = clock.tsc_utc(&clock.base))与它唯一的写者;泄漏一个单元
-    pub fn fixed(line: TscUtc) -> UtcClock;  // 不再发布的线(测试、工具、探针);泄漏一个单元
+    pub fn fixed(line: TscUtc) -> UtcClock;  // 不再发布的线(测试、工具、探针);泄漏一个单元;From<TscUtc> 同此
     pub fn line(&self) -> TscUtc;            // 一次 SeqCell::try_load;写入中 → 本读者上次读到的线(不自旋)
     pub fn utc_ns(&self, t: Tsc) -> i64;     // max(本读者上次结果, line().utc_ns(t)):同一读者内单调不减(调用方传不减的 t)
 }

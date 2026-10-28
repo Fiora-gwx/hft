@@ -32,7 +32,7 @@ fn reg_013_set_params_binding() {
         RefData,
         blob::{AccountRow, RawBlob, sec},
     };
-    use hft_rt::{CalibPair, Heartbeat, Mailbox, TscUtc, UtcClock};
+    use hft_rt::{CalibPair, Heartbeat, Mailbox, TscUtc};
     use hft_sequencer::driver::live::{LiveCfg, LiveDriver};
     use hft_sequencer::{BootSource, MemJournal, ParsedConfig, Sequencer, StepOutcome};
     use hft_testkit::{dst::seq::build, seq_rig::RigIo};
@@ -141,13 +141,13 @@ fn reg_013_set_params_binding() {
             |_, _| Ok(()),
             |b, _, rd| hft_risk::RiskParams::decode_blob(b, rd).map_err(|_| 1),
             vec![],
-            UtcClock::fixed(TscUtc {
+            TscUtc {
                 base_tsc: Tsc(0),
                 base_utc_ns: build::UTC0,
                 mult: 1,
                 shift: 0,
                 err_ns: 0,
-            }),
+            },
             EngineInfo {
                 version: "test".into(),
                 epoch: 1,

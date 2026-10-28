@@ -78,6 +78,13 @@ impl UtcClock {
     }
 }
 
+/// `UtcClock::fixed` (a constant line; leaks one cell).
+impl From<TscUtc> for UtcClock {
+    fn from(line: TscUtc) -> UtcClock {
+        UtcClock::fixed(line)
+    }
+}
+
 impl core::fmt::Debug for UtcClock {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("UtcClock")

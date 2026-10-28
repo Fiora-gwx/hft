@@ -125,7 +125,7 @@ impl<S: StrategySet, R: CtlRing, J: ResultSource> Gateway<S, R, J> {
         risk_decode: RiskDecode,
         active_params: Vec<ParsedConfig<S>>,
         journal: J,
-        clock: UtcClock,
+        clock: impl Into<UtcClock>,
         engine: hft_ctl_proto::EngineInfo,
     ) -> Result<Gateway<S, R, J>, GatewayError> {
         if ring_bytes < MIN_RING_BYTES {

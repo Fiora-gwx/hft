@@ -268,7 +268,7 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
         refdata_check: RefdataAssemblyCheck,
         risk_decode: RiskDecode,
         active_params: Vec<ParsedConfig<S>>,
-        clock: UtcClock,
+        clock: impl Into<UtcClock>,
         engine: EngineInfo,
     ) -> Core<S, R> {
         let bases = active_params
@@ -291,7 +291,7 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
             retired,
             refdata_check,
             risk_decode,
-            clock: Clock(clock),
+            clock: Clock(clock.into()),
             engine,
             bases,
             awaiting: Vec::new(),
