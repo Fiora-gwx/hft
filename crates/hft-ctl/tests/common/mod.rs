@@ -28,7 +28,7 @@ use hft_event::{
     StrategyParamsHdr,
 };
 use hft_refdata::RefData;
-use hft_rt::{MailReceiver, MailSender, Mailbox, TscUtc};
+use hft_rt::{MailReceiver, MailSender, Mailbox, TscUtc, UtcClock};
 use hft_strategy_sdk::{GroupTable, ResetPreview, StrategySet};
 use hft_types::{AccountId, AssetId, GroupId, InstId, StrategyId, Tsc, VenueId};
 use serde_json::{Value, json};
@@ -44,14 +44,14 @@ pub const G2: u32 = (2 << 24) | 101;
 pub const G9: u32 = (3 << 24) | 101;
 
 /// 1 GHz test clock, tsc 0 = `UTC0`.
-pub fn clock() -> TscUtc {
-    TscUtc {
+pub fn clock() -> UtcClock {
+    UtcClock::fixed(TscUtc {
         base_tsc: Tsc(0),
         base_utc_ns: UTC0,
         mult: 1,
         shift: 0,
         err_ns: 0,
-    }
+    })
 }
 
 pub fn principals() -> PrincipalTable {

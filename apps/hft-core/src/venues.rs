@@ -53,6 +53,7 @@ pub fn assemble(
     v: &Venue,
     rd: &'static RefData,
     clock: TscClock,
+    utc: &hft_rt::UtcClock,
     epoch: u32,
     bbo: Producer<FeedMsg>,
     md: Producer<FeedMsg>,
@@ -68,6 +69,7 @@ pub fn assemble(
             v,
             rd,
             clock,
+            utc,
             epoch,
             bbo,
             md,
@@ -85,6 +87,7 @@ pub fn assemble(
             v,
             rd,
             clock,
+            utc,
             epoch,
             bbo,
             md,
@@ -103,6 +106,7 @@ pub fn assemble(
             v,
             rd,
             clock,
+            utc,
             epoch,
             bbo,
             md,
@@ -121,6 +125,7 @@ pub fn assemble(
             v,
             rd,
             clock,
+            utc,
             epoch,
             bbo,
             md,
@@ -139,6 +144,7 @@ pub fn assemble(
             v,
             rd,
             clock,
+            utc,
             epoch,
             bbo,
             md,
@@ -318,6 +324,7 @@ fn build<P: AccountProtocol + Send>(
     v: &Venue,
     rd: &'static RefData,
     clock: TscClock,
+    utc: &hft_rt::UtcClock,
     epoch: u32,
     bbo: Producer<FeedMsg>,
     md: Producer<FeedMsg>,
@@ -469,7 +476,7 @@ where
         // Serial startup only: no strategy or gateway can place an order before the baseline.
         loop {
             client
-                .poll(clock.to_utc_ns(hft_rt::tsc_now()))
+                .poll(utc.utc_ns(hft_rt::tsc_now()))
                 .map_err(|e| account_error(name, &e))?;
             if let Some(state) = client.take() {
                 baseline = state;
@@ -588,7 +595,7 @@ where
             rd,
             reqs: [Some(snapreq_rx), None],
             out: [Some(snap_tx), None],
-            clock: clock.tsc_utc(&clock.base),
+            clock: utc.clone(),
         },
         ctx.clone(),
         snapshot_pool,
@@ -657,7 +664,7 @@ where
             handoff: fh_rx,
             retire: fr_tx,
             build: fb_tx,
-            clock: clock.tsc_utc(&clock.base),
+            clock: utc.clone(),
         },
         ctx,
     )
@@ -737,7 +744,7 @@ where
                 handoff: gh_rx,
                 retire: gr_tx,
                 build: gb_tx,
-                clock: clock.tsc_utc(&clock.base),
+                clock: utc.clone(),
             },
             accounts,
         )
@@ -776,6 +783,9 @@ where
     let account = v.accounts.first().map(|k| AccountId(k.account));
     let task_name = name.to_owned();
     let v_timeout_ms = v.account_io.as_ref().map_or(10_000, |x| x.timeout_ms);
+    // Session logins, account REST and connection deadlines: the same line as the gw's
+    // `BuildReq.deadline_ns`.
+    let builder_utc = utc.clone();
     tasks.push((
         policy(c, &format!("conn-builder:{name}"))?,
         Box::new(move |stop, t| {
@@ -800,7 +810,7 @@ where
                 }
                 if !stopping_now {
                     snapshots.poll_once(hft_rt::tsc_now().0);
-                    let now = clock.to_utc_ns(hft_rt::tsc_now());
+                    let now = builder_utc.utc_ns(hft_rt::tsc_now());
                     if let Some(r) = fb_rx.try_pop()
                         && session.start(&mut connector, r, None, now).is_err()
                     {

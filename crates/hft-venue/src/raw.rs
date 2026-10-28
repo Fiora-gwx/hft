@@ -60,6 +60,8 @@ pub struct RawLog {
     w: JournalWriter,
     venue: VenueId,
     ticks: Ticks,
+    /// Segment-header UTC of a size roll (the runtime's published line).
+    utc: hft_rt::UtcClock,
     pub(crate) n: RawCounters,
     pub(crate) trace: Option<Vec<Effect>>,
 }
@@ -70,15 +72,16 @@ impl RawLog {
         self.w.seal_and_close()
     }
     /// A raw writer for `venue` (the runtimes build their own; public for benchmarks and tools).
-    pub fn open(w: JournalWriter, venue: VenueId, clock: hft_rt::TscUtc) -> RawLog {
-        RawLog::new(w, venue, Ticks { clock })
+    pub fn open(w: JournalWriter, venue: VenueId, clock: hft_rt::UtcClock) -> RawLog {
+        RawLog::new(w, venue, clock)
     }
 
-    pub(crate) fn new(w: JournalWriter, venue: VenueId, ticks: Ticks) -> RawLog {
+    pub(crate) fn new(w: JournalWriter, venue: VenueId, utc: hft_rt::UtcClock) -> RawLog {
         RawLog {
             w,
             venue,
-            ticks,
+            ticks: Ticks::of(&utc),
+            utc,
             n: RawCounters::default(),
             trace: None,
         }
@@ -100,14 +103,14 @@ impl RawLog {
         if self.w.needs_roll(Tsc(tsc)).is_none() {
             return;
         }
-        let utc = self.ticks.utc_ns(tsc);
+        let utc = self.utc.utc_ns(Tsc(tsc));
         let info = RollInfo {
             utc_ns: utc,
             calib: CalibPair {
                 tsc: Tsc(tsc),
                 realtime_ns: utc,
                 phc_ns: 0,
-                err_ns: self.ticks.clock.err_ns,
+                err_ns: self.utc.line().err_ns,
             },
             tsc_hz_milli: self.ticks.hz_milli(),
             configs: &[],

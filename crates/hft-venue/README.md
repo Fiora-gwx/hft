@@ -142,14 +142,14 @@ pub struct FeedDeps {   // 连接经 Handoff 交接、经 RetireMsg 交还,任�
     pub ready: Option<ReadyPoll>,            // hft-net 就绪探测;只在 ready_poll 生效时(§2 第 2 步)
     pub raw: JournalWriter,                  // raw-feed-<venue>(Md/All)或 raw-feed-<venue>-bbo(feed-bbo),本任务唯一写者
     pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
-    pub clock: TscUtc,                       // TSC → UTC 换算(基础层类型)
+    pub clock: UtcClock,                     // hft-rt 发布线的读者(TSC → UTC,随 housekeeping 校准更新);时长换算取构造时的线
 }
 pub struct SnapDeps {
     pub rd: &'static RefData,
     pub reqs: [Option<Consumer<SnapReq>>; 2], // snapreq-<venue>、snapreq-<venue>-bbo(各自存在的条件见 §1)
     pub out: [Option<ByteProducer>; 2],       // snap-<venue>、snap-<venue>-bbo
     pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
-    pub clock: TscUtc,
+    pub clock: UtcClock,
 }
 pub struct GwDeps {
     pub rd: &'static RefData,
@@ -163,16 +163,18 @@ pub struct GwDeps {
     pub kill_mask: u32,                      // GLOBAL | VENUE | HARD(全 gw 共用的位;账户位按 GwAccount.kill_ix 逐条取,见 §4 第 1 步)
     pub tx_tags: Option<Producer<TxTag>>,    // TX 时间戳配对;可选,默认 None
     pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
-    pub clock: TscUtc,
+    pub clock: UtcClock,
 }
 pub struct AcctDeps {
     pub rd: &'static RefData,
     pub reqs: Consumer<AcctReq>,             // ← acctreq-<venue>
     pub out: ByteProducer,                   // → acct-<venue>(唤醒按消费者 gw 的空闲策略)
     pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
-    pub clock: TscUtc,
+    pub clock: UtcClock,
 }
 ```
+
+各任务的 `clock` 是同一条 hft-rt 发布线(`UtcClock`,规则归 [hft-rt 时间](../hft-rt/README.md#时间))的独立读者:墙钟值——gw 与 acct-fetch 填给 `encode`/签名的 `WallClock`、REST 与建连的 `BuildReq.deadline_ns`、应用层 ping 的时间戳、raw 段头与快照记录的 UTC——在使用时按当前发布线换算,同一任务内单调不减;超时、节拍、限速窗口的 TSC 时长取构造时的线。conn-builder 的 `now_ns`(建连截止判定、登录签名)读同一条线,所以截止与判定之间没有跨时钟的偏差。
 
 ### 产生与消费的事件
 

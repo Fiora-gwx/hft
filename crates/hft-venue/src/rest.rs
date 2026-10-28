@@ -23,7 +23,9 @@ pub struct AcctConnections {
     pub src_ip_idx: u8,
     pub first_conn: u8,
     pub last_conn: u8,
-    pub clock: hft_rt::TscUtc,
+    /// The published TSC → UTC line: `BuildReq.deadline_ns` (the conn-builder's `now` reads the
+    /// same line).
+    pub clock: hft_rt::UtcClock,
     pub timeout_ms: u32,
     pub handoff: hft_rt::Consumer<crate::Handover>,
     pub retire: hft_rt::Producer<hft_net::RetireMsg>,

@@ -122,7 +122,7 @@ impl Default for CalibPair {
     }
 }
 
-/// Distributed TSC → UTC conversion (warm readers via `SeqCell<TscUtc>`).
+/// TSC → UTC line; distributed to warm and gw readers through `UtcClock`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TscUtc {
     pub base_tsc: Tsc,

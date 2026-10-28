@@ -11,7 +11,7 @@ use hft_net::{
     RetireMsg, RotatePolicy, SysCount,
 };
 use hft_refdata::RefData;
-use hft_rt::{ByteConsumer, ByteProducer, Consumer, PollTask, Polled, Producer, TscUtc, WaitFds};
+use hft_rt::{ByteConsumer, ByteProducer, Consumer, PollTask, Polled, Producer, UtcClock, WaitFds};
 use hft_types::{AccountId, InstId, MAX_BBO_CONN_SLOTS, Tsc, VenueId};
 use hft_venue_proto::{
     ControlHint, DecodeErr, MsgOp, PingKind, RouteId, RouteKind, RouteSpec, RxMeta, StreamKind, SubFrames,
@@ -52,7 +52,8 @@ pub struct FeedDeps {
     pub handoff: Consumer<Handover>,
     pub retire: Producer<RetireMsg>,
     pub build: Producer<BuildReq>,
-    pub clock: TscUtc,
+    /// The published TSC → UTC line (hft-rt `UtcClock`): app-level ping timestamps, raw roll.
+    pub clock: UtcClock,
 }
 
 /// Counters of one feed task (summed into telemetry each second by hft-core).
@@ -176,6 +177,7 @@ struct St<P: VenueProtocol> {
     rd: &'static RefData,
     ctx: P::FeedCtx,
     t: Ticks,
+    utc: UtcClock,
     ids: Box<[InstId]>,
     insts: Vec<Inst>,
     seqs: Vec<InstSeq>,
@@ -726,7 +728,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         if vm.ws_max_conn_age_s != 0 && cfg.rotate_margin_s >= vm.ws_max_conn_age_s {
             return Err(InitErr::RotateMargin);
         }
-        let t = Ticks { clock: deps.clock };
+        let t = Ticks::of(&deps.clock);
         let mut ids: Vec<InstId> = rd.insts_of_venue(P::VENUE).to_vec();
         ids.sort_unstable();
         ids.dedup();
@@ -765,6 +767,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             rd,
             ctx,
             t,
+            utc: deps.clock.clone(),
             ids: ids.into_boxed_slice(),
             insts,
             seqs: vec![InstSeq::new(); n],
@@ -773,7 +776,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             bulk: deps.bulk,
             pend_bbo: VecDeque::with_capacity(PEND_CAP),
             pend_md: VecDeque::with_capacity(PEND_CAP),
-            raw: RawLog::new(deps.raw, P::VENUE, t),
+            raw: RawLog::new(deps.raw, P::VENUE, deps.clock),
             sink: FeedSink::new(cfg.snapshot_part_levels),
             n: FeedCounters::default(),
             next_sub_id: 1,
@@ -1653,7 +1656,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     }
                     PingKind::AppText | PingKind::AppJson => {
                         let mut buf = [0u8; 256];
-                        let ms = self.st.t.utc_ns(now) / 1_000_000;
+                        let ms = self.st.utc.utc_ns(hft_types::Tsc(now)) / 1_000_000;
                         let n = P::app_ping(ConnRole::Md, ms, &mut buf);
                         match buf.get(..n) {
                             Some(b) if n > 0 => {
@@ -1677,7 +1680,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     }
                     HbSend::App => {
                         let mut buf = [0u8; 256];
-                        let ms = self.st.t.utc_ns(now) / 1_000_000;
+                        let ms = self.st.utc.utc_ns(hft_types::Tsc(now)) / 1_000_000;
                         let n = P::app_ping(ConnRole::Md, ms, &mut buf);
                         match buf.get(..n) {
                             Some(b) if n > 0 => {

@@ -3,7 +3,7 @@
 
 use hft_event::FeedCmd;
 use hft_net::EndpointId;
-use hft_rt::{IdlePolicy, TscUtc};
+use hft_rt::{IdlePolicy, TscUtc, UtcClock};
 use hft_types::MAX_BBO_CONN_SLOTS;
 use hft_venue_proto::{VenueCfg, VenueEnv};
 
@@ -292,13 +292,17 @@ impl Default for SnapCfg {
     }
 }
 
-/// TSC ↔ duration conversions from the runtime's `TscUtc` (TSC deltas only; never across boots).
+/// TSC ↔ duration conversions from the line current at construction (TSC deltas only; never
+/// across boots). Wall-clock values come from the runtime's `UtcClock`, not from here.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct Ticks {
     pub clock: TscUtc,
 }
 
 impl Ticks {
+    pub fn of(utc: &UtcClock) -> Ticks {
+        Ticks { clock: utc.line() }
+    }
     /// Ticks in `ns` nanoseconds (`ns << shift / mult`).
     pub fn ns(&self, ns: u64) -> u64 {
         let mult = u128::from(self.clock.mult.max(1));
@@ -310,10 +314,6 @@ impl Ticks {
     }
     pub fn us(&self, us: u64) -> u64 {
         self.ns(us.saturating_mul(1000))
-    }
-    /// UTC nanoseconds at `tsc`.
-    pub fn utc_ns(&self, tsc: u64) -> i64 {
-        self.clock.utc_ns(hft_types::Tsc(tsc))
     }
     /// Counter frequency in milli-hertz (journal segment headers).
     pub fn hz_milli(&self) -> u64 {

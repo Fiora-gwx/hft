@@ -95,6 +95,17 @@ pub fn gw_rd<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>, const C: usize>(
     o: GhOpts,
     rd: &'static hft_refdata::RefData,
 ) -> Result<Gh<P, C>, hft_venue::InitErr> {
+    gw_rd_clock::<P, C>(cfg, accts, o, rd, clock())
+}
+
+/// `gw_rd` with the given published line instead of the fixed 1 GHz `clock()`.
+pub fn gw_rd_clock<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>, const C: usize>(
+    cfg: GwCfg,
+    accts: &[AccountId],
+    o: GhOpts,
+    rd: &'static hft_refdata::RefData,
+    utc: hft_rt::UtcClock,
+) -> Result<Gh<P, C>, hft_venue::InitErr> {
     let net = Net::new(4, 40);
     let (w, raw) = raw_journal("raw-gw-v7", 4);
     let (out_p, out_c) = spsc::<OutMsg>(o.out_cap, Backing::Heap).unwrap();
@@ -117,7 +128,7 @@ pub fn gw_rd<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>, const C: usize>(
         handoff: h_c,
         retire: r_p,
         build: b_p,
-        clock: clock(),
+        clock: utc,
     };
     let specs = accts.iter().map(|&a| spec::<P>(a, cfg.stale_guard_ms)).collect();
     let rt = GwRuntime::<P, C>::new(cfg, deps, specs)?;
@@ -155,7 +166,11 @@ pub fn gw_full<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>>(
     accts: &[AccountId],
     o: GhOpts,
 ) -> Gh<P> {
-    let mut h = gw_with::<P, 2048>(cfg, accts, o).unwrap();
+    gw_open(gw_with::<P, 2048>(cfg, accts, o).unwrap(), accts)
+}
+
+/// `gw_full`'s steps on an already built harness: every connection open, `SetEpoch{5}`.
+pub fn gw_open<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>>(mut h: Gh<P>, accts: &[AccountId]) -> Gh<P> {
     let per = if P::USER_STREAM { 3 } else { 2 };
     h.open(1_000, per * accts.len());
     h.cmd(GwCmd::set_epoch(5, false, 0));

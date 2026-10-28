@@ -42,7 +42,7 @@ spec: README.md
 - `GatewayConfig`:`result_wait_ms = 5000`、`write_rate_per_min = 12`、`warmup_rate_per_s = 50`、`dedup_capacity = 4096`、`advisor_mem_budget_mib = 256`、`advisor_ckpt_max_mib = 1024`;`socket_path` = 临时目录下的 `ctl.sock`。
 - `principals`:uid 1100 = `hft-opsbot`(issuer `tg:1001` {Viewer}、`tg:1002` {Trader}、`tg:1003` {Admin}、`tg:1004` {Viewer, Trader}、`tg:1005` {Viewer}、`ops_bot`);uid 1101 = `hft-pipeline`(`pipeline`);uid 1102 = `hft-recon`(`reconciler`);uid 1200 = 登录 `alice`(`cli:alice` {Admin});uid 1201 = `tom`(`cli:tom` {Trader});uid 1202 = `vera`(`cli:vera` {Viewer})。
 - ctl 环:hft-rt `ByteSpsc` 262 144 B(单条 ≤ 65 536 B);消费端由测试读取。`parsed`/`retired` 为单槽 `Mailbox`。
-- 时钟:假 `TscUtc`,1 GHz(1 tick = 1 ns),tsc 0 对应 UTC `1790000000000000000`;连接以 harness 的 `connect_as(uid)` 建立(注入对端凭证,生产路径为 `SO_PEERCRED`)。
+- 时钟:固定线的 `UtcClock`(`UtcClock::fixed`),1 GHz(1 tick = 1 ns),tsc 0 对应 UTC `1790000000000000000`;连接以 harness 的 `connect_as(uid)` 建立(注入对端凭证,生产路径为 `SO_PEERCRED`)。
 - journal:测试 journal + 假 sequencer `FakeSeq`(取 ctl 环、按序赋 seq 写进 journal,并按脚本写 `CmdResult`;缺省在取出后 1 ms 写 `Applied`,可暂停)。
 - `active_params`:`(s1-main, acct-a)` 版本 41(blob `B41`,含 `g1`)、`(s2-main, acct-b)` 版本 7、`(s9-sim, sim-a)` 版本 3;`refdata_check` 为脚本函数(缺省通过)。
 - 请求:按 hft-ctl-proto 基线的信封约定,每条请求新 `cmd_id`,`issued_at_ns` = 当前 UTC、`expires_at_ns` = `issued_at_ns` + 30 s;`tg:*` 请求带 `chat_type = "private"`,另注明群聊。

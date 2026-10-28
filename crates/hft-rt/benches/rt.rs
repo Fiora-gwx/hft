@@ -1,4 +1,4 @@
-//! Criterion benchmarks for hft-rt (RT-150 – RT-165); ids equal the `基准名` fields in TESTS.md
+//! Criterion benchmarks for hft-rt (RT-150 – RT-165, RT-172); ids equal the `基准名` fields in TESTS.md
 //! and the budget names in README "延迟与资源契约" / "线程计划的执行".
 
 #![allow(
@@ -285,6 +285,18 @@ fn rt_159_seqcell(c: &mut Criterion) {
     c.bench_function("rt_seqcell", |b| b.iter(|| black_box(&cell).load()));
 }
 
+fn rt_172_utc_clock(c: &mut Criterion) {
+    let clk = TscClock::from_hz_milli(2_500_000_000_000, CalibPair::default());
+    let u = UtcClock::fixed(clk.tsc_utc(&CalibPair::default()));
+    let mut t = 1_000u64;
+    c.bench_function("rt_utc_clock", |b| {
+        b.iter(|| {
+            t += 1;
+            black_box(&u).utc_ns(Tsc(black_box(t)))
+        })
+    });
+}
+
 fn rt_160_heartbeat(c: &mut Criterion) {
     let hb = Heartbeat::new();
     c.bench_function("rt_heartbeat", |b| b.iter(|| black_box(&hb).beat()));
@@ -436,5 +448,6 @@ criterion_group!(
     rt_163_taskloop_idle_round,
     rt_164_wake_check,
     rt_165_unpark_latency,
+    rt_172_utc_clock,
 );
 criterion_main!(benches);

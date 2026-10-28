@@ -30,4 +30,4 @@ SDK `Now.utc_ns` 由段头校准对按 `EngineClock.tsc_hz_milli` 换算。hft-c
 
 决策 UTC 在测试的模拟一天中(计数器慢 30 ppm、12 h 时再变 1 ppm)首次重锚后与 CLOCK_REALTIME 相差 ≤ 50 µs,首次重锚前(约 3 s)≤ 1 ms;只靠启动校准时一天落后约 2.6 s。代价是每 10 s 一条 32 B 的 Input,以及冷读者若要复现决策 UTC 必须按日志重放重锚(段头校准对仍是启动校准)。advisor 从快照起步时,上一条 AdvisorTick 的 UTC 同样按日志重放重锚得到(不能用恢复出的 UTC 线向前外推:tick 与快照之间隔着重锚时会差一次步长,tick 属于上一次运行时会差该运行累计的漂移)。
 
-warm 线程(gw 签名时间戳、REST 截止、ctl)仍用启动时按值传入的 `TscUtc`,没有经 `SeqCell<TscUtc>` 更新,同样按 30 ppm 漂移;它们不进决策回放,单独修正。
+warm 线程(gw 签名时间戳、REST 截止、ctl)的墙钟经 hft-rt 发布线 `UtcClock` 跟随同一组校准对,见 [warm 读者的 UTC](2026-10-28-warm-utc-line.md)。

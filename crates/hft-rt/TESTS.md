@@ -29,13 +29,13 @@ RT-002/166 验证测量环溢出与零分配，见 [延迟采集测试](../../to
 | 变长字节环与版本交换 | RT-030–RT-036 |
 | 所有权交接、值单元与 kill 字 | RT-040–RT-046, RT-050 |
 | 版本交换(可选) | 不适用:里程碑外(可选扩展:refdata 热替换启用时补写 `EpochSwap` 的 loom 与基准用例) |
-| 时间 | RT-050–RT-060, RT-140, RT-144, RT-168 |
+| 时间 | RT-050–RT-060, RT-140, RT-144, RT-168–RT-171 |
 | CPU、主机检查、内存 | RT-070–RT-088, RT-141–RT-143, RT-145 |
 | 等待与存活 | RT-090–RT-099 |
 | 线程计划的执行:任务轮转与空闲策略 | RT-110–RT-122 |
 | 配置项 | RT-130–RT-131 |
 | 实现说明 | RT-008, RT-021–RT-026, RT-033, RT-053, RT-054, RT-073–RT-079, RT-116 |
-| 延迟与资源契约 | RT-150–RT-167 |
+| 延迟与资源契约 | RT-150–RT-167, RT-172 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
 | 延伸阅读 | 不适用:非规范 |
@@ -637,6 +637,54 @@ RT-002/166 验证测量环溢出与零分配，见 [延迟采集测试](../../to
 | RT-168.3 | 100 个,无抖动(窗口只留最近 60 个) | `Some(999_970_000_000)` |
 | RT-168.4 | 60 个,抖动依次 +40、−40、0、+25、−25 ns | 与 999 970 000 000 相差 ≤ 0.01 ppm |
 | RT-168.5 | 3 个,`tsc` 不变(阈值 `u32::MAX`) | `None` |
+
+### RT-169 UtcPublisher 的发布规则与 UtcClock 的读者下限
+
+- 规则:[时间](README.md#时间)
+- 级别:table
+- 里程碑:M1
+- 前置:启动时钟 `C1G`,`base = (0, R)`;`UtcClock::shared(&C1G, 1_000)`;校准对 `err_ns = 10`;`mult_boot` = `C1G` 的 `mult`
+- 实现:`crates/hft-rt/tests/utc.rs::rt_169_publisher_rule`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RT-169.1 | 不 `update` | `line()` = `C1G.tsc_utc(&base)`;`utc_ns(Tsc(1000))` = `R + 1000` |
+| RT-169.2 | `update((10^9, R + 1_000_030_000), Some(999_970_000_000))`(落后 30 µs) | 发布线 = 以该校准对为基准、频率 999 970 000 000 的线;`utc_ns(Tsc(10^9))` = `R + 1_000_030_000` |
+| RT-169.3 | 频率偏离 2 000 ppm、或 `None` | 发布线 `mult` = `mult_boot`;基准 = 该校准对 |
+| RT-169.4 | 超前 100 µs(horizon 1 s) | 基准 = `(pair.tsc, 当前线在该点的值)`;`mult` = `mult_boot − mult_boot / 10_000`(减速 100 ppm);`err_ns` = 100 010;再过 10^9 tick 与目标线相差 ≤ 1 ns |
+| RT-169.5 | 超前 10 ms | `mult` = `mult_boot − mult_boot × 500 / 10^6`(上限 500 ppm);`current()` = 发布线 |
+| RT-169.6 | `UtcClock::fixed(C1G 的线)` | `utc_ns(Tsc(7))` = `R + 7` |
+| RT-169.7 | 同一读者随后 `utc_ns(Tsc(5))`;其克隆 `utc_ns(Tsc(9))` | `R + 7`(不回退);`R + 9` |
+
+### RT-170 慢 30 ppm 的计数器上模拟一天:发布线跟随 CLOCK_REALTIME
+
+- 规则:[时间](README.md#时间)
+- 级别:unit
+- 里程碑:M1
+- 前置:注入的 `ClockReads`:计数器每真实秒 999 970 000 tick(标称 1 GHz,慢 30 ppm),CLOCK_MONOTONIC_RAW = 计数器按标称频率换算(Graviton 的情形),CLOCK_REALTIME = 真实时间,每次读数前进 20 ns;`calibrate_with(nominal_hz_milli = 10^12)`(`rounds = 5`、`samples = 8`);`UtcClock::shared(&启动时钟, 1_000)`、`DriftTracker::new(50_000)`
+- 步骤:
+  1. 每真实秒一个节拍:`sample_pair_with` → `push` → `update(pair, hz_milli())`;每个节拍之间在 10 个等距时刻读 `utc_ns`,与真实时间比较
+  2. 12 h 起计数器再慢 1 ppm(计数器连续);18 h 起 CLOCK_REALTIME 回跳 2 ms;共 86 400 s
+- 期望:
+  - 启动频率 = 标称频率;只用启动线,一天后落后 > 2.5 s
+  - 读数全程单调不减
+  - 第一次 `update` 之前误差 ≤ 1 ms;之后(18 h 起 10 s 之外)≤ 50 µs;第二次 `update` 起(同样除外)≤ 1 µs
+  - 18 h 起 10 s 内误差 ≤ 2.001 ms(回跳以 500 ppm 减速消化,线不回跳);日终误差 ≤ 50 µs
+- 实现:`crates/hft-rt/tests/utc.rs::rt_170_simulated_day`
+
+### RT-171 一个写者、多个读者并发:读者单调、读到的线都是发布过的
+
+- 规则:[时间](README.md#时间)
+- 级别:unit
+- 里程碑:M1
+- 前置:`UtcClock::shared(&C1G, 1)`(horizon 1 ms);3 个读者线程各持一个克隆;写者的计数器(`AtomicU64`,`update` 之后 Release 写入)每次 +10^6
+- 步骤:
+  1. 写者连续 20 000 次 `update`,校准对误差交替 +5 µs、−5 µs(前跳与减速交替);读者循环读计数器、`line()` 与 `utc_ns`,每 64 次记一次 `line()`
+- 期望:
+  - 每个读者的 `utc_ns` 单调不减
+  - 不经下限的 `line().utc_ns(t)` 相对此前最大值的回退 ≤ 1 µs
+  - 读者记下的每条线都在写者发布过的线之中(无撕裂)
+- 实现:`crates/hft-rt/tests/utc.rs::rt_171_concurrent_readers`
 
 ### RT-056 tsc_now 与 tsc_ordered 在同一线程内单调不减
 
@@ -1532,10 +1580,18 @@ RT-002/166 验证测量环溢出与零分配，见 [延迟采集测试](../../to
   - 循环期间被测线程的系统调用总数为 0
 - 实现:`crates/hft-rt/tests/proc_syscall.rs::rt_167_zero_syscalls_hot_entries`
 
+### RT-172 UtcClock::utc_ns 的耗时
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M1
+- 基准名:`rt_utc_clock`
+- 实现:`crates/hft-rt/benches/rt.rs::rt_172_utc_clock`
+
 ## 验收
 
 - M1 完成:里程碑为 M1 的用例全部有同编号实现且通过(`unit` 在 PR;标注 aarch64 的 unit 与 RT-057、RT-074、RT-077 在 CI 每夜 arm 专项;`proc` 在 PR 的 `ubuntu-latest`);`host` 用例按各自里程碑在所列机器上执行并归档证据。
 - loom 用例(RT-008、RT-041、RT-042、RT-045、RT-116)每个 PR 运行且穷举完成(不设 `LOOM_MAX_PREEMPTIONS` 上限,单个模型 ≤ 10 min)。
 - 压力用例(RT-009、RT-036、RT-046)在每夜 arm 专项以 10 倍规模运行零失败(弱内存序只在 aarch64 上真实出现)。
-- 基准:RT-150–RT-165 在参考机 `bench-gate --reference` 下不超过 README [延迟与资源契约](README.md#延迟与资源契约) 与"线程计划的执行"节的预算,且不宽于 [benchmarks 单 crate 上限表](../../benchmarks/README.md#单-crate-基准上限表) 的环跳与 TSC 读取行;同条件下 `rt_spsc_hop` 与 `rtrb` 的对照结果随里程碑报告存档;从 M1.5 第一次参考机运行起判定,CI 只报告。
+- 基准:RT-150–RT-165、RT-172 在参考机 `bench-gate --reference` 下不超过 README [延迟与资源契约](README.md#延迟与资源契约) 与"线程计划的执行"节的预算,且不宽于 [benchmarks 单 crate 上限表](../../benchmarks/README.md#单-crate-基准上限表) 的环跳与 TSC 读取行;同条件下 `rt_spsc_hop` 与 `rtrb` 的对照结果随里程碑报告存档;从 M1.5 第一次参考机运行起判定,CI 只报告。
 - 目标机器上 `check_host` 调优后无 hard 位:RT-141(dev2)、RT-142(升级主机)。

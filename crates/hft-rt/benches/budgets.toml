@@ -38,6 +38,9 @@ budget_ns = 2
 [rt_seqcell]
 budget_ns = 5
 
+[rt_utc_clock]
+budget_ns = 8
+
 [rt_heartbeat]
 budget_ns = 1
 

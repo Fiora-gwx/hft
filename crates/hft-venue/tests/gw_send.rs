@@ -666,6 +666,51 @@ fn ven_246_wall_clock_and_expiry() {
 }
 
 #[test]
+fn ven_404_wall_clock_follows_published_line() {
+    use hft_rt::{CalibPair, Tsc, TscClock, UtcClock};
+    // Boot line: 1 tick = 1 ns, utc = tsc; housekeeping's publisher re-anchors it.
+    let boot = TscClock::from_hz_milli(1_000_000_000_000, CalibPair::default());
+    let (utc, mut publisher) = UtcClock::shared(&boot, 1_000);
+    let built = gw_rd_clock::<StubProto, 2048>(g0(), &[A1, A2], GhOpts::default(), rd_stub(), utc).unwrap();
+    let mut h = gw_open(built, &[A1, A2]);
+    let t0 = 1_700_000_000_123_456_789u64;
+    let wall = |h: &mut support::gwh::Gh<StubProto>, slot: u32, now: u64| {
+        stub::take_log();
+        let c = h.place(A1, slot, 1, S1, false);
+        h.cmd(c);
+        h.poll(now);
+        let clk = stub::calls("encode")[0].clk.unwrap();
+        (clk.unix_ms, clk.unix_us)
+    };
+    assert_eq!(
+        wall(&mut h, 1, t0),
+        (1_700_000_000_123, 1_700_000_000_123_456),
+        "VEN-404.1"
+    );
+    // CLOCK_REALTIME is 2.7 s ahead of the boot line at t0 + 1 s: the next request follows.
+    let pair = |tsc: u64, realtime_ns: i64| CalibPair {
+        tsc: Tsc(tsc),
+        realtime_ns,
+        phc_ns: 0,
+        err_ns: 0,
+    };
+    publisher.update(&pair(t0 + 1_000_000_000, (t0 + 3_700_000_000) as i64), None);
+    assert_eq!(
+        wall(&mut h, 2, t0 + 2_000_000_000),
+        (1_700_000_004_823, 1_700_000_004_823_456),
+        "VEN-404.2"
+    );
+    // CLOCK_REALTIME 1 s behind the line: the line keeps its value and slews (no step back).
+    publisher.update(&pair(t0 + 3_000_000_000, (t0 + 4_700_000_000) as i64), None);
+    let (ms, us) = wall(&mut h, 3, t0 + 3_000_001_000);
+    assert_eq!(ms, 1_700_000_005_823, "VEN-404.3");
+    assert!(
+        (1_700_000_005_823_456..=1_700_000_005_823_457).contains(&us),
+        "VEN-404.3 {us}"
+    );
+}
+
+#[test]
 fn ven_403_last_slot_is_mirrored() {
     let mut h = gw_full::<StubProto>(
         GwCfg {
