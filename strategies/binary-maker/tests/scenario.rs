@@ -8,9 +8,9 @@
 
 mod common;
 
-use binary_maker::vol::{Vol, isqrt};
 use binary_maker::{BinaryMaker, BinaryMakerParams};
 use common::*;
+use hft_feature::{RealizedVol as Vol, isqrt};
 use hft_strategy_sdk::params::{RawParams, SchemaView};
 use hft_strategy_sdk::prelude::*;
 use hft_strategy_sdk::testing::{MockViews, ev};
@@ -433,7 +433,7 @@ fn bmk_011_pair_cost_limit() {
 
 #[test]
 fn bmk_012_normal_cdf() {
-    use binary_maker::norm::{cdf, inv_cdf};
+    use hft_feature::{cdf, inv_cdf};
     let near = |a: i64, b: i64, tol: i64| (a - b).abs() <= tol;
     // .1 Φ at 0, ±1, 1.96 and beyond the table (1e-9; tolerance 2e-5).
     for (z, want) in [
@@ -845,8 +845,8 @@ fn bmk_021_forecast() {
     let b = h.views_mut().bbo_of(R);
     h.feed(&ev::bbo(R, 6, b).as_ref());
     let f = &h.strategy().fast;
-    assert_eq!(f.ref_imb, 500_000_000, "BMK-021.1");
-    let sigma = f.vol.sigma(60).unwrap();
+    assert_eq!(f.feat.top.imb, 500_000_000, "BMK-021.1");
+    let sigma = f.feat.vol.sigma(60).unwrap();
     assert_eq!(f.forecast(sigma), 686_245_000, "BMK-021.1");
     // .2 returns only: the last five one-second returns +1, −1, +1, −1, +1 bp sum to ~1 bp;
     // / (σ √5) ≈ 0.447.
@@ -857,8 +857,8 @@ fn bmk_021_forecast() {
     ]));
     warm(&mut h, 400, 399, 1);
     let f = &h.strategy().fast;
-    let sigma = f.vol.sigma(60).unwrap();
-    assert_eq!(f.vol.recent(5), (100_020, 499_980), "BMK-021.2");
+    let sigma = f.feat.vol.sigma(60).unwrap();
+    assert_eq!(f.feat.vol.recent(5), (100_020, 499_980), "BMK-021.2");
     assert!(
         near(f.forecast(sigma), 447_300_000, 1_000_000),
         "BMK-021.2 {}",
@@ -872,7 +872,7 @@ fn bmk_021_forecast() {
     ]));
     warm(&mut h, 400, 399, 1);
     let f = &h.strategy().fast;
-    let sigma = f.vol.sigma(60).unwrap();
+    let sigma = f.feat.vol.sigma(60).unwrap();
     assert!(
         near(f.forecast(sigma), 66_717_000, 100_000),
         "BMK-021.3 {}",
@@ -885,9 +885,13 @@ fn bmk_021_forecast() {
         ("pred_w_ser", 0),
     ]));
     warm(&mut h, 400, 399, 1);
-    h.strategy_mut().fast.ref_imb = 1_000_000_000;
+    h.strategy_mut().fast.feat.top.imb = 1_000_000_000;
     let f = &h.strategy().fast;
-    assert_eq!(f.forecast(f.vol.sigma(60).unwrap()), 6_000_000_000, "BMK-021.4");
+    assert_eq!(
+        f.forecast(f.feat.vol.sigma(60).unwrap()),
+        6_000_000_000,
+        "BMK-021.4"
+    );
 }
 
 #[test]
@@ -997,7 +1001,7 @@ fn bmk_024_schema_v6() {
 
 #[test]
 fn bmk_025_integer_logarithm() {
-    use binary_maker::fast::comp::{atanh2, ln_rate, ln_ratio};
+    use hft_feature::{atanh2, ln_rate, ln_ratio};
     // Exact values (the README's arithmetic; the offline port reproduces them).
     assert_eq!(ln_rate(1_000_000_000), 0, "BMK-025.1");
     assert_eq!(ln_rate(2_000_000_000), 693_147_181, "BMK-025.1");
@@ -1026,7 +1030,7 @@ fn lv(px: i64, shares: i64) -> Level {
 
 #[test]
 fn bmk_026_composite_score() {
-    use binary_maker::fast::comp::{self, BidSide, ScoreIn, SecHist, SlotHist, Trades};
+    use binary_maker::features::{self as comp, BidSide, ScoreIn, SecHist, SlotHist, Trades};
     let mut v = MockViews::new(fixture());
     let (x, o) = (SLOTS[2], SLOTS[3]);
     MockViews::book(
@@ -1042,15 +1046,15 @@ fn bmk_026_composite_score() {
         &[lv(560, 100)],
     );
     // Our 30 shares at 0.453 are the whole level: the best bid as the score sees it is 0.450.
-    let bx = BidSide::read(&Views::book(&v, x), Some((453, 30_000_000)));
-    let bo = BidSide::read(&Views::book(&v, o), None);
+    let bx = BidSide::read(&Views::book(&v, x), Side::Buy, Some((453, 30_000_000)));
+    let bo = BidSide::read(&Views::book(&v, o), Side::Buy, None);
     assert_eq!(
-        (bx.best(), bx.top_size(), bx.depth5(10)),
+        (bx.best(), bx.top_size(), bx.depth(10, 5)),
         (Some(450), 120_000_000, 380_000_000),
         "BMK-026.1"
     );
     assert_eq!(
-        (bo.best(), bo.top_size(), bo.depth5(10)),
+        (bo.best(), bo.top_size(), bo.depth(10, 5)),
         (Some(540), 80_000_000, 230_000_000),
         "BMK-026.1"
     );
@@ -1150,11 +1154,15 @@ fn bmk_026_composite_score() {
         trade(&mut h, 11_000_000_000, SLOTS[2], 50, Side::Buy);
         trade(&mut h, 12_000_000_000, SLOTS[3], 80, Side::Buy);
         trade(&mut h, 13_000_000_000, SLOTS[2], 60, Side::Sell);
-        let net = h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 0);
+        let net = h.strategy().fast.feat.trades.net(SLOTS[2], SLOTS[3], 0);
         let want = if row == "on" { -90_000_000 } else { 0 };
         assert_eq!(net, want, "BMK-026.5 {row}");
         assert_eq!(
-            h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 12_000_000_001),
+            h.strategy()
+                .fast
+                .feat
+                .trades
+                .net(SLOTS[2], SLOTS[3], 12_000_000_001),
             if row == "on" { -60_000_000 } else { 0 },
             "BMK-026.5 {row} window"
         );
@@ -1340,7 +1348,7 @@ fn bmk_029_own_bid_left_out_of_the_imbalance() {
 
 #[test]
 fn bmk_030_lag_quantiles() {
-    use binary_maker::fast::lag::{LagGate, quantile_x10};
+    use hft_feature::{LagQuantiles as LagGate, quantile_x10};
     assert_eq!(
         quantile_x10(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9),
         Some(91),
@@ -1751,7 +1759,7 @@ fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (
             fnv(&mut hash, format!("{c:?}").as_bytes());
         }
         // Most places are acknowledged: the quote becomes Live with a resting order.
-        for i in 0..6 {
+        for (i, &inst) in SLOTS.iter().enumerate() {
             let q = h.strategy().fast.quotes[i];
             if q.state == QState::Placing && rng.below(5) != 0 {
                 next_slot += 1;
@@ -1768,7 +1776,7 @@ fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (
                 h.views_mut().set_order(OrderView {
                     r,
                     group: gid(i as u32),
-                    inst: SLOTS[i],
+                    inst,
                     side: Side::Buy,
                     tif: Tif::PostOnly,
                     class: IntentClass::Open,
@@ -1822,4 +1830,37 @@ fn bmk_034_decision_trace_is_stable() {
         (0xa5fc_cf6a_5c2b_8311, [797, 704, 2335, 536]),
     ];
     assert_eq!(got, want, "BMK-034");
+}
+
+#[test]
+fn bmk_035_feature_export_row() {
+    use binary_maker::features::COLUMNS;
+    use hft_feature::{FeatureRow, NA};
+    let mut h = harness(&params(|_| {}));
+    warm(&mut h, 400, 399, 1);
+    let f = &h.strategy().fast.feat;
+    let names: Vec<&str> = COLUMNS.iter().map(|c| c.name).collect();
+    assert_eq!(
+        names,
+        [
+            "ref_mid_x2",
+            "ref_imb",
+            "ref_sigma",
+            "ref_samples",
+            "lag_minute",
+            "lag_p90",
+            "lag_p50"
+        ],
+        "BMK-035"
+    );
+    let sigma = f.vol.sigma(1).unwrap();
+    let mut buf = [7i64; 9];
+    let mut row = FeatureRow::new(&mut buf);
+    f.export(&mut row);
+    assert_eq!(row.len(), 7, "BMK-035");
+    assert_eq!(buf, [20_001_000, 0, sigma, 399, NA, NA, NA, 7, 7], "BMK-035");
+    let mut short = [0i64; 3];
+    let mut row = FeatureRow::new(&mut short);
+    f.export(&mut row);
+    assert_eq!((row.len(), short), (7, [20_001_000, 0, sigma]), "BMK-035 short");
 }

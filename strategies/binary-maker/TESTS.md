@@ -21,6 +21,7 @@ spec: README.md
 | 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022, BMK-024, BMK-033 |
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
+| 特征 | BMK-034、BMK-035 |
 | 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
@@ -523,3 +524,13 @@ spec: README.md
 - 步骤:逐事件对捕获的意图、各槽报价状态、分数缓存与公允价锚做 FNV-1a,最后加快照字节
 - 期望:四组的 (哈希, 下单数, 撤单数, 分数有效的事件数, 成交数) 等于用 v7 内联实现记录的值;特征实现迁移(决定不变的修复)后不变
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_034_decision_trace_is_stable`
+
+### BMK-035 特征导出一行定点列
+
+- 规则:[特征](README.md#特征)
+- 级别:unit
+- 里程碑:M3
+- 前置:默认参数;`warm(400, 399, 1)`(400 个参考报价样本,最后一条参考报价中间价 100 005.00)
+- 步骤:`MakerFeatures::export` 写入 7 列的缓冲;另以 9 列的缓冲与 3 列的缓冲各写一次
+- 期望:列名与 `features::COLUMNS` 一致;值依次为 `ref_mid_x2` 20 001 000、`ref_imb` 0、`ref_sigma` = `RealizedVol::sigma(1)`、`ref_samples` 399、三个延迟列 `NA`(延迟闸门关闭);较长的缓冲多出的两格不被写,较短的缓冲只写前三列且写出计数仍为 7
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_035_feature_export_row`

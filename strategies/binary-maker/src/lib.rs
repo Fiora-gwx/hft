@@ -15,9 +15,8 @@
 
 pub mod desc;
 pub mod fast;
-pub mod norm;
+pub mod features;
 pub mod params;
-pub mod vol;
 
 use hft_strategy_sdk::{
     Ctx, EventRef, GroupTable, NoModel, ParamError, RefView, RestoreError, SnapshotReader, SnapshotWriter,
