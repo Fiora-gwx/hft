@@ -43,7 +43,9 @@ replayer sim     --journal … [--from-seq N] [--to-seq M] [--accounts <a,b>] [-
                  [--advice recompute|journal] [--model-checkpoint <dir>] [--stress <case>[,<case>…]|gate|all] [--stress-spec <spec.toml>]
                  [--ab <paramsA> <paramsB>] [--emit-journal] --out <dir>
 replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]]
-                 [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|through] [--reseed-s N] [--log-timers] [--jobs N]
+                 [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N]
+                 [--calib calib.json] [--own] [--tombstone] [--cancel-latency E:R] [--taker-delay B[:S:P]] [--taker-resp-us N]
+                 [--fee-binary K] [--gtd-ms N] [--fill-resp-us N]
 replayer parity   --journal <file|dir> --out <dir> [--variants <file.toml>] [--set NAME=RAW[,…]] [--jobs N]
 replayer compare --a <journal> --b <journal> --map <a账户>=<b账户>[,…] [--from <utc>] [--to <utc>] [--window-ms 2000] --out <dir>
 replayer latency --journal … [--from <utc>] [--to <utc>] [--instance prod|sim] [--venue <v>[,<v>…]]

@@ -198,6 +198,8 @@ pub struct ResearchDriver {
     cfg: DriverCfg,
     taken: u16,
     cur_tsc: u64,
+    /// Engine UTC of the Input being handed (reseed interval and window phase of the venue).
+    cur_utc: i64,
     last_tsc: u64,
     cont_checked: bool,
     /// `ConfigBlob` records seen (prefix and stream), newest last; plus the variants' blobs.
@@ -281,6 +283,7 @@ impl ResearchDriver {
             cfg,
             taken: 0,
             cur_tsc: 0,
+            cur_utc: 0,
             last_tsc: 0,
             cont_checked: true,
             blobs,
@@ -404,6 +407,9 @@ impl ResearchDriver {
         if role == Role::Output {
             self.stats.log_outputs_skipped += 1;
             if r.kind == EventKind::ORDER_DECISION {
+                if let Some(v) = &mut self.venue {
+                    v.on_logged(&r);
+                }
                 self.logged.push(Captured {
                     seq: r.seq,
                     kind: r.kind,
@@ -423,6 +429,7 @@ impl ResearchDriver {
                         .is_some_and(|b| self.balance_seen.insert((b.account.0, b.venue.0, b.asset.0)));
                 if !first_balance {
                     self.stats.masked_reports_dropped += 1;
+                    venue.on_logged(&r);
                     return None;
                 }
             }
@@ -524,6 +531,7 @@ impl<S: StrategySet> Driver<S> for ResearchDriver {
         }
         loop {
             if let Some(p) = self.queue.pop_front() {
+                self.cur_utc = Self::utc_at(v, p.tsc);
                 self.hand(out, p);
                 return true;
             }
@@ -585,6 +593,7 @@ impl<S: StrategySet> Driver<S> for ResearchDriver {
         let Some(venue) = &mut self.venue else {
             return EmitResult::Skipped;
         };
+        venue.on_utc(self.cur_utc);
         match o {
             OutRecord::Out(_, c) => venue.on_command(c, c.decided_tsc),
             OutRecord::Pair(p, _) => {

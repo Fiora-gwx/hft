@@ -10,7 +10,9 @@ use crate::Failure;
 
 const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [--account N]... \
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
-[--maker-fill queue|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N]";
+[--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
+[--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -31,6 +33,14 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
         i += 1;
         if key == "--log-timers" {
             driver.engine_timers = false;
+            continue;
+        }
+        if key == "--own" {
+            sim.own = true;
+            continue;
+        }
+        if key == "--tombstone" {
+            sim.venue.tombstone = true;
             continue;
         }
         let value = args
@@ -75,9 +85,63 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
             "--maker-fill" => {
                 sim.maker_fill = match value.as_str() {
                     "queue" => hft_sim::MakerFill::Queue,
+                    "queue-cap" => hft_sim::MakerFill::QueueCap,
                     "through" => hft_sim::MakerFill::TradeThrough,
-                    _ => return Err(format!("--maker-fill {value}: queue|through")),
+                    _ => return Err(format!("--maker-fill {value}: queue|queue-cap|through")),
                 }
+            }
+            "--calib" => {
+                let text = std::fs::read(&value).map_err(|e| format!("{value}: {e}"))?;
+                sim.calib_file_sha = hft_replay::calib::apply(&text, &mut sim)?;
+            }
+            "--cancel-latency" => {
+                let (e, r) = value
+                    .split_once(':')
+                    .ok_or_else(|| format!("--cancel-latency {value}: ENTRY_US:RESP_US"))?;
+                let us = |v: &str| u32::try_from(num(v)?).map_err(|_| format!("{key}: {v} too large"));
+                sim.venue.cancel_us = Some((us(e)?, us(r)?));
+            }
+            "--taker-delay" => {
+                let us = |v: &str| u32::try_from(num(v)?).map_err(|_| format!("{key}: {v} too large"));
+                let p: Vec<&str> = value.split(':').collect();
+                let (base, slow, ppm) = match p.as_slice() {
+                    [b] => (us(b)?, 0, 0),
+                    [b, s, q] => (us(b)?, us(s)?, us(q)?),
+                    _ => return Err(format!("--taker-delay {value}: BASE_US[:SLOW_US:SLOW_PPM]")),
+                };
+                let resp = sim.venue.taker.map_or(0, |t| t.resp_us);
+                sim.venue.taker = Some(hft_sim::TakerDelay {
+                    base_us: base,
+                    slow_us: slow,
+                    slow_ppm: ppm,
+                    resp_us: resp,
+                });
+            }
+            "--taker-resp-us" => {
+                let r = u32::try_from(num(&value)?).map_err(|_| "--taker-resp-us too large")?;
+                let t = sim.venue.taker.get_or_insert(hft_sim::TakerDelay {
+                    base_us: 0,
+                    slow_us: 0,
+                    slow_ppm: 0,
+                    resp_us: 0,
+                });
+                t.resp_us = r;
+            }
+            "--fee-binary" => {
+                let k: f64 = value
+                    .parse()
+                    .map_err(|_| format!("--fee-binary {value}: a fraction"))?;
+                if !(0.0..=1.0).contains(&k) {
+                    return Err(format!("--fee-binary {value}: 0..=1"));
+                }
+                #[allow(clippy::cast_possible_truncation)]
+                let k_e9 = (k * 1e9).round() as i64;
+                sim.venue.fee = hft_sim::FeeModel::BinaryTaker { k_e9 };
+            }
+            "--gtd-ms" => sim.venue.gtd_ms = u32::try_from(num(&value)?).map_err(|_| "--gtd-ms too large")?,
+            "--fill-resp-us" => {
+                sim.venue.fill_resp_us =
+                    Some(u32::try_from(num(&value)?).map_err(|_| "--fill-resp-us too large")?)
             }
             "--reseed-s" => sim.reseed_s = u32::try_from(num(&value)?).map_err(|_| "--reseed-s too large")?,
             "--jobs" => {

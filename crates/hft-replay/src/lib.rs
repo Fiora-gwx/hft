@@ -2,6 +2,7 @@
 //! in-process simulated venue, N parameter variants × M latency seeds, Parquet output.
 #![forbid(unsafe_code)]
 
+pub mod calib;
 pub mod driver;
 pub mod parity;
 pub mod run;
@@ -97,6 +98,8 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
         "journal": opts.files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "sim": format!("{:?}", opts.sim),
         "calib_sha": sim_sha(&opts.sim),
+        "calib_file_sha": opts.sim.calib_file_sha,
+        "own": opts.sim.own,
         "engine_timers": opts.driver.engine_timers,
         "wall_s": wall_s,
         "runs": runs,

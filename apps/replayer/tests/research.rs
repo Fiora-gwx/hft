@@ -330,3 +330,120 @@ fn rpl_304_parity_matches_the_logged_decisions_and_reports_a_variant() {
         "RPL-304.2"
     );
 }
+
+/// The Polymarket venue model of the calibration form, with pools on every leg.
+fn pm_model() -> SimParams {
+    let mut p = SimParams::default();
+    let text = br#"{"maker_fill":"queue_cap","tombstone":true,"cancel_us":[30000,5000],
+        "taker":{"base_us":195000,"slow_us":1250000,"slow_ppm":125000,"resp_us":15000},
+        "fee_k":0.07,"gtd_ms":300000,"fill_resp_us":12000,"thr":[1.0,5.0],
+        "pools":{"ack":[0.030,0.035,0.040,0.045,0.050,0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,0.100,0.105,0.110,0.115,0.120,0.125],
+                 "cxl":[0.030,0.040,0.050,0.060,0.070,0.080,0.090,0.100,0.110,0.120,0.130,0.140,0.150,0.160,0.170,0.180,0.190,0.200,0.210,0.220]}}"#;
+    p.calib_file_sha = hft_replay::calib::apply(text, &mut p).unwrap();
+    p
+}
+
+#[test]
+fn rpl_305_venue_model_runs_are_deterministic() {
+    let (_t, files) = dst_journal(0, 2_000);
+    let mut c = cfg(&files);
+    c.sim = pm_model();
+    c.sim.own = true;
+    // .1 two runs with the venue model, pools and the own overlay: the same tables and hash.
+    let a = run_one::<TestStrategies>(&c).unwrap();
+    let b = run_one::<TestStrategies>(&c).unwrap();
+    assert!(a.stats.sim_inputs > 0, "RPL-305.1 {:?}", a.stats);
+    assert_eq!(
+        (&a.decisions, &a.fills, &a.orders),
+        (&b.decisions, &b.fills, &b.orders),
+        "RPL-305.1"
+    );
+    assert_eq!(a.sim_state_hash, b.sim_state_hash, "RPL-305.1");
+    // .2 another seed draws other latencies from the pools (reseeded per interval).
+    let mut c2 = c.clone();
+    c2.sim.seed = 2;
+    let d = run_one::<TestStrategies>(&c2).unwrap();
+    assert_ne!(a.orders, d.orders, "RPL-305.2 {:?}", a.orders);
+    // .3 the default venue model gives the run of the plain simulator.
+    let base = run_one::<TestStrategies>(&cfg(&files)).unwrap();
+    let mut c3 = cfg(&files);
+    c3.sim.venue = hft_sim::VenueModel::default();
+    let same = run_one::<TestStrategies>(&c3).unwrap();
+    assert_eq!(
+        (base.sim_state_hash, &base.fills),
+        (same.sim_state_hash, &same.fills),
+        "RPL-305.3"
+    );
+}
+
+#[test]
+fn rpl_306_research_calib_option() {
+    let (t, files) = dst_journal(0, 1_000);
+    let dir = files[0].parent().unwrap().to_path_buf();
+    let calib = t.path().join("calib.json");
+    let text = br#"{"maker_fill":"queue_cap","tombstone":true,"gtd_ms":300000}"#;
+    std::fs::write(&calib, text).unwrap();
+    let out = t.path().join("out");
+    let exe = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join(format!("replay_probe{}", std::env::consts::EXE_SUFFIX));
+    let o = std::process::Command::new(&exe)
+        .args([
+            "--fixture-dst",
+            "research",
+            "--journal",
+            dir.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--calib",
+            calib.to_str().unwrap(),
+            "--own",
+            "--fee-binary",
+            "0.07",
+            "--taker-delay",
+            "195000:1250000:125000",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "RPL-306.1 {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out.join("run.json")).unwrap()).unwrap();
+    use sha2::Digest;
+    let want: String = sha2::Sha256::digest(text)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(meta["calib_file_sha"], want.as_str(), "RPL-306.1");
+    assert_eq!(meta["own"], true, "RPL-306.1");
+    let sim = meta["sim"].as_str().unwrap();
+    assert!(
+        sim.contains("QueueCap") && sim.contains("BinaryTaker") && sim.contains("195000"),
+        "RPL-306.1 {sim}"
+    );
+    // .2 a malformed calibration file: exit 2.
+    std::fs::write(&calib, b"{\"bogus\":1}").unwrap();
+    let o = std::process::Command::new(&exe)
+        .args([
+            "--fixture-dst",
+            "research",
+            "--journal",
+            dir.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--calib",
+            calib.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(2), "RPL-306.2");
+}

@@ -643,6 +643,14 @@ impl SimExchange {
         }
     }
 
+    /// The complementary binary outcome token of `i` and the price of one unit (`10^|px_exp|`):
+    /// a bid at `px` on `i` is liquidity at `one − px` on the other side of the complement.
+    pub fn complement(&self, i: InstId) -> Option<(InstId, Px)> {
+        let r = self.insts.get(self.inst_index(i)?)?;
+        let c = self.insts.get(usize::from(r.complement))?;
+        Some((c.id, Px(10i64.saturating_pow(u32::from(r.px_exp.unsigned_abs())))))
+    }
+
     /// Hidden own quantity of inst index `ii`'s `side` at `px`.
     pub(crate) fn own_at(&self, ii: usize, side: Side, px: i64) -> i64 {
         if self.own.is_empty() {
