@@ -648,7 +648,7 @@ pub struct BboView {                     // 按值返回(Views::bbo、EventRef::
     pub resync: bool,                    // 该 inst 的报价在重同步或没有健康成员;为真时 quote_live 为假
 }
 pub struct Stamps {                      // 按值(Views::stamps);写者 sequencer,取自当前 Input 的 MarketHdr 或 OrderEvent
-    pub kind: u16,                       // Input 的 EventKind 编号
+    pub kind: u16,                       // Input 的 EventKind 编号(码表见 docs/generated/event-catalog.md)
     pub venue_ns: i64,                   // 交易所时刻(MarketHdr/OrderEvent.ex_ts_ns,UTC ns;0 = 无)
     pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用)
     pub hw_rx_ns: i64,                   // 网卡硬件接收戳(PHC 域,不是 UTC;0 = 不可用)
