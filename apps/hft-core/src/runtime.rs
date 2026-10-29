@@ -519,9 +519,11 @@ fn run_linux(
             let vtask = crate::venues::assemble(
                 c, &l.setup, name, v, rd, clock, &utc, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
             )?;
-            let (task, gw, js, baseline) = vtask;
-            initial_balances.extend(baseline.balances);
-            initial_positions.extend(baseline.positions);
+            let (task, gw, js, baselines) = vtask;
+            for b in baselines {
+                initial_balances.extend(b.balances);
+                initial_positions.extend(b.positions);
+            }
             venue_tasks.push(task);
             if let Some(g) = gw {
                 gateway_inputs.push(g);

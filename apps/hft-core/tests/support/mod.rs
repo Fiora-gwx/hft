@@ -790,6 +790,10 @@ pub struct PmLive {
     pub daily_loss_max_resumes: Option<u8>,
     /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
     pub presign: bool,
+    /// Further Live accounts `(UID, KEYS_DIR)` (`--live-account`, repeatable): accounts 2, 3, …
+    /// labelled `pm-live-2`, …, bound to the same binary-maker instance with `pm-live`'s risk
+    /// limits; the strategy parameters stay one blob under `pm-live`.
+    pub extra_accounts: Vec<(String, PathBuf)>,
 }
 
 /// `venues.pm.presign` of the live configuration: two prices below and two above the last place
@@ -1145,6 +1149,23 @@ fn write_pm(
             venue: v,
             uid: l.uid.as_str().into(),
         });
+        for (i, (uid, _)) in l.extra_accounts.iter().enumerate() {
+            let id = AccountId(a.0 + 1 + i as u8);
+            b.account(AccountSpec {
+                id,
+                sim: false,
+                bound_instance: StrategyId(1),
+                is_prod: true,
+                venues: 1 << v.0,
+                label: format!("pm-live-{}", id.0).as_str().into(),
+                uid_policy: UidPolicy::Verified,
+            });
+            b.account_venue(AccountVenueSpec {
+                account: id,
+                venue: v,
+                uid: uid.as_str().into(),
+            });
+        }
     } else {
         b.sim(SimSpec {
             account: a,
@@ -1313,6 +1334,17 @@ fn write_pm(
             rr_reserve: None,
         },
     ));
+    // Further live accounts: `pm-live`'s account and venue limits each.
+    let extra: Vec<AccountId> = live.map_or(Vec::new(), |l| {
+        (0..l.extra_accounts.len())
+            .map(|i| AccountId(a.0 + 1 + i as u8))
+            .collect()
+    });
+    for id in &extra {
+        let (acct, venue) = (risk.accounts[0].1, risk.venues[0].2);
+        risk.accounts.push((*id, acct));
+        risk.venues.push((v, *id, venue));
+    }
     let risk = risk.build();
     let rpb = risk.encode_blob().unwrap();
     // Polymarket settles in USDC (pUSD, 1:1) and lists no USDC/USDT book: USDC is valued at par,
@@ -1363,6 +1395,7 @@ fn write_pm(
         engine.role_prod = true;
         engine.gws.venues = vec![v];
         engine.keys_required = vec![(a, v, 3)];
+        engine.keys_required.extend(extra.iter().map(|id| (*id, v, 3)));
         // A SmokeOrder bids half the ask (an outcome token at 0.50 → 0.25): it must never fill.
         engine.oms.smoke_far_bp = Rate(500_000_000);
         // A REST place answer can take over 2 s (2026-10-23, round trips otherwise up to 0.76 s);
@@ -1496,18 +1529,24 @@ quote_interval_ms = 1000
                 v.remove("live_feed");
             }
         }
-        let k = |f: &str| l.keys_dir.join(f).display().to_string();
-        let keys: toml::Value = toml::from_str(&format!(
-            "account=1\napi_key_path={:?}\nsession_seed_path={:?}\nrest_api_key_path={:?}\nrest_secret_path={:?}\npassphrase_path={:?}",
-            k("api_key"),
-            k("secret"),
-            k("api_key"),
-            k("secret"),
-            k("passphrase")
-        ))
-        .unwrap();
+        let keys = |account: u8, dir: &Path| -> toml::Value {
+            let k = |f: &str| dir.join(f).display().to_string();
+            toml::from_str(&format!(
+                "account={account}\napi_key_path={:?}\nsession_seed_path={:?}\nrest_api_key_path={:?}\nrest_secret_path={:?}\npassphrase_path={:?}",
+                k("api_key"),
+                k("secret"),
+                k("api_key"),
+                k("secret"),
+                k("passphrase")
+            ))
+            .unwrap()
+        };
+        let mut accounts = vec![keys(a.0, &l.keys_dir)];
+        for (id, (_, dir)) in extra.iter().zip(&l.extra_accounts) {
+            accounts.push(keys(id.0, dir));
+        }
         let pm = config["venues"]["pm"].as_table_mut().unwrap();
-        pm.insert("accounts".into(), toml::Value::Array(vec![keys]));
+        pm.insert("accounts".into(), toml::Value::Array(accounts));
         pm.insert(
             "account_io".into(),
             toml::from_str(

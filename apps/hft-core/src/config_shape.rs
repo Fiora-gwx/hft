@@ -76,6 +76,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "session_secret_path",
                 "rest_sign_alg",
                 "passphrase_path",
+                "src_ip",
             ],
         ),
         "sim" => (
