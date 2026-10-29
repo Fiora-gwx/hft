@@ -376,17 +376,17 @@ spec: README.md
 | REF-018.2 | inst 2 的 quote = USDC(`Stable`) | `Ok` |
 | REF-018.3 | USDT 的 `class = Equity` | `[{QuoteNotStable, 3, 0}, {QuoteNotStable, 3, 1}, {QuoteNotStable, 3, 2}, {QuoteNotStable, 3, 3}, {QuoteNotStable, 3, 4}]` |
 
-### REF-019 一个实例至多被一个账户绑定
+### REF-019 一个实例可被多个账户绑定(账户集合)
 
 - 规则:[实现说明](README.md#实现说明)、[数据结构](README.md#数据结构)
 - 级别:table
 - 里程碑:M1
 - 前置:F0
-- 实现:`crates/hft-refdata/tests/refs.rs::ref_019_instance_multi_bound`
+- 实现:`crates/hft-refdata/tests/refs.rs::ref_019_instance_account_set`
 
 | 行 | 改动 | 期望 |
 |---|---|---|
-| REF-019.1 | 账户 2 的 `bound_instance = 1`(与账户 1 相同) | `[{InstanceMultiBound, 4, 1}]` |
+| REF-019.1 | 账户 2 的 `bound_instance = 1`(与账户 1 相同) | `Ok`;`accounts_of(1) = [1, 2]`,`account_of(1) = 1`,账户 2 的 `bound_instance` 仍为 1 |
 | REF-019.2 | 账户 1、2 的 `bound_instance` 都为 0 | `Ok` |
 
 ### REF-020 有 inst 的 venue 缺 VenueCaps 行报 MissingCaps,无 inst 的 venue 不要求

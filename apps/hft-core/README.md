@@ -83,7 +83,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `MissingCredential` | 2 | Live 账户在其交易的某个 venue 缺会话 key 或 REST key 的秘密名 |
 | `EndpointOverrideInProd` | 2 | `order_env = "prod"` 的配置出现 `endpoint_override` 或 `test.extra_ca` |
 | `SimSectionInProd` | 2 | `prod` 实例出现 `sim.*` 或 `[[sim.*_models]]` |
-| `BindingMismatch` | 2 | 账户的 `bound_instance` 没有对应的 `StrategyParams`,或同一实例被两份参数引用([策略装配](#策略装配)) |
+| `BindingMismatch` | 2 | 账户的 `bound_instance` 没有对应的 `StrategyParams`(一个实例一份,其 `account` 为该实例账户集合中 id 最小的主账户),或同一实例被两份参数引用([策略装配](#策略装配)) |
 | `ProbeOnProdAccount` | 2 | 见[策略装配](#策略装配) |
 | `ModelMemBudget` | 2 | 见[内存与 journal 段](#内存与-journal-段按主机类唯一归属)规则 5 |
 | `StandbyFlagMismatch` | 2 | `startup.allow_missing_standby` 与 ECF1 段 5 不等 |

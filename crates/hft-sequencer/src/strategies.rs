@@ -24,10 +24,16 @@ pub const fn strategy_owner(s: StrategyId) -> u16 {
     hft_event::TIMER_OWNER_STRATEGY_BASE + s.0 as u16
 }
 
-/// One strategy instance (bound to exactly one account).
+/// Accounts one instance may trade (refdata `accounts_of`); more → `BootError::Config`.
+pub const MAX_INSTANCE_ACCOUNTS: usize = 8;
+
+/// One strategy instance: its account set (`account` = the primary, the lowest id).
 pub struct InstanceSlot<S: StrategySet> {
     pub id: StrategyId,
     pub account: AccountId,
+    /// Every account bound to the instance, ascending (`accounts[..n_accounts]`).
+    pub accounts: [AccountId; MAX_INSTANCE_ACCOUNTS],
+    pub n_accounts: u8,
     pub kind_id: u16,
     /// Bound account is Live (dispatch order: Live first).
     pub live: bool,
@@ -64,6 +70,16 @@ impl<S: StrategySet> core::fmt::Debug for InstanceSlot<S> {
 }
 
 impl<S: StrategySet> InstanceSlot<S> {
+    /// The instance's accounts, ascending (the first is `account`).
+    #[inline]
+    pub fn accounts(&self) -> &[AccountId] {
+        self.accounts.get(..usize::from(self.n_accounts)).unwrap_or(&[])
+    }
+    /// `a` is one of the instance's accounts.
+    #[inline]
+    pub fn has_account(&self, a: AccountId) -> bool {
+        self.accounts().contains(&a)
+    }
     pub fn groups(&self) -> Option<&GroupTable> {
         self.cur.as_ref().map(|p| &p.groups)
     }
@@ -130,10 +146,24 @@ impl<S: StrategySet> Instances<S> {
             let Some(account) = rd.account_of(m.id) else {
                 continue;
             };
-            let live = matches!(rd.account(account).kind, AccountKind::Live);
+            let set = rd.accounts_of(m.id);
+            if set.len() > MAX_INSTANCE_ACCOUNTS {
+                return Err(BootError::Config(crate::types::ConfigErr::Component(
+                    "instance accounts",
+                )));
+            }
+            let mut accounts = [AccountId(0); MAX_INSTANCE_ACCOUNTS];
+            for (x, a) in accounts.iter_mut().zip(set) {
+                *x = *a;
+            }
+            let live = set
+                .iter()
+                .any(|a| matches!(rd.account(*a).kind, AccountKind::Live));
             slots.push(InstanceSlot {
                 id: m.id,
                 account,
+                accounts,
+                n_accounts: set.len() as u8,
                 kind_id: m.kind_id,
                 live,
                 inst: None,
@@ -201,16 +231,19 @@ impl<S: StrategySet> Instances<S> {
     }
     /// Slot index of the instance bound to an account.
     pub fn ix_of_account(&self, a: AccountId) -> Option<usize> {
-        self.slots.iter().position(|s| s.account == a)
+        self.slots.iter().position(|s| s.has_account(a))
     }
-    /// Every (strategy, account, group) cell of the created instances.
+    /// Every (strategy, account, group) cell of the created instances: per instance, each of its
+    /// accounts in ascending order, then its groups.
     pub fn cells(&self) -> impl Iterator<Item = CellKey> + '_ {
         self.slots.iter().flat_map(|s| {
-            s.groups().into_iter().flat_map(move |g| {
-                g.iter().map(move |(_, sp)| CellKey {
-                    strategy: s.id,
-                    account: s.account,
-                    group: sp.id,
+            s.accounts().iter().flat_map(move |a| {
+                s.groups().into_iter().flat_map(move |g| {
+                    g.iter().map(move |(_, sp)| CellKey {
+                        strategy: s.id,
+                        account: *a,
+                        group: sp.id,
+                    })
                 })
             })
         })
@@ -219,13 +252,13 @@ impl<S: StrategySet> Instances<S> {
     pub fn n_cells(&self) -> usize {
         self.slots
             .iter()
-            .map(|s| s.groups().map_or(0, |g| usize::from(g.len())))
+            .map(|s| s.groups().map_or(0, |g| usize::from(g.len())) * s.accounts().len())
             .sum()
     }
     /// The GroupSpec of a group (any instance).
     pub fn spec(&self, a: AccountId, g: GroupId) -> Option<&GroupSpec> {
         let s = self.slots.get(self.ix(g.strategy())?)?;
-        if s.account != a && a.0 != 0 {
+        if !s.has_account(a) && a.0 != 0 {
             return None;
         }
         let t = s.groups()?;
@@ -279,6 +312,8 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
         return Ok(Err(0));
     };
     let account = slot.account;
+    let set = slot.accounts;
+    let set = set.get(..usize::from(slot.n_accounts)).unwrap_or(&[]).to_vec();
     let strategy = slot.id;
     let rv = RefView::new(&e.rd, account);
     match slot.inst.as_mut() {
@@ -313,7 +348,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
             .as_ref()
             .and_then(|o| o.groups.gix_of(g.id).map(|gi| *o.groups.get(gi)));
         match prev {
-            None => added.push(cell(strategy, account, g.id)),
+            None => added.extend(set.iter().map(|a| cell(strategy, *a, g.id))),
             Some(pg) if pg.fingerprint() != g.fingerprint() => changed_fp.push(g.id),
             _ => {}
         }
@@ -321,7 +356,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     if let Some(o) = old.as_ref() {
         for (_, g) in o.groups.iter() {
             if p.groups.gix_of(g.id).is_none() {
-                removed.push(cell(strategy, account, g.id));
+                removed.extend(set.iter().map(|a| cell(strategy, *a, g.id)));
             }
         }
     }
@@ -361,12 +396,21 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
         .on_groups_changed(&all, &RefView::new(&e.rd, account), &mut xo);
     crate::exec_glue::drain_out(e, inst, drv, &mut xo)?;
     e.put_exec(xo);
-    e.risk.on_groups_changed(account, &groups);
-    e.trace.rec("risk.on_groups_changed", u64::from(account.0), 0);
+    // Every account of the instance trades the same groups.
+    let (accounts, n_accounts) = inst
+        .slots
+        .get(ix)
+        .map_or(([AccountId(0); MAX_INSTANCE_ACCOUNTS], 0), |s| {
+            (s.accounts, usize::from(s.n_accounts))
+        });
+    for a in accounts.iter().take(n_accounts).copied() {
+        e.risk.on_groups_changed(a, &groups);
+        e.trace.rec("risk.on_groups_changed", u64::from(a.0), 0);
+    }
     for c in removed.iter() {
-        if e.exec.cell(account, c.group).is_some_and(|x| x.has_target) {
+        if e.exec.cell(c.account, c.group).is_some_and(|x| x.has_target) {
             let mut xo = e.take_exec();
-            e.exec.clear_target(strategy, account, c.group, e.now, &mut xo);
+            e.exec.clear_target(strategy, c.account, c.group, e.now, &mut xo);
             crate::exec_glue::drain_out(e, inst, drv, &mut xo)?;
             e.put_exec(xo);
             e.seq_note(
@@ -374,7 +418,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
                 hft_event::NoteLevel::Info,
                 c.group,
                 InstId(0),
-                [u64::from(strategy.0), u64::from(account.0), 0, 0, 0, 0, 0, 0],
+                [u64::from(strategy.0), u64::from(c.account.0), 0, 0, 0, 0, 0, 0],
             );
         }
         if n_timers > 0 {
@@ -836,7 +880,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
         return Ok(());
     };
     let strategy = slot.id;
-    let account = slot.account;
+    let (accounts, n_accounts) = (slot.accounts, usize::from(slot.n_accounts));
     e.ctx_full = e.ctx_full.saturating_add(u64::from(slot.bufs.full_count()));
     inst.ops.clear();
     for (h, op) in slot.bufs.ops() {
@@ -922,18 +966,21 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
             OpOwned::Halt { group, reason } => {
                 e.trace
                     .rec("ctx.request_halt", u64::from(strategy.0), u64::from(group.0));
-                let rec = hft_event::CapRecord {
-                    source: CapSource(CapSource::HALTED.0),
-                    level: 1,
-                    cflags: 0,
-                    _pad: [0; 5],
-                    scope: hft_risk::mode::cell_scope(strategy, account, group),
-                    set_seq: e.cur_seq,
-                    // The strategy's reason code (SDK `request_halt`): into the CapRecord and so
-                    // into its CapSet Note.
-                    params: [u64::from(reason), 0],
-                };
-                crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
+                // The group halts on every account of the instance.
+                for account in accounts.iter().take(n_accounts).copied() {
+                    let rec = hft_event::CapRecord {
+                        source: CapSource(CapSource::HALTED.0),
+                        level: 1,
+                        cflags: 0,
+                        _pad: [0; 5],
+                        scope: hft_risk::mode::cell_scope(strategy, account, group),
+                        set_seq: e.cur_seq,
+                        // The strategy's reason code (SDK `request_halt`): into the CapRecord and
+                        // so into its CapSet Note.
+                        params: [u64::from(reason), 0],
+                    };
+                    crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
+                }
             }
         }
     }

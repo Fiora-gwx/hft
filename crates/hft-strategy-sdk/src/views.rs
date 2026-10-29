@@ -276,6 +276,18 @@ impl<'a> RefView<'a> {
     pub const fn refdata(&self) -> &'a RefData {
         self.rd
     }
+    /// The instance's account set: every account bound to the same instance as this view's
+    /// account, ascending (the first is the primary account); just this account when it is the
+    /// only one (or unbound).
+    pub fn accounts(&self) -> &'a [AccountId] {
+        let s = self.rd.account(self.account).bound_instance;
+        let set = self.rd.accounts_of(s);
+        if set.is_empty() {
+            core::slice::from_ref(&self.rd.account(self.account).id)
+        } else {
+            set
+        }
+    }
     /// Hot row (market kind, tick, lot, min notional, asset). Only for insts referenced by the
     /// instance's GroupSpecs or subscriptions (checked at assembly); others → the NONE row.
     pub fn inst(&self, i: InstId) -> &'a InstHot {

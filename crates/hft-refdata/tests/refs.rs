@@ -9,7 +9,7 @@
 use crate::common;
 
 use common::*;
-use hft_refdata::LoadErrCode::{DanglingRef, InstanceMultiBound, QuoteNotStable};
+use hft_refdata::LoadErrCode::{DanglingRef, QuoteNotStable};
 use hft_refdata::{
     AccountVenueSpec, AssetClass, ChainToken, Endpoint, EndpointEnv, EndpointRole, Exchange, FeeAssetRule,
     FeeOverrideSpec, InstKind, LimitBucket, LimitScope, MaintKind, RateLimit, SimSpec, StaleGuardKind,
@@ -209,10 +209,23 @@ fn ref_018_quote_stable() {
 }
 
 #[test]
-fn ref_019_instance_multi_bound() {
+fn ref_019_instance_account_set() {
+    // .1 two accounts bound to one instance: accepted; the instance's set lists both, the primary
+    // is the lower id.
     let mut s = f0_spec();
     s.account_mut(2).bound_instance = StrategyId(1);
-    assert_eq!(errs(&s.build()), vec![e(InstanceMultiBound, 4, 1)], "REF-019.1");
+    let rd = ok(&s.build());
+    assert_eq!(
+        rd.accounts_of(StrategyId(1)),
+        &[AccountId(1), AccountId(2)],
+        "REF-019.1"
+    );
+    assert_eq!(rd.account_of(StrategyId(1)), Some(AccountId(1)), "REF-019.1");
+    assert_eq!(
+        rd.account(AccountId(2)).bound_instance,
+        StrategyId(1),
+        "REF-019.1"
+    );
     let mut s = f0_spec();
     s.account_mut(1).bound_instance = StrategyId(0);
     s.account_mut(2).bound_instance = StrategyId(0);

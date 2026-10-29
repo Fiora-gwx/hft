@@ -111,3 +111,94 @@ fn seq_017_desc_version_in_section5() {
     assert_eq!(g[0].group, G1);
     let _ = RingId::Ctl;
 }
+
+/// SEQ-451: an instance bound to two accounts (account set) has cells on both, may place on
+/// either (not on an account of another instance), and accepts commands scoped to either.
+#[test]
+fn seq_451_instance_account_set() {
+    use hft_types::RejectBits;
+    reset_script();
+    let mut b = b0();
+    let mut a3 = b.rd.accounts[2].clone();
+    a3.bound_instance = S1;
+    a3.venues = vbits(&[A, B]);
+    a3.label = "acct-3".into();
+    b.rd.accounts[2] = a3;
+    // One more Live account: more engine timers per account.
+    b.caps.max_timers += 64;
+    let mut h = b.boot();
+    h.steady();
+    // .1 the slot lists both accounts (primary = the lower id); one cell per account and group.
+    let s1 = h.s.instances().get(S1).unwrap();
+    assert_eq!(
+        (s1.account, s1.accounts()),
+        (AC1, &[AC1, AccountId(3)][..]),
+        "SEQ-451.1"
+    );
+    let cells: Vec<_> =
+        h.s.instances()
+            .cells()
+            .filter(|c| c.strategy == S1)
+            .map(|c| c.account)
+            .collect();
+    assert_eq!(cells, vec![AC1, AccountId(3)], "SEQ-451.1");
+    assert_eq!(
+        h.s.instances().ix_of_account(AccountId(3)),
+        h.s.instances().ix(S1),
+        "SEQ-451.1"
+    );
+    let rd = &h.s.engine().rd;
+    let rv = |a| hft_strategy_sdk::RefView::new(rd, a).accounts().to_vec();
+    assert_eq!(
+        (rv(AC1), rv(AccountId(3)), rv(AC2)),
+        (vec![AC1, AccountId(3)], vec![AC1, AccountId(3)], vec![AC2]),
+        "SEQ-451.1 RefView"
+    );
+    // .2 S1 places on account 3: not refused as unbound; on account 2 (bound to S2): NOT_BOUND.
+    let m = h.mark();
+    set_hook(|hx, ev, ctx| {
+        if let hft_strategy_sdk::EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            for a in [AccountId(3), AC2] {
+                let mut it = intent(
+                    hx,
+                    A1,
+                    hft_types::Side::Buy,
+                    hft_types::Tif::Gtc,
+                    hft_strategy_sdk::IntentClass::Open,
+                    px("49000"),
+                    q("0.001"),
+                );
+                it.account = a;
+                let _ = ctx.place(it);
+            }
+        }
+    });
+    h.quote(A1, "50000", "50002");
+    h.run();
+    clear_hook();
+    let ds = decisions(&h.since(m));
+    let on = |a: AccountId| ds.iter().find(|(_, d)| d.account == a).map(|(_, d)| d.reject);
+    assert_eq!(
+        on(AccountId(3)).map(|r| r & RejectBits::NOT_BOUND.0),
+        Some(0),
+        "SEQ-451.2 {ds:?}"
+    );
+    assert_eq!(
+        on(AC2).map(|r| r & RejectBits::NOT_BOUND.0),
+        Some(RejectBits::NOT_BOUND.0),
+        "SEQ-451.2 {ds:?}"
+    );
+    // .3 a SetMode scoped to account 3 of S1: applied.
+    let id = h.cmd_confirmed(
+        AccountId(3),
+        &ControlCmd::SetMode {
+            scope: scope(S1, AccountId(3), GroupId(0)),
+            mode: hft_types::RunMode::CloseOnly,
+        },
+    );
+    h.run();
+    assert_eq!(h.result_of(id).map(|r| r.status), Some(0), "SEQ-451.3");
+}

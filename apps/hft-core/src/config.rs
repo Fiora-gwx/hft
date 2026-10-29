@@ -947,9 +947,12 @@ pub fn load_timed(
         if matches!(m.kind, AccountKind::Sim(_)) != dry || m.is_prod != c.instance.prod_orders() {
             errors.push(Error::config("EnvAccountMismatch", format!("account {a}")));
         }
+        // One parameter blob per instance, under its primary account (the lowest id of its account
+        // set; with one account per instance, the account itself).
+        let primary = rd.account_of(m.bound_instance).unwrap_or(m.id);
         let rows: Vec<_> = parsed
             .iter()
-            .filter(|(_, p)| p.account == m.id && p.strategy == m.bound_instance)
+            .filter(|(_, p)| p.account == primary && p.strategy == m.bound_instance)
             .collect();
         if rows.len() != 1 {
             errors.push(Error::config("BindingMismatch", format!("account {a}")));

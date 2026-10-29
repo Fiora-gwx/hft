@@ -193,7 +193,8 @@ impl GroupSpecExt for GroupSpec { /* … */ }
 
 pub struct RefView<'a> { /* 借用 RefData,只暴露本实例需要的部分 */ }
 impl<'a> RefView<'a> {
-    pub fn new(rd: &'a RefData, account: AccountId) -> RefView<'a>;   // account = 本实例绑定的账户
+    pub fn new(rd: &'a RefData, account: AccountId) -> RefView<'a>;   // account = 该实例的主账户(账户集合中 id 最小者)
+    pub fn accounts(&self) -> &'a [AccountId];               // 该实例的账户集合(与 account 绑定同一实例的全部账户,升序,首个为主账户);未绑定 → 只有 account
     pub fn inst(&self, i: InstId) -> &'a InstHot;            // refdata 热行:市场类型、tick、lot、最小名义、资产、计价资产
     pub fn asset(&self, a: AssetId) -> &'a AssetMeta;
     pub fn insts_of(&self, a: AssetId) -> &'a [InstId];      // refdata 中该资产在全部 venue 上的 inst(InstId 升序),含不在本账户 venues 内的

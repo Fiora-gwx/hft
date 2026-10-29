@@ -21,7 +21,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424、SEQ-441 |
-| 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
+| 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340、SEQ-451 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447–SEQ-449 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
 | advisor | SEQ-030、SEQ-031、SEQ-051、SEQ-339 |
@@ -352,6 +352,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 节 5 中 s1 行的 `StrategyRowHdr{strategy: 1, account: 1, kind_id: 0xFF01, desc_version: 3, params_version: 1}`,`n_groups = 1`,其后一条 `GroupSeqRow{group: g1}`
 - 实现:`crates/hft-sequencer/tests/strategies.rs::seq_017_desc_version_in_section5`
 
+
+### SEQ-451 一个实例绑定两个账户(账户集合)
+
+- 规则:[策略集](README.md#策略集strategyset)(实例表与账户集合)
+- 级别:table
+- 里程碑:M3
+- 前置:B0,账户 3(Live,venue A/B)的 `bound_instance` = s1;稳态
+- 实现:`crates/hft-sequencer/tests/strategies.rs::seq_451_instance_account_set`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-451.1 | 读实例表 | s1 的主账户 1、账户集合 [1, 3];s1 的 cell 依次为账户 1、3 各一个;`ix_of_account(3)` = s1;SDK `RefView::accounts` 对账户 1、3 都是 [1, 3],对账户 2 是 [2] |
+| SEQ-451.2 | s1 在 `a1` 报价上下两单:账户 3、账户 2(绑定 s2) | 账户 3 的决定没有 `NOT_BOUND`;账户 2 的决定 `reject` 含 `NOT_BOUND` |
+| SEQ-451.3 | `SetMode{scope (s1, 账户 3), CloseOnly}`(确认) | `Applied` |
 ### SEQ-018 策略只经静态分派进入本 crate
 
 - 规则:[策略集](README.md#策略集strategyset)、[依赖](README.md#依赖)

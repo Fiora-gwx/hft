@@ -10,7 +10,7 @@ status: spec
 
 ## 概要
 
-`hft-refdata` 拥有参考数据的**格式、加载校验与查询**:`RefData`(不可变快照)、`InstMeta`/`InstHot`、`AssetMeta`、`VenueMeta`、**`VenueCaps`**(每个 `VenueId` 一行的交易所能力表;`VenueId` 按产品线划分,市场段由 `VenueMeta.product` 推出)、`AccountMeta`(含账户类型 `Live`/`Sim`、交易所 UID、绑定的策略实例)、策略实例表、`FeeSchedule`、`RateLimitTable`、端点、维护窗口、链上代币映射(optional)、符号→`InstId` 查表。本 crate 是下列事实的唯一归属:账户列表、标签、类型与绑定(`AccountMeta`;**一个账户只绑定一个策略实例**)、交易所差异(`VenueCaps`:手续费扣币规则、reduceOnly、要求的账户配置、资金费推送方式、保证金数据来源、自身强平识别方法、可忽略的用户流事件、能力位、死手、测试网)、交易所限速(`RateLimitTable`;余量比例在 `RiskParams`)、连接最长存活(`VenueMeta.ws_max_conn_age_s`)。group 成员、`open_allowed` 与阈值在 `StrategyParams`([hft-event SPB1](../hft-event/README.md#strategyparamsspb1));OMS/ledger/容量/环容量在 **`EngineConfig`**(另一个 blob,复用本 crate 的段式容器);`risk_class` 在 `RiskParams`。它不拥有取值:**唯一来源是 [`tools/hft-cfg`](../../tools/README.md#hft-cfg)**(从受版本控制的 TOML 编码;RDB1 只有本 crate 的 `RdbBuilder` 一个编码器);不拥有替换命令的语义与权限([control-plane](../../docs/subsystems/control-plane.md));不拥有跨线程发布机制。调用者:feed 线程(符号→`InstId`、线格式指数)、gw 线程(tick/lot、客户端 id 限制、能力位)、sim-gw(模拟账户配置、能力表)、sequencer(风控、OMS、执行层、策略视图的全部静态参数)、冷进程与 PyO3(解析 journal 里的 `ConfigBlob`)。热路径上只有查表,没有加载。
+`hft-refdata` 拥有参考数据的**格式、加载校验与查询**:`RefData`(不可变快照)、`InstMeta`/`InstHot`、`AssetMeta`、`VenueMeta`、**`VenueCaps`**(每个 `VenueId` 一行的交易所能力表;`VenueId` 按产品线划分,市场段由 `VenueMeta.product` 推出)、`AccountMeta`(含账户类型 `Live`/`Sim`、交易所 UID、绑定的策略实例)、策略实例表、`FeeSchedule`、`RateLimitTable`、端点、维护窗口、链上代币映射(optional)、符号→`InstId` 查表。本 crate 是下列事实的唯一归属:账户列表、标签、类型与绑定(`AccountMeta`;**一个账户只绑定一个策略实例**,一个实例可绑定多个账户)、交易所差异(`VenueCaps`:手续费扣币规则、reduceOnly、要求的账户配置、资金费推送方式、保证金数据来源、自身强平识别方法、可忽略的用户流事件、能力位、死手、测试网)、交易所限速(`RateLimitTable`;余量比例在 `RiskParams`)、连接最长存活(`VenueMeta.ws_max_conn_age_s`)。group 成员、`open_allowed` 与阈值在 `StrategyParams`([hft-event SPB1](../hft-event/README.md#strategyparamsspb1));OMS/ledger/容量/环容量在 **`EngineConfig`**(另一个 blob,复用本 crate 的段式容器);`risk_class` 在 `RiskParams`。它不拥有取值:**唯一来源是 [`tools/hft-cfg`](../../tools/README.md#hft-cfg)**(从受版本控制的 TOML 编码;RDB1 只有本 crate 的 `RdbBuilder` 一个编码器);不拥有替换命令的语义与权限([control-plane](../../docs/subsystems/control-plane.md));不拥有跨线程发布机制。调用者:feed 线程(符号→`InstId`、线格式指数)、gw 线程(tick/lot、客户端 id 限制、能力位)、sim-gw(模拟账户配置、能力表)、sequencer(风控、OMS、执行层、策略视图的全部静态参数)、冷进程与 PyO3(解析 journal 里的 `ConfigBlob`)。热路径上只有查表,没有加载。
 
 ## 目录
 
@@ -63,7 +63,8 @@ impl RefData {
     pub fn venue(&self, v: VenueId) -> &VenueMeta;
     pub fn venue_uid(&self, a: AccountId, v: VenueId) -> Option<&str>;   // Live 账户在该 venue 的交易所 UID;Sim 或空串(只在 Unverifiable 账户)→ None
     pub fn instance(&self, s: StrategyInstanceId) -> Option<&InstanceMeta>;
-    pub fn account_of(&self, s: StrategyInstanceId) -> Option<AccountId>; // 绑定到该实例的账户(一个实例至多一个账户,加载校验 InstanceMultiBound);未绑定 → None
+    pub fn account_of(&self, s: StrategyInstanceId) -> Option<AccountId>; // 该实例的主账户(绑定到它的账户中 id 最小者);未绑定 → None
+    pub fn accounts_of(&self, s: StrategyInstanceId) -> &[AccountId];   // 绑定到该实例的全部账户(账户集合),升序;未绑定 → 空
     pub fn insts_of_asset(&self, a: AssetId) -> &[InstId];   // 按 InstId 升序
     pub fn insts_of_venue(&self, v: VenueId) -> &[InstId];   // 按 InstId 升序
     pub fn rate_limits(&self, v: VenueId) -> &[RateLimit];
@@ -137,7 +138,7 @@ impl SymbolIndex {
     InstanceIdRange = 5,
     DanglingRef = 6,             // 引用的 venue/inst/asset/账户/实例不存在,或代币行的 chain 不是链上 venue
     QuoteNotStable = 7,
-    InstanceMultiBound = 8,
+    InstanceMultiBound = 8,   // 不再产生(一个实例可绑定多个账户);码值保留,不复用
     // 第 5 步 能力表
     MissingCaps = 9, CapsMarketMismatch = 10, SpotBorrowRequired = 11, DeadManRange = 12,
     CapsValue = 13,              // 其余能力表取值非法(如 Poll 的 interval_ms 越界)
@@ -405,7 +406,7 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 1. 结构:magic/format、`total_len == blob.len()`、`base_version = 0`、`version ≥ 1`、段不越界不重叠、段 id 唯一、`row_size ≥` 已知大小、对齐;未知段与退役段按上文;行内枚举与 Option 线编码的判别值合法。
 2. 字符串:`StrRef` 在界内、合法 UTF-8;符号与别名长度 1..=27,不含空白与控制字符;实例名与账户标签唯一。
 3. ID:Assets、Insts、Accounts、Instances 的 id 从 1 起稠密、唯一、按 id 排序;Venues 与 VenueCaps 以 `VenueId` 为键(按常量表取值,不要求稠密),唯一、升序;`VenueId` 必须在 [hft-types 常量表](../hft-types/README.md#id-与枚举)内(`UnknownVenue`);Instances 的 id ≤ 254(`InstanceIdRange`,`GroupId` 构造要求)。
-4. 引用:inst 的 venue/asset/quote 存在;quote 的 `class == Stable`;费率行的 (account, venue) 存在;维护窗口、端点、限速、代币行引用的 venue/inst/asset 存在;代币行的 chain 是链上 venue;别名行的 inst 存在且属于该行的 venue;`VenueCaps` 行的 venue 存在于 Venues,其 `fee_asset_rule` 引用的资产存在;`AccountMeta.bound_instance` 为 0 或存在于 Instances、`venues` 位图中的每个 venue 存在于 Venues,且每个实例至多被一个账户绑定(`InstanceMultiBound`);`AccountVenues`、`SimAccounts`、`SimBalances` 引用的账户、venue、资产存在;`MmrTiers` 行的 inst 存在。
+4. 引用:inst 的 venue/asset/quote 存在;quote 的 `class == Stable`;费率行的 (account, venue) 存在;维护窗口、端点、限速、代币行引用的 venue/inst/asset 存在;代币行的 chain 是链上 venue;别名行的 inst 存在且属于该行的 venue;`VenueCaps` 行的 venue 存在于 Venues,其 `fee_asset_rule` 引用的资产存在;`AccountMeta.bound_instance` 为 0 或存在于 Instances、`venues` 位图中的每个 venue 存在于 Venues,一个实例可被多个账户绑定(账户集合,`accounts_of`;每个账户仍只绑定一个实例);`AccountVenues`、`SimAccounts`、`SimBalances` 引用的账户、venue、资产存在;`MmrTiers` 行的 inst 存在。
 5. 能力表:每个被 inst 引用的 `VenueId` 恰有一行 `VenueCaps`(`MissingCaps`),`market` 与 `VenueMeta.product`、`VenueId::market()` 一致(`CapsMarketMismatch`);`InstKind` 为 `Spot`/`Perp` 的 inst 与其 venue 的 `VenueMeta.product` 相同(`CapsMarketMismatch`;`Delivery` 留给第 6 步);现货行显式 `NotApplicable`:`required_position_mode`、`required_margin_mode`、`funding_settle`、`margin_data`,且 `required_multi_asset = None`(违反 → `CapsMarketMismatch`);现货行 `required_spot_borrow ∈ {None, Some(false)}`(`Some(true)` → `SpotBorrowRequired`),永续行 `required_spot_borrow = None`(`CapsMarketMismatch`);永续行 `funding_settle ≠ NotApplicable`(`CapsMarketMismatch`);`Poll` 的 `interval_ms ∈ [1000, 600000]`(`CapsValue`);`dms ≠ None` 时 `dms_refresh_ms > 0`、`dms_timeout_ms ≥ max(dms_min_ms, 2 × dms_refresh_ms)`(丢一次刷新不触发交易所侧全撤)且 `dms_max_ms = 0` 或 `dms_timeout_ms ≤ dms_max_ms`,`dms = None` 时四个时长字段为 0(`DeadManRange`);`required_margin_mode ≠ Mixed`(`CapsMarketMismatch`)。
 6. 指数:`px_exp, qty_exp ∈ [-18, 6]`;**`px_exp + qty_exp ≤ −6`**(保证名义换算只做除法,见 [hft-types](../hft-types/README.md#实现说明);违反 → `NotionalExp`);`px_unit_shift, qty_unit_shift ∈ [-12, 12]`;`px_wire_exp = px_exp + px_unit_shift`、`qty_wire_exp = qty_exp − qty_unit_shift` 由加载器计算,不从 blob 读,且两者 ∈ [-18, 6](`parse_exact` 的指数范围;越界 → `ExpRange`);`InstKind::Delivery` 拒绝(`UnsupportedKind`)。
 7. 步长复核:用 `parse_exact(tick_str, px_wire_exp)` 重新解析交易所原文,结果必须等于行内 `tick`(不等或其他解析错误 → `TickMismatch`;`PRECISION` → `AssetExpTooCoarse`)。`lot`(`lot_str`)、`min_qty`(`min_qty_str`)同理,以 `qty_wire_exp` 解析。`tick > 0`、`lot > 0`、`min_qty > 0`、`min_qty` 是 `lot` 整数倍(`TickMismatch`)。
