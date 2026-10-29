@@ -270,3 +270,30 @@ fn rpl_303_research_command_writes_tables_and_run_json() {
         .unwrap();
     assert_eq!(o.status.code(), Some(2), "RPL-303.3");
 }
+
+/// Throughput probe (not a case): `HFT_RESEARCH_BENCH_STEPS` DST steps, events per second.
+#[test]
+#[ignore]
+fn research_throughput_probe() {
+    let steps: u64 = std::env::var("HFT_RESEARCH_BENCH_STEPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50_000);
+    let (_t, files) = dst_journal(0, steps);
+    let c = cfg(&files);
+    let t0 = std::time::Instant::now();
+    let r = run_one::<TestStrategies>(&c).unwrap();
+    let dt = t0.elapsed().as_secs_f64();
+    let n = r.stats.log_inputs
+        + r.stats.log_meta
+        + r.stats.log_outputs_skipped
+        + r.stats.masked_reports_dropped
+        + r.stats.log_timers_dropped;
+    eprintln!(
+        "records {n} handed {} in {dt:.3}s = {:.0} rec/s ({:.2} us/rec); {:?}",
+        r.stats.log_inputs + r.stats.sim_inputs + r.stats.engine_timers,
+        n as f64 / dt,
+        dt * 1e6 / n as f64,
+        r.stats
+    );
+}
