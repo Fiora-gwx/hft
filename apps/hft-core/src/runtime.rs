@@ -738,7 +738,11 @@ fn run_linux(
             .as_ref()
             .ok_or_else(|| Error::config("SimConfig", "missing sim"))?;
         let tail_cfg = storage::reader_cfg(c);
-        let mut gateway = paper::Gateway::new(
+        let model = paper::model(p)?;
+        if let Some(sha) = &model.calib_sha {
+            eprintln!("hft-core: sim-gw calibration table sha256 {sha}");
+        }
+        let gateway = paper::Gateway::new(
             paper::exchange(p, rd, clock.hz_milli)?,
             storage::reader(c)?,
             Box::new(move |seq| {
@@ -752,6 +756,20 @@ fn run_linux(
             rd,
             epoch,
         );
+        // Pools draw by the condition of the Sim accounts' venues (hft-sim README "条件跟踪与校准表").
+        let mut gateway = match model.venue.pools {
+            Some(_) => {
+                let venues = (1..=255u8)
+                    .map(|a| rd.account(hft_types::AccountId(a)))
+                    .filter(|m| m.id.0 != 0 && matches!(m.kind, hft_refdata::AccountKind::Sim(_)))
+                    .fold(0u64, |v, m| v | m.venues);
+                gateway.with_condition(
+                    hft_sim::CondTracker::new(model.cond, venues, clock.hz_milli),
+                    utc.clone(),
+                )
+            }
+            None => gateway,
+        };
         workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
                 t.heartbeat.beat();

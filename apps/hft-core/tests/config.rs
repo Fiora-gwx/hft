@@ -636,6 +636,68 @@ maker_fill = 'prob'
     assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-425.3: {e:?}");
 }
 
+#[test]
+fn core_447_sim_calibration_table() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let calib = d.path().join("calib.json");
+    std::fs::write(
+        &calib,
+        r#"{"maker_fill": "queue_cap", "tombstone": true, "gtd_ms": 900, "thr": [3.5],
+            "pools": {"ack": [0.05, 0.06], "cxl|1": [0.04]}, "min_n": 1}"#,
+    )
+    .unwrap();
+    let with = |extra: &str| {
+        std::fs::write(&path, text.replace("[sim]\n", &format!("[sim]\n{extra}\n"))).unwrap();
+        hft_core::config::parse(&path).unwrap()
+    };
+    // .1 absent: the configured maker_fill, every venue option off, no hash.
+    let c = hft_core::config::parse(&path).unwrap();
+    let m = hft_core::paper::model(c.sim.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        (m.maker_fill, m.venue.clone(), m.calib_sha.clone()),
+        (
+            hft_sim::MakerFill::TradeThrough,
+            hft_sim::VenueModel::default(),
+            None
+        ),
+        "CORE-447.1"
+    );
+    // .2 `calib`: the table's maker_fill, options, pools and thresholds; the file's SHA-256; the
+    // exchange builds with them.
+    let c = with(&format!(
+        "calib = '{}'",
+        calib.display().to_string().replace('\\', "/")
+    ));
+    let p = c.sim.as_ref().unwrap();
+    let m = hft_core::paper::model(p).unwrap();
+    assert_eq!(m.maker_fill, hft_sim::MakerFill::QueueCap, "CORE-447.2");
+    assert!(m.venue.tombstone && m.venue.gtd_ms == 900, "CORE-447.2");
+    assert_eq!(
+        m.venue.pools.as_ref().map(|x| x.pools.len()),
+        Some(2),
+        "CORE-447.2"
+    );
+    assert_eq!(m.cond.load_thr_ns, vec![3_500_000], "CORE-447.2");
+    assert!(m.calib_sha.as_ref().is_some_and(|h| h.len() == 64), "CORE-447.2");
+    let l = hft_core::config::load(&path, true).unwrap();
+    let rd = hft_refdata::RefData::load(l.rd.blob(), None).unwrap();
+    assert!(
+        hft_core::paper::exchange(p, &rd, 1_000_000_000_000).is_ok(),
+        "CORE-447.2"
+    );
+    // .3 a missing file or an unknown field: SimConfig.
+    for body in [None, Some(r#"{"bogus": 1}"#)] {
+        match body {
+            None => std::fs::remove_file(&calib).unwrap(),
+            Some(b) => std::fs::write(&calib, b).unwrap(),
+        }
+        let e = hft_core::paper::model(c.sim.as_ref().unwrap()).unwrap_err();
+        assert_eq!(e.code, "SimConfig", "CORE-447.3 {body:?}");
+    }
+}
+
 #[cfg(feature = "polymarket")]
 #[test]
 fn core_426_polymarket_maker_sim_config_loads() {

@@ -763,7 +763,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `[[accounts]].id` / `.label` | u8 / string | 必须与 refdata `AccountMeta.id`/`AccountMeta.label` 一致;账户名前缀规则见[实例角色](#实例角色prod-与-sim) | 必填 |
 | `[[accounts]].keys` | {venue → {session, rest} 秘密名} | Live 账户必填(会话 key 与 REST key 是同一把的 venue 两项指向同一秘密);Sim 账户出现即退出 2 | — |
 | `[[accounts]].deadman` | {venue → bool} | Live 账户是否启用交易所侧死手;能力来自 refdata `VenueCaps.dms` | Live 必填 |
-| `sim.*` | 表 | `SimTuning`:`seed`、`consume_decay_ms`、`take_avail_bp`、`quiet_ms`、`report_interval_s`、`transfer_delay_ms`、`rate_limit`、`late_fee`、`maker_fill`(`trade_through` \| `queue`,`--dry-run` 的 `[sim]` 已接) | 语义与默认见 [hft-sim 配置](../../crates/hft-sim/README.md#配置);`sim` 实例必填 `seed`;`prod` 实例出现即退出 2 |
+| `sim.*` | 表 | `SimTuning`:`seed`、`consume_decay_ms`、`take_avail_bp`、`quiet_ms`、`report_interval_s`、`transfer_delay_ms`、`rate_limit`、`late_fee`、`maker_fill`(`trade_through` \| `queue`,`--dry-run` 的 `[sim]` 已接)、`calib`(校准表路径,见下) | 语义与默认见 [hft-sim 配置](../../crates/hft-sim/README.md#配置);`sim` 实例必填 `seed`;`prod` 实例出现即退出 2 |
 | `[[sim.latency_models]]` | 表数组 | `LatencyModel` 取值表:`{kind = "Fixed", entry_us, resp_us}` 或 `{kind = "Empirical", entry = [[q_bp, us], …], resp = [[q_bp, us], …]}`;`SimAccountCfg.latency_model` 是下标(出现顺序,从 0 起) | `sim` 实例至少一项;定义与校验归 [hft-sim](../../crates/hft-sim/README.md#配置) |
 | `[[sim.margin_models]]` | 表数组 | `MarginModel` 取值表:`{mmr = "RefdataTiers" 或 { Flat = "0.005" }, leverage, liq_fee, liq_slippage_bp}`;`SimAccountCfg.margin_model` 是下标 | 同上 |
 | `advisor.mem_budget_mib` | u32 | 本实例全部已绑定策略实例的 Model 内存预算([规则 5](#内存与-journal-段按主机类唯一归属));须等于 EngineConfig ECF1 段 5 的 `advisor_mem_budget_mib`,不等退出 2 | 必填(deploy 按内存表 advisor 一行生成) |
@@ -811,6 +811,8 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `advice` | 15 `Advice` | 字节 | 256 KiB | 同左 | 同左 | 同左 |
 | `snapreq-<venue>`(及拆分时的 `-bbo`) | 16 `SnapReq` | 元素 | 64 | 64 | 16 | 16 |
 | `snap-<venue>`(及拆分时的 `-bbo`) | 17 `Snap` | 字节 | 4 MiB | 4 MiB | 1 MiB | 1 MiB(增量深度启用时 2 MiB;现货深度快照的响应体大小待核实(方法:按目标档数抓取各所 REST 快照)) |
+
+**`[sim] calib`**:可选的校准表路径(JSON,格式与解析归 [hft-sim 条件跟踪与校准表](../../crates/hft-sim/README.md#条件跟踪与校准表),与 `replayer research --calib` 同一份解析)。启动时读入:表里的 `maker_fill` 覆盖 `[sim] maker_fill`,场所行为选项交给 `SimExchange::set_venue_model`;表里有条件延迟池时,sim-gw 用 `CondTracker` 跟踪它从 journal 读到的行情(Sim 账户的 venue 算负载,其他 venue 的第一个 Bbo inst 是参考报价),每条指令前按决策时刻的条件 `set_condition`(UTC 取发布线)。文件读不到或格式错 → `SimConfig`,退出 2;生效时把文件的 SHA-256 打到 stderr。sim-gw 的回报本身是 Input,校准表不进 journal。
 
 **`[sim]` 进 journal**:`sim` 实例启动步 5 把生效的 `[sim]` 全表(`SimTuning` 与两张模型表)以规范编码写成一条 `ConfigBlob`(与 `ConfigBlob{HostManifest}` 同一步写入;段首与其他生效配置一起重述),[replayer sim](../replayer/README.md#sim) 从 journal 取,不读当前配置文件(`replayer verify` 不需要它:Sim 账户的回报本身是 Input)。该 blob 的 `BlobKind` 编号由 [hft-event](../../crates/hft-event/README.md) 登记。
 

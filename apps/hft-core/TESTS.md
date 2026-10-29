@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-441、CORE-446、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445、CORE-447 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4451,6 +4451,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-425.1 | 未配置 | `TradeThrough` |
 | CORE-425.2 | `maker_fill = "queue"` | `Queue` |
 | CORE-425.3 | `maker_fill = "prob"` | `ConfigParse` |
+
+### CORE-447 `[sim] calib` 校准表
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`[sim] calib`)、[hft-sim 条件跟踪与校准表](../../crates/hft-sim/README.md#条件跟踪与校准表)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置;临时目录里的 `calib.json` = `maker_fill = "queue_cap"`、`tombstone`、`gtd_ms = 900`、`thr = [3.5]`、两个池(`ack`、`cxl|1`)、`min_n = 1`
+- 实现:`apps/hft-core/tests/config.rs::core_447_sim_calibration_table`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-447.1 | 未配置 `calib` | `paper::model`:`TradeThrough`、`VenueModel::default()`、无哈希 |
+| CORE-447.2 | `calib = '<calib.json>'` | `QueueCap`;墓碑开、GTD 900 ms、2 个池、负载阈值 3.5 ms;64 位 SHA-256;`paper::exchange` 成功 |
+| CORE-447.3 | 文件不存在;未知字段 | 都是 `SimConfig` |
 
 ### CORE-426 Polymarket 挂单模拟配置可加载
 

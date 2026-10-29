@@ -391,6 +391,10 @@ pub struct Paper {
     /// hft-sim `maker_fill` (resting-order fill model); absent = `trade_through`.
     #[serde(default)]
     pub maker_fill: MakerFillKind,
+    /// Calibration table (hft-sim `calib`, README "[sim] 校准表"): venue-behaviour options and
+    /// conditional latency pools; its `maker_fill` overrides the one above.
+    #[serde(default)]
+    pub calib: Option<PathBuf>,
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

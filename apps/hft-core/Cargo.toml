@@ -22,7 +22,7 @@ hft-sequencer = { workspace = true, features = ["live"] }
 hft-strategy-sdk.workspace = true
 hft-strategy-registry = { path = "../../strategies/registry" }
 hft-risk.workspace = true
-hft-sim.workspace = true
+hft-sim = { workspace = true, features = ["calib"] }
 hft-ctl = { path = "../../crates/hft-ctl" }
 hft-net.workspace = true
 hft-venue.workspace = true

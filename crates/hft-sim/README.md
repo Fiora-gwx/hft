@@ -173,7 +173,7 @@ pub fn reply_parts(rd: &RefData, epoch: u16, msg: &RepMsg, bulk: &[u8], emit: im
 
 ### 场所行为选项(`VenueModel`)
 
-`SimExchange::set_venue_model(VenueModel)`(构造之后、第一条指令之前,冷路径)打开 Polymarket 实盘验证过的成交与时序规则(研究侧参照 `bm_sim.py`);`VenueModel::default()` 全部关闭,行为、回报与 `state_hash` 与不调用时相同(SIM-239)。hft-core 的 sim-gw 不调用它;研究回放([hft-replay](../hft-replay/README.md#模拟场所))按命令行或校准表设置。
+`SimExchange::set_venue_model(VenueModel)`(构造之后、第一条指令之前,冷路径)打开 Polymarket 实盘验证过的成交与时序规则(研究侧参照 `bm_sim.py`);`VenueModel::default()` 全部关闭,行为、回报与 `state_hash` 与不调用时相同(SIM-239)。hft-core 的 sim-gw 只在 `[sim] calib` 给出校准表时调用它([hft-core](../../apps/hft-core/README.md));研究回放([hft-replay](../hft-replay/README.md#模拟场所))按命令行或校准表设置。
 
 ```rust
 pub struct VenueModel {
