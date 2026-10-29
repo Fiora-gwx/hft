@@ -49,6 +49,7 @@
 | [crates/hft-ctl](crates/hft-ctl/README.md) | warm | core | ctl-gateway |
 | [crates/hft-telemetry](crates/hft-telemetry/README.md) | cold | core | 延迟样本、直方图、按事件加权的离线延迟统计 |
 | [crates/hft-sim](crates/hft-sim/README.md) | warm | core | 模拟撮合与模拟账户(实时行情纸面交易;journal 重演排障);队列模型为可选 feature |
+| [crates/hft-replay](crates/hft-replay/README.md) | cold | optional | 研究回放:同一 sequencer 与策略代码回放 seq journal,被模拟账户由 hft-sim 撮合,参数变体 × 延迟种子,Parquet 输出 |
 | [crates/hft-py](crates/hft-py/README.md) | cold | core | PyO3 绑定(journal reader + ledger + SDK `params` 编解码,aarch64 wheel) |
 | [crates/hft-testkit](crates/hft-testkit/README.md) | dev | core | 金样、属性测试、DST、共用撮合器、假交易所、测试策略 |
 | [crates/hft-ext-proto](crates/hft-ext-proto/README.md) | pure | optional | 外部 venue(chain-core ↔ hft-core)帧;链上策略迁移时启用(冻结) |

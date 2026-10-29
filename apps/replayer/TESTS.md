@@ -21,6 +21,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
 | verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
+| research | RPL-300–RPL-303 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
 | bench(可选扩展) | RPL-256 |
@@ -2387,3 +2388,56 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 6. **门槛 ⑩**:7 天窗口内每天都有一份 `replayer latency` 输出(RPL-190–RPL-206 的行为为前提;窗口、判定与证据格式归 [testing §8.2](../../docs/testing.md#82-延迟验收的测法))。
 7. **基准**:RPL-250、RPL-252、RPL-253 与 SIM-213 在参考机上不超过 benchmarks 登记的上限;RPL-254 在 dev2 上 `memory.peak` 不超过 `MemoryMax`。
 8. **可选扩展**:RPL-256–RPL-258 带 `状态:可选扩展`,只在 `tools/xtask/test-trace.toml` 的 `enabled_extensions` 列出对应扩展后要求实现。
+
+### RPL-300 研究回放:模拟账户的运行确定
+
+- 规则:[research](README.md#research);机制归 [hft-replay 驱动](../../crates/hft-replay/README.md#驱动)、[账户屏蔽](../../crates/hft-replay/README.md#账户屏蔽)、[确定性](../../crates/hft-replay/README.md#确定性)
+- 级别:table
+- 里程碑:M3
+- 前置:[真实 DST](../../crates/hft-testkit/README.md#6-dst-框架)套件 0、种子 0、2 000 步、故障关闭的运行导出为物理段文件(`fixture::dst::export`);测试策略集合;`SimParams` 缺省
+- 实现:`apps/replayer/tests/research.rs::rpl_300_simulated_run_is_deterministic`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-300.1 | `run_one`(被模拟账户缺省) | 两个账户被模拟;被屏蔽的日志回报 > 0、模拟 Input > 0、丢弃的日志堆定时器 > 0 且引擎触发的定时器 > 0;决策与模拟成交 > 0 |
+| RPL-300.2 | 同一配置再运行一次 | 四张表、驱动计数与 `sim_state_hash` 相同 |
+
+### RPL-301 不模拟任何账户时决策与日志一致
+
+- 规则:[hft-replay 账户屏蔽](../../crates/hft-replay/README.md#账户屏蔽)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300;`accounts = Some(空)`,`engine_timers` 关(`--log-timers`)
+- 实现:`apps/replayer/tests/research.rs::rpl_301_nothing_simulated_reproduces_the_logged_decisions`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-301.1 | `run_one` | 没有模拟 Input、没有屏蔽;回放的每条 `OrderDecision` 与日志中启动快照之后的 `OrderDecision` 依次相同(`trigger_log_seq` = 日志的 `trigger_seq`,inst、slot、gen、action、side、px、qty、reject、reason、intent_no) |
+
+### RPL-302 参数变体的 SetParams 生效或拒绝
+
+- 规则:[hft-replay 参数变体](../../crates/hft-replay/README.md#参数变体)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300;两个实例分属两种测试策略,只有一种的 schema 含 `thr`
+- 实现:`apps/replayer/tests/research.rs::rpl_302_variant_set_params_applies_or_refuses`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-302.1 | 变体 `thr = 5` | 运行成功;变体 Input 2 条(一对 ConfigBlob + SetParams);两个实例中恰一个的当前参数 SHA-256 与基线不同 |
+| RPL-302.2 | 变体 `no_such_field = 1`;`thr = −1` | 运行失败,错误信息含该字段名 |
+
+### RPL-303 `replayer research` 写出四张表与 run.json
+
+- 规则:[research](README.md#research)、[hft-replay 输出](../../crates/hft-replay/README.md#输出)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300(1 000 步);以测试策略集合装配的 `replay_probe` 示例程序(`--fixture-dst`)
+- 实现:`apps/replayer/tests/research.rs::rpl_303_research_command_writes_tables_and_run_json`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| RPL-303.1 | `research --journal <段目录> --out <dir> --set thr=5 --seeds 1,2 --jobs 2` | 退出 0;`decisions/fills/orders/windows.parquet` 与 `run.json` 都存在 |
+| RPL-303.2 | 读 `run.json` | `runs` 依次为 (base, 1)、(base, 2)、(set1, 1)、(set1, 2);`calib_sha` 为 64 位十六进制 |
+| RPL-303.3 | `research --journal <段目录> --bogus 1` | 退出 2 |
+

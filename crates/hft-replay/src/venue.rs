@@ -1,0 +1,340 @@
+//! The simulated venue of the replayed accounts (README "模拟场所"): `hft_sim::SimExchange` fed
+//! from the journal, the order commands of the masked accounts, `Deliver` settlement as the live gw
+//! reports it, and the deterministic reseeding of every account's latency sub-stream.
+
+use hft_event::{
+    EventKind, ExternalCause, ExternalFill, GwCmd, GwOp, Level, RecordHeader, RepMsg, SendReport,
+};
+use hft_refdata::{AccountKind, RefData, SimAccountCfg, SimBalance};
+use hft_sim::glue::{Fed, feed_record, reply_parts, written};
+use hft_sim::{LatencyModel, MakerFill, MarginModel, MmrSource, SimExchange, SimSetup, SimTuning};
+use hft_types::{AccountId, AssetId, Qty, Rate, Side, Tsc, VenueId};
+
+/// Simulation parameters of one run (README "命令行" `--sim-*`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimParams {
+    pub latency: LatencyModel,
+    pub maker_fill: MakerFill,
+    /// Base seed; the sub-stream of an account in a reseed interval is
+    /// `splitmix(seed ⊕ interval ⊕ account)` (README "确定性").
+    pub seed: u64,
+    /// Reseed interval in UTC seconds (0 = never: one stream for the whole run).
+    pub reseed_s: u32,
+    pub consume_decay_ms: u32,
+    pub take_avail_bp: u16,
+}
+
+impl Default for SimParams {
+    fn default() -> Self {
+        SimParams {
+            latency: LatencyModel::Fixed {
+                entry_us: 40_000,
+                resp_us: 0,
+            },
+            maker_fill: MakerFill::Queue,
+            seed: 1,
+            reseed_s: 300,
+            consume_decay_ms: 1_000,
+            take_avail_bp: 10_000,
+        }
+    }
+}
+
+/// A simulated report ready to be handed as an Input.
+#[derive(Clone, Debug)]
+pub struct SimInput {
+    pub kind: EventKind,
+    pub due: Tsc,
+    pub body: Vec<u8>,
+}
+
+/// The simulated venue.
+pub struct ResearchVenue {
+    ex: SimExchange,
+    rd: RefData,
+    /// Accounts whose logged reports are replaced by the simulation.
+    mask: Vec<AccountId>,
+    levels: Vec<Level>,
+    params: SimParams,
+    interval: i64,
+    /// Inputs produced but not yet handed (SendReport Written, deliveries), in order.
+    immediate: Vec<SimInput>,
+    pub fed: u64,
+}
+
+impl core::fmt::Debug for ResearchVenue {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ResearchVenue")
+            .field("mask", &self.mask)
+            .field("params", &self.params)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `splitmix64` (the sub-stream mixer of hft-sim).
+pub fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Report kinds of a masked account that the replay drops from the journal (their simulated
+/// counterparts take their place, README "账户屏蔽").
+pub fn masked_kind(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::ORDER_EVENT
+            | EventKind::SEND_REPORT
+            | EventKind::EXTERNAL_FILL
+            | EventKind::BALANCE_REPORT
+            | EventKind::POSITION_REPORT
+            | EventKind::MARGIN_REPORT
+            | EventKind::FUNDING_SETTLE
+    )
+}
+
+/// The account of a report body (`None` for other kinds).
+pub fn report_account(kind: EventKind, body: &[u8]) -> Option<AccountId> {
+    body.get(account_offset(kind)?).map(|a| AccountId(*a))
+}
+
+/// Offset of the `account` field of a report body (hft-event layouts).
+fn account_offset(kind: EventKind) -> Option<usize> {
+    use core::mem::offset_of;
+    Some(match kind {
+        EventKind::ORDER_EVENT => offset_of!(hft_event::OrderEvent, account),
+        EventKind::EXTERNAL_FILL => offset_of!(hft_event::ExternalFill, account),
+        EventKind::SEND_REPORT => offset_of!(hft_event::SendReport, account),
+        EventKind::BALANCE_REPORT => offset_of!(hft_event::BalanceReport, account),
+        EventKind::POSITION_REPORT => offset_of!(hft_event::PositionReport, account),
+        EventKind::MARGIN_REPORT => offset_of!(hft_event::MarginReportHdr, account),
+        EventKind::FUNDING_SETTLE => offset_of!(hft_event::FundingSettle, account),
+        _ => return None,
+    })
+}
+
+/// A large starting balance of every quote asset on the account's venues: the engine's own ledger
+/// and risk checks govern; the simulated cash only has to never be the binding constraint.
+fn balances(rd: &RefData, a: AccountId) -> Box<[SimBalance]> {
+    let venues = rd.account(a).venues;
+    let mut out: Vec<SimBalance> = Vec::new();
+    for v in 1..64u8 {
+        if venues & (1u64 << v) == 0 {
+            continue;
+        }
+        for i in rd.insts_of_venue(VenueId(v)) {
+            let asset: AssetId = rd.inst(*i).quote;
+            if asset.0 == 0 || out.iter().any(|b| b.venue.0 == v && b.asset == asset) {
+                continue;
+            }
+            let exp = rd.asset(asset).exp.qty_exp;
+            let unit = 10i64.saturating_pow(u32::from(exp.unsigned_abs()));
+            out.push(SimBalance {
+                venue: VenueId(v),
+                asset,
+                qty: Qty(1_000_000_000i64.saturating_mul(unit)),
+            });
+        }
+    }
+    out.into()
+}
+
+impl ResearchVenue {
+    /// A simulated exchange for `mask` (Live or Sim accounts of `rd`), clocked at `tsc_hz_milli`.
+    pub fn new(rd: &RefData, mask: &[AccountId], tsc_hz_milli: u64, p: &SimParams) -> Result<Self, String> {
+        let mut accounts = Vec::new();
+        for a in mask {
+            let m = rd.account(*a);
+            let cfg = match &m.kind {
+                AccountKind::Sim(c) => SimAccountCfg {
+                    initial_balances: balances(rd, *a),
+                    latency_model: 0,
+                    fee_tier: c.fee_tier,
+                    margin_model: 0,
+                },
+                AccountKind::Live => SimAccountCfg {
+                    initial_balances: balances(rd, *a),
+                    latency_model: 0,
+                    fee_tier: 0,
+                    margin_model: 0,
+                },
+            };
+            accounts.push((*a, cfg));
+        }
+        let setup = SimSetup {
+            tuning: SimTuning {
+                maker_fill: p.maker_fill,
+                consume_decay_ms: p.consume_decay_ms,
+                take_avail_bp: p.take_avail_bp,
+                rate_limit: true,
+                ..SimTuning::with_seed(p.seed)
+            },
+            tsc_hz_milli,
+            latency_models: vec![p.latency],
+            margin_models: vec![MarginModel {
+                mmr: MmrSource::Flat(Rate(5_000_000)),
+                leverage: 1,
+                liq_fee: Rate(0),
+                liq_slippage_bp: 0,
+            }],
+            accounts,
+        };
+        let mut ex = SimExchange::new(&setup, rd).map_err(|e| format!("simulated venue: {e:?}"))?;
+        // Start-up replies (connection facts, account config) are not part of the replayed
+        // world: the journal already carries the venue's own.
+        ex.drain_due(Tsc(0), |_| {});
+        Ok(ResearchVenue {
+            ex,
+            rd: rd.clone(),
+            mask: mask.to_vec(),
+            levels: Vec::with_capacity(8192),
+            params: p.clone(),
+            interval: -1,
+            immediate: Vec::new(),
+            fed: 0,
+        })
+    }
+
+    pub fn masked(&self, a: AccountId) -> bool {
+        self.mask.contains(&a)
+    }
+
+    pub fn mask(&self) -> &[AccountId] {
+        &self.mask
+    }
+
+    /// Reseeds every account at the first record of each UTC interval of `reseed_s` seconds.
+    pub fn on_utc(&mut self, utc_ns: i64) {
+        if self.params.reseed_s == 0 {
+            return;
+        }
+        let k = utc_ns.div_euclid(i64::from(self.params.reseed_s) * 1_000_000_000);
+        if k == self.interval {
+            return;
+        }
+        self.interval = k;
+        for a in &self.mask {
+            let s = splitmix64(self.params.seed ^ splitmix64(k as u64) ^ u64::from(a.0));
+            self.ex.reseed_account(*a, s);
+        }
+    }
+
+    /// A journal record in journal order (market data reaches the replica, anything else only
+    /// advances time).
+    pub fn on_record(&mut self, r: &hft_sequencer::MemRecord) {
+        let hdr = RecordHeader {
+            len: r.body.len() as u32,
+            kind: r.kind.0,
+            flags: r.flags.0,
+            seq: r.seq,
+            tsc: r.tsc,
+        };
+        if feed_record(&mut self.ex, &hdr, r.kind, &r.body, &mut self.levels) == Fed::Market {
+            self.fed += 1;
+        }
+    }
+
+    /// An out-ring command of the engine at decision time `decided`. Commands of accounts outside
+    /// the mask are ignored (their logged reports stay in the replay).
+    pub fn on_command(&mut self, cmd: &GwCmd, decided: Tsc) {
+        if !self.masked(cmd.account) {
+            return;
+        }
+        match cmd.op {
+            GwOp::Place | GwOp::Cancel | GwOp::Amend | GwOp::Query | GwOp::CancelAll => {
+                let venue = self.rd.inst(cmd.inst).venue;
+                if let Some(w) = written(cmd, venue, decided) {
+                    self.push_immediate(EventKind::SEND_REPORT, decided, &RepMsg::SendReport(w));
+                }
+                self.ex.on_command(cmd, decided);
+            }
+            GwOp::SimSettle | GwOp::SimReset | GwOp::SimTransfer => self.ex.on_command(cmd, decided),
+            GwOp::Deliver => self.deliver(cmd, decided),
+            _ => {}
+        }
+    }
+
+    /// hft-venue gw `Deliver`: the inventory reported as `ExternalFill{Delivery}` at the payout
+    /// price (no fee); the simulated position is closed the same way.
+    fn deliver(&mut self, c: &GwCmd, t: Tsc) {
+        if c.qty.0 <= 0 || c.px.0 < 0 {
+            return;
+        }
+        let _ = self.ex.external_fill(c.account, c.inst, Side::Sell, c.qty, c.px);
+        let f = ExternalFill {
+            venue: self.rd.inst(c.inst).venue,
+            account: c.account,
+            side: Side::Sell,
+            cause: ExternalCause::Delivery,
+            inst: c.inst,
+            qty: c.qty,
+            px: c.px,
+            fee: Qty(0),
+            fee_asset: self.rd.inst(c.inst).quote,
+            _pad: [0; 6],
+            exch_order_id: u64::from(c.arg2),
+            trade_id: 0,
+            ex_ts_ns: i64::from(c.arg2).saturating_mul(1_000_000_000),
+            rx_tsc: t,
+            fill_seq: c.qty.0 as u64,
+            cash_qty: Qty(0),
+            cash_amount: Qty(0),
+        };
+        self.push_immediate(EventKind::EXTERNAL_FILL, t, &RepMsg::ExternalFill(f));
+    }
+
+    fn push_immediate(&mut self, kind: EventKind, t: Tsc, m: &RepMsg) {
+        let body = m.with_parts(&[], |_, p| p.concat());
+        self.immediate.push(SimInput { kind, due: t, body });
+    }
+
+    /// Reports produced at the command itself (Written, deliveries), oldest first.
+    pub fn take_immediate(&mut self) -> Vec<SimInput> {
+        core::mem::take(&mut self.immediate)
+    }
+
+    /// Executes every command that arrives before `t`.
+    pub fn advance(&mut self, t: Tsc) {
+        self.ex.advance(t);
+    }
+
+    /// The replies due at or before `t`, as Input records in `(due, gen)` order; only order
+    /// evidence (OrderEvent, ExternalFill, SendReport, FundingSettle) is kept — account truth and
+    /// connection facts of the replayed accounts come from the journal and the engine's ledger.
+    pub fn due(&mut self, t: Tsc, epoch: u16, out: &mut Vec<SimInput>) {
+        let rd = &self.rd;
+        self.ex.drain_due(t, |r| {
+            let keep = matches!(
+                r.msg,
+                RepMsg::OrderEvent(..)
+                    | RepMsg::ExternalFill(_)
+                    | RepMsg::SendReport(_)
+                    | RepMsg::FundingSettle(_)
+            );
+            if !keep {
+                return;
+            }
+            reply_parts(rd, epoch, &r.msg, r.bulk, |kind, parts| {
+                out.push(SimInput {
+                    kind,
+                    due: r.due_tsc,
+                    body: parts.concat(),
+                });
+            });
+        });
+    }
+
+    pub fn next_due(&self) -> Option<Tsc> {
+        self.ex.next_due()
+    }
+
+    pub fn state_hash(&self) -> u64 {
+        self.ex.state_hash()
+    }
+}
+
+/// `SendReport` of a masked account is replaced too; kept public for the parity report.
+pub fn is_written(r: &SendReport) -> bool {
+    r.status == hft_event::SendStatus::Written
+}

@@ -209,6 +209,15 @@ deps = [
     "crates/hft-ledger", "crates/hft-risk", "crates/hft-rt",
 ]
 
+# Research replay (crates/hft-replay/README.md): cold, offline only; the sequencer's replay-io
+# assembly with the simulated exchange and Parquet output.
+[pkg."crates/hft-replay"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-journal", "crates/hft-rt",
+    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer",
+]
+
 [pkg."crates/hft-testkit"]
 tier = "dev"
 deps = [
@@ -279,6 +288,7 @@ deps = [
     "crates/hft-strat-lib", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-book",
     "crates/hft-event", "crates/hft-refdata", "crates/hft-sim", "crates/hft-journal", "strategies/registry",
     "crates/hft-telemetry", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
+    "crates/hft-replay",
 ]
 
 [pkg."apps/watchtower"]

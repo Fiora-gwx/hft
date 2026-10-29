@@ -5,6 +5,7 @@ mod checkpoints;
 mod latency;
 mod options;
 mod report;
+mod research;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -105,6 +106,9 @@ fn discover(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Failure> {
 fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
     if args.first().is_some_and(|s| s == "latency") {
         return latency::execute(args, stdout);
+    }
+    if args.first().is_some_and(|s| s == "research") {
+        return research::execute::<S>(args, stdout);
     }
     if args == ["--version"] {
         writeln!(stdout, "{VERSION}").map_err(|e| (2, e.to_string()))?;

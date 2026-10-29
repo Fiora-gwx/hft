@@ -1,0 +1,29 @@
+[package]
+name = "hft-replay"
+description = "Research replay: a seq journal through the same Sequencer and strategy code with an in-process simulated venue, parameter variants and Parquet output (spec: crates/hft-replay/README.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-journal.workspace = true
+hft-rt.workspace = true
+hft-sim.workspace = true
+hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
+hft-sequencer = { workspace = true, features = ["replay-io"] }
+zerocopy.workspace = true
+sha2 = "0.10"
+toml.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arrow-array = "59"
+arrow-schema = "59"
+parquet = { version = "59", default-features = false, features = ["arrow", "zstd"] }

@@ -1,0 +1,167 @@
+---
+description: "研究回放:replayer research 用它把 seq journal 经同一 Sequencer 与同一策略代码回放,被模拟账户的回报由进程内 hft-sim 撮合重新生成,N 个参数变体 × M 个延迟种子,输出 Parquet 与 run.json"
+kind: crate
+tier: cold
+scope: optional
+status: impl
+---
+
+# hft-replay
+
+## 概要
+
+可选扩展,触发条件:研究需要在录下的 journal 上比较策略参数变体(上线不依赖它)。`hft-replay` 拥有**研究回放**的装配:流式读取 seq journal、从第一个 `StateSnapshot` 启动 [hft-sequencer](../hft-sequencer/README.md)、用 `ResearchDriver` 按事件时间把日志 Input、模拟场所回报与引擎自身的定时器归并成一条输入流、把参数变体作为 `ConfigBlob` + `SetParams` 注入、把决策与模拟成交写成 Parquet。被模拟账户的撮合用 [hft-sim](../hft-sim/README.md) 的同一个 `SimExchange` 与同一套 journal 衔接(`glue` 模块),与 hft-core 的 sim-gw 共用。调用者只有 [replayer](../../apps/replayer/README.md) 的 `research` 子命令。它不写 journal、不读系统时钟(运行耗时的 `wall_s` 只进 `run.json`)、不连交易所;结论只用于研究与参数筛选,上线门槛不变([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md))。
+
+## 目录
+
+- [使用本组件](#使用本组件)
+  - [命令行](#命令行)
+  - [驱动](#驱动)
+  - [账户屏蔽](#账户屏蔽)
+  - [模拟场所](#模拟场所)
+  - [参数变体](#参数变体)
+  - [确定性](#确定性)
+  - [输出](#输出)
+- [实现说明](#实现说明)
+- [延迟与资源契约](#延迟与资源契约)
+- [测试与验收](#测试与验收)
+- [依赖](#依赖)
+- [延伸阅读](#延伸阅读)
+- [已知限制与后续工作](#已知限制与后续工作)
+
+## 使用本组件
+
+```rust
+pub struct ResearchOpts {
+    pub files: Vec<PathBuf>,                 // 一个运行的 seq 段文件(.jrn,链序)
+    pub accounts: Option<Vec<AccountId>>,    // 被模拟账户;None = 全部绑定了策略实例的账户;Some(空) = 不模拟
+    pub variants: Vec<Variant>,              // 第一个是基线(不改参数)
+    pub seeds: Vec<u64>,                     // 每个变体 × 每个种子各跑一次
+    pub sim: SimParams,
+    pub driver: DriverCfg,
+    pub reassembly: usize,                   // 多段记录重组上限(字节)
+    pub jobs: usize,                         // 并行运行数(线程;每个运行各自读 journal)
+    pub out: PathBuf,
+}
+pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value, String>;   // 写出全部表与 run.json,返回 run.json
+pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String>;                     // 一个 (变体, 种子)
+pub struct Variant { pub name: String, pub set: BTreeMap<String, i64> }                    // 参数名 → schema 原始值
+pub struct SimParams { pub latency: LatencyModel, pub maker_fill: MakerFill, pub seed: u64, pub reseed_s: u32,
+                       pub consume_decay_ms: u32, pub take_avail_bp: u16 }
+pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
+```
+
+### 命令行
+
+由 [replayer `research`](../../apps/replayer/README.md#research) 解析;选项与缺省:
+
+| 选项 | 含义 | 缺省 |
+|---|---|---|
+| `--journal <file\|dir>` | 一个运行的 seq 段(目录递归收集 `.jrn`,按路径排序) | 必填 |
+| `--out <dir>` | 输出目录(不存在则创建) | 必填 |
+| `--account N` | 被模拟账户(可重复) | 全部绑定实例的账户 |
+| `--variants <file.toml>` | `[[variant]] name = "…" set = { 字段 = 原始值, … }` | 无 |
+| `--set NAME=RAW[,…]` | 追加一个变体 `set<k>` | 无 |
+| `--seeds S[,S…]` | 延迟随机种子 | `1` |
+| `--latency ENTRY_US:RESP_US` | `LatencyModel::Fixed` | `40000:0` |
+| `--maker-fill queue\|through` | 挂单成交模型 | `queue` |
+| `--reseed-s N` | 重播种间隔(UTC 秒,0 = 不重播种) | `300` |
+| `--log-timers` | 照读日志里的堆定时器,不由引擎状态触发 | 关 |
+| `--jobs N` | 并行运行数 | `1` |
+| `--reassembly-bytes N` | 多段记录重组上限 | 128 MiB |
+
+### 驱动
+
+`ResearchDriver` 实现 hft-sequencer 的 `Driver`,模式报告为 `Verify`(启动走非实盘路径:从快照恢复后由驱动继续)。启动:读到第一个 `StateSnapshot` 所在事件结束为止的前缀,`check_snapshot` + `EngineSetup::from_snapshot`,`Sequencer::boot(Journal{AtSeq(快照 seq)})`。每次 `take`:
+
+1. 队列非空 → 交出队首。
+2. `engine_timers` 开时,每交出一条之后检查一次:OMS 要继续 → `Timer{owner 3, id 1}`;通知积压 → `Timer{Sys 17}`(与实盘驱动同一编码)。
+3. 下一条日志记录的 tsc 为 `T`;堆顶定时器 `deadline ≤ T` 时取 `t = max(deadline, 上次交出的 tsc)`,否则 `t = T`。
+4. `SimExchange::advance(t)`,交付 `due ≤ t` 的回报(按 `(due, gen_seq)`),每条成为一个 Input(tsc 取 `max(due, 上次交出的 tsc)`)。
+5. 没有回报时:堆顶到期 → 交出该 `Timer`(owner、id、group、deadline 原样);否则读下一条日志记录:Output 跳过;被屏蔽的回报丢弃;`engine_timers` 开时 owner ≠ 1(Sys)的 `Timer` 丢弃(它们是实盘订单流下的堆定时器);其余照交,行情记录先交给 `SimExchange`。
+6. 日志读完 → 结束(不再推进到最后一条记录之后)。
+
+`measure()` 返回当前 Input 的 tsc,所以 `decided_tsc` 与模拟下单的决策时刻都是该事件的时刻。`emit` 把被模拟账户的订单类指令交给模拟场所(其 `SendReport{Written}` 立即排队),其他账户的指令忽略(它们的回报留在日志里)。分段:`roll_info` 预读到下一段的第一条记录,取该段段头的校准对;`clock_status` 取该段开头 Meta 中的 `ClockStatus`。所有记录(含插入的 Input)取新的递增 seq;日志 Input 的 `(回放 seq, 日志 seq)` 对照表供决策表的 `trigger_log_seq`。
+
+### 账户屏蔽
+
+被模拟账户(`mask`)的这些日志 Input 不进入状态机:`OrderEvent`、`SendReport`、`ExternalFill`、`PositionReport`、`MarginReport`、`FundingSettle`,以及每个 (账户, venue, 资产) 第一条之后的 `BalanceReport`(第一条用于初始化账本现金,hft-ledger `UNINIT`)。`ConnState`、`AccountConfigReport` 照读(连接与账户配置事实取自实盘)。不在 `mask` 内的账户照读日志回报;`accounts = Some(空)` 且 `--log-timers` 时,回放的输入流与日志的 Input 相同,决策与日志逐条一致(RPL-301)。
+
+### 模拟场所
+
+`ResearchVenue` 为 `mask` 内账户(Live 或 Sim)建一个 `SimExchange`:每个账户 venue 上每个报价资产给 10⁹ 个单位的初始余额(引擎自己的账本与风控决定能否下单,模拟现金不成为约束);`MarginModel` 为固定 0.5 %、1 倍;启动回报丢弃。行情经 `hft_sim::glue::feed_record`。订单类指令 → `SendReport{Written}`(sent_tsc = 决策时刻)+ `on_command`;`SimSettle`/`SimReset`/`SimTransfer` → `on_command`;`Deliver`(Live 账户的结算)→ 与 hft-venue gw 相同形态的 `ExternalFill{Delivery}`(卖出、按兑付价、无费)并 `external_fill` 平掉模拟仓位。交付的回报只保留订单证据(`OrderEvent`、`ExternalFill`、`SendReport`、`FundingSettle`);余额、仓位、保证金与连接回报丢弃(账户真值由引擎账本按成交维护)。
+
+### 参数变体
+
+一个变体对每个被模拟账户上、schema 含其中至少一个字段的策略实例各发一对 Input(在第一个日志 Input 之前,tsc = 启动快照的 tsc):`ConfigBlob`(`variant_blob`:该实例当前参数 blob 按其 schema 版本解码,改值,按当前 schema 版本重编码,`version + 1`,SHA-256 重算)与 `ControlCmd::SetParams`(issuer `pipeline`、`confirmed = 1`)。字段名在所有被模拟实例的 schema 中都不存在、或值超出 `[min, max]` → 该运行失败;`SetParams` 的结果不是 `Applied` → 失败。
+
+### 确定性
+
+一个运行只依赖 journal、代码与 `(变体, SimParams)`:没有墙钟与线程交互(并行的运行之间不共享状态)。模拟延迟的随机数按 hft-sim 的账户子流,在每个 `reseed_s` 秒的 UTC 区间开始时以 `splitmix64(seed ⊕ splitmix64(区间号) ⊕ 账户)` 重播种(`SimExchange::reseed_account`;判定在命令到达模拟场所时按该事件的引擎 UTC),所以同一区间内各变体从同一状态抽样(common random numbers),分段回放与整段回放在区间边界上对齐。两次相同运行的四张表、计数与 `sim_state_hash` 相同(RPL-300)。
+
+### 输出
+
+每张表的前两列是 `variant`、`seed`;时间列 `utc_ns` 是引擎 UTC(引擎自己的 UTC 线,`Now.utc_ns` 同源)。价、量为定点原始值(指数见 `px_exp`/`qty_exp` 或 refdata)。
+
+| 文件 | 每行 | 列 |
+|---|---|---|
+| `decisions.parquet` | 一条 `OrderDecision`(全部账户) | `seq`、`trigger_seq`、`trigger_log_seq`(触发 Input 的日志 seq,插入的 Input 为 0)、`tsc`、`utc_ns`、`engine_ns`、`strategy`、`account`、`inst`、`group`、`action`、`side`、`tif`、`oflags`、`px`、`qty`、`px_exp`、`qty_exp`、`slot`、`gen`、`target_slot`、`reject`、`reason`、`intent_no`、`shadow` |
+| `fills.parquet` | 一笔模拟成交 | `utc_ns`、`account`、`inst`、`side`、`px`、`qty`、`fee`、`slot`、`gen` |
+| `orders.parquet` | 一张被接受的模拟订单 `(account, slot, gen)` | `inst`、`side`、`px`、`qty`、`t_dec`、`t_ack`、`t_cxl_dec`、`t_done`、`first_fill`(UTC ns,0 = 无)、`cum`、`last_event`(`OrderEventKind`)、`reject_code` |
+| `windows.parquet` | 每次交付(`ExternalFill{Delivery}`)结束的 (账户, inst) 区间;日志结束时未交付的区间 `end_s = −1` | `end_s`、`bought`、`cost`、`sold`、`proceeds`、`fees`(报价资产单位)、`delivered`、`payout_px`、`pnl` = 交付值 + 卖出 − 买入 − 费、`n_fills` |
+| `run.json` | 运行元数据(也作为每个 Parquet 文件的 `hft.run` 键值元数据) | `version`、`code_sha`(构建时 `HFT_GIT_SHA`)、`journal`、`sim`、`calib_sha`(`SimParams` 的 SHA-256)、`engine_timers`、`wall_s`、`runs[]`:`variant`、`seed`、`set`、`params_sha`(每个被模拟账户的实例当前参数 blob SHA-256)、`accounts`、`first_seq`、`start_snapshot`、`stats`(驱动计数)、`sim_state_hash` |
+
+## 实现说明
+
+<details><summary>实现要点</summary>
+
+| 文件 | 职责 |
+|---|---|
+| `src/lib.rs` | `ResearchOpts`、`research`(变体 × 种子的运行、合表、写出) |
+| `src/run.rs` | `run_one`:启动、变体注入、步进循环、决策/订单/成交/区间表 |
+| `src/driver.rs` | `ResearchDriver`、`ResearchSink`(新 seq、截获 `OrderDecision`/`CmdResult`)、前缀读取 |
+| `src/source.rs` | 流式读取(逻辑记录、段校准、预读) |
+| `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver` |
+| `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
+| `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
+
+- 截获的 Output 在下一次 `take` 时按引擎此刻的 `Now`(即触发它的 Input 处理之后)盖 `utc_ns`/`engine_ns`;模拟回报按其 tsc 用引擎当前的时钟锚换算。
+- 被模拟的 Live 账户在引擎里仍是 Live(出环、`Settle` → `Deliver`),只是指令去了模拟场所;Sim 账户的 `SimSettle` 由 `SimExchange` 处理。
+
+</details>
+
+## 延迟与资源契约
+
+冷路径,无热路径约束。内存:前缀日志(到启动快照为止)+ 预读与队列;日志本身流式读取,不整份进内存。吞吐目标与实测见 [TESTS.md](TESTS.md) 的验收一节(重构设计 §5.3 的 ≥ 20× / 单 journal < 1 min 口径待研究机实测)。
+
+## 测试与验收
+
+用例与验收见 [TESTS.md](TESTS.md)。
+
+## 依赖
+
+内部:`hft-types`、`hft-refdata`、`hft-event`、`hft-journal`、`hft-rt`、`hft-sim`、`hft-strategy-sdk`(`schema-json`)、`hft-sequencer`(`replay-io`)。外部:`arrow-array`/`arrow-schema`/`parquet` 59(Parquet 写出,zstd)、`serde`/`serde_json`/`toml`(变体文件与 `run.json`)、`sha2`、`zerocopy`。不被任何引擎 crate 或 hft-core 依赖。
+
+## 延伸阅读
+
+- [replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md)
+- [hft-sim journal 衔接](../hft-sim/README.md#journal-衔接glue-模块)
+- [重构进度](../../docs/refactor/PROGRESS.md)
+
+## 已知限制与后续工作
+
+- 只读未压缩的 `.jrn` 段(`.jrn.zst` 先 `zstd -d`);一次运行一个 journal 运行(多个运行的目录请分开调用)。
+- 撮合模型是现有 hft-sim(定长或经验分布延迟、队列/打穿成交);条件延迟池、撤单竞速与墓碑、吃单延迟与到达时簿、非线性吃单费与返利、GTD 到期属于重构 M2。
+- `--latency` 只给定长模型;经验分布与条件延迟池随 M2 的校准表(`replayer calib`)接入。
+- N 个变体各自读 journal、各自重建簿;共享解析与参数无关特征是后续优化(先按 M1 实测决定)。
+- `--own`(从公开簿扣掉日志中自己的挂单)、`parity` 子命令与 `features` 子命令未接入。
+- 从非创建处起步的模拟账户没有起点时的模拟挂单(实盘 journal 每次启动从空订单开始,不受影响)。
+
+### 开发备忘
+
+<details><summary>给实现者</summary>
+
+- 设计依据:重构设计 2026-10-29 §4.3.2、§5(仓外 `E:\trade\handoff\hft-refactor-design-2026-10-29.md`);研究侧参照实现 `E:\trade\staging\pm5m\bm_sim.py`。
+- 与 `bm_sim.py` 的对账(M1 验收 (b))需要研究机上的实盘 journal 与同参数、同固定延迟的 `bm_sim.py` 输出。
+
+</details>

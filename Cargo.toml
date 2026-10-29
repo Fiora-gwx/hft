@@ -27,6 +27,7 @@ members = [
     "crates/hft-risk",
     "crates/hft-py",
     "crates/hft-sequencer",
+    "crates/hft-replay",
     "strategies/latency-probe",
     "strategies/cross-taker",
     "strategies/portfolio-carry",
@@ -90,6 +91,7 @@ venue-bitget = { path = "crates/venue-bitget" }
 venue-polymarket = { path = "crates/venue-polymarket" }
 hft-risk = { path = "crates/hft-risk" }
 hft-sequencer = { path = "crates/hft-sequencer" }
+hft-replay = { path = "crates/hft-replay" }
 hft-oms = { path = "crates/hft-oms" }
 
 [workspace.lints.rust]
