@@ -1568,3 +1568,258 @@ fn bmk_033_v7_off_is_v6() {
     );
     assert_eq!(v6, off, "BMK-033.1");
 }
+
+/// xorshift64* stream of the decision trace (BMK-034).
+struct TraceRng(u64);
+
+impl TraceRng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    fn below(&mut self, n: u64) -> i64 {
+        (self.next() % n.max(1)) as i64
+    }
+}
+
+fn fnv(h: &mut u64, bytes: &[u8]) {
+    for b in bytes {
+        *h ^= u64::from(*b);
+        *h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+}
+
+/// Decision trace of a generated stream over seven windows (reference quotes, slot books including
+/// locked and crossed ones, large and small prints, market-data stamps with a load episode, fills,
+/// cancels and ageing of the live quotes, a parameter change at 1 100 s): FNV-1a over every
+/// captured operation, the quote states, the score cache and the fair-value anchor after every
+/// event and the final snapshot; and (places, cancels, events with a valid score, fills).
+fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (u64, [u32; 4]) {
+    use binary_maker::fast::QState;
+    let mut h = harness(p);
+    let mut rng = TraceRng(seed);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut n = [0u32; 4];
+    let mut mid: i64 = 10_000_000;
+    let mut tok_mid: i64 = 500;
+    let mut next_slot = 100u32;
+    let mut pos = [(0i64, 0i64); 6];
+    let mut win = 0i64;
+    let mut t: i64 = 1_000_000_000;
+    let mut switched = false;
+    let s = 1_000_000_000i64;
+    while t < 2_400 * s {
+        t += 20_000_000 + rng.below(280) * 1_000_000;
+        h.views_mut().at_engine_ns(t);
+        if !switched && t >= 1_100 * s {
+            h.on_params(p2).unwrap();
+            switched = true;
+        }
+        let w = t.div_euclid(300 * s) * 300;
+        if w != win {
+            win = w;
+            pos = [(0, 0); 6];
+            for k in 0..6u32 {
+                h.views_mut().group_pos(A1, gid(k), GroupPosView::EMPTY);
+            }
+        }
+        let cur = (w / 300).rem_euclid(3) as usize;
+        let r = rng.below(100);
+        let out = if r < 30 {
+            mid += (rng.below(5) - 2) * 600;
+            let (bq, aq) = (1 + rng.below(5_000_000), 1 + rng.below(5_000_000));
+            h.views_mut()
+                .bbo(R, (Px(mid - 1), Qty(bq)), (Px(mid + 1), Qty(aq)));
+            let b = h.views_mut().bbo_of(R);
+            h.feed(&ev::bbo(R, 6, b).as_ref())
+        } else if r < 72 {
+            let k = if rng.below(4) == 0 {
+                rng.below(6) as usize
+            } else {
+                cur * 2 + rng.below(2) as usize
+            };
+            tok_mid = (tok_mid + rng.below(11) - 5).clamp(60, 940);
+            let m = if k % 2 == 0 { tok_mid } else { 1_000 - tok_mid };
+            let half = 1 + rng.below(8);
+            let (mut bid, mut ask) = (m - half, m + half);
+            if rng.below(20) == 0 {
+                ask = bid - rng.below(2);
+            }
+            let mut bids = Vec::new();
+            let mut asks = Vec::new();
+            for _ in 0..1 + rng.below(5) {
+                bids.push(lv(bid, 1 + rng.below(300)));
+                asks.push(lv(ask, 1 + rng.below(300)));
+                bid -= 1 + rng.below(10);
+                ask += 1 + rng.below(10);
+            }
+            h.views_mut().book(SLOTS[k], &bids, &asks);
+            if r < 40 {
+                // Market-data stamps of this inst: normal lag, or a load episode (300 to 900 s).
+                let slow = (300 * s..900 * s).contains(&t);
+                for j in 0..1 + rng.below(4) {
+                    let lag = if slow {
+                        100 + rng.below(300)
+                    } else {
+                        1 + rng.below(80)
+                    };
+                    let rx = t - 30_000_000 + j * 1_000_000;
+                    h.views_mut().md_push(
+                        SLOTS[k],
+                        MdStampView {
+                            kind: MdStampView::MD_BATCH,
+                            ex_ts_ns: rx - lag * 1_000_000,
+                            sw_rx_ns: rx,
+                            rx_tsc: Tsc(0),
+                        },
+                    );
+                }
+            }
+            h.feed(&ev::book(SLOTS[k], k as u16).as_ref())
+        } else if r < 84 {
+            let k = cur * 2 + rng.below(2) as usize;
+            let tv = TradeView {
+                px: Px(tok_mid),
+                qty: Qty((1 + rng.below(150)) * 1_000_000),
+                side: if rng.below(2) == 0 { Side::Buy } else { Side::Sell },
+                ex_ts_ns: t,
+            };
+            h.feed(&ev::trade(SLOTS[k], k as u16, tv).as_ref())
+        } else if r < 97 {
+            let live: Vec<usize> = (0..6)
+                .filter(|i| {
+                    let q = h.strategy().fast.quotes[*i];
+                    q.r.is_some() && matches!(q.state, QState::Live | QState::Cancelling)
+                })
+                .collect();
+            if live.is_empty() {
+                h.feed(&ev::timer(1, gid(0), 0).as_ref())
+            } else {
+                let i = live[rng.below(live.len() as u64) as usize];
+                let q = h.strategy().fast.quotes[i];
+                let o = q.r.unwrap();
+                let kind = match rng.below(10) {
+                    0..=4 => {
+                        let d = (1 + rng.below(10)) * 1_000_000;
+                        let (qty, cost) = pos[i];
+                        pos[i] = (qty + d, cost + d * q.px);
+                        let mut gp = GroupPosView::EMPTY;
+                        gp.n_legs = 1;
+                        gp.legs[0].qty = Qty(pos[i].0);
+                        gp.legs[0].entry_px = Px(pos[i].1 / pos[i].0.max(1));
+                        h.views_mut().group_pos(A1, gid(i as u32), gp);
+                        n[3] += 1;
+                        OrderUpdateKind::Filled {
+                            d: Qty(d),
+                            px: Px(q.px),
+                            fee: 0,
+                            fee_asset: USDC,
+                            cum: Qty(d),
+                            done: rng.below(3) == 0,
+                        }
+                    }
+                    5..=7 => OrderUpdateKind::Cancelled,
+                    8 => OrderUpdateKind::Aged,
+                    _ => OrderUpdateKind::Acked,
+                };
+                h.feed(
+                    &ev::order(
+                        i as u16,
+                        OrderUpdate {
+                            r: o,
+                            group: gid(i as u32),
+                            tag: binary_maker::fast::tag_of(i as u16),
+                            kind,
+                        },
+                    )
+                    .as_ref(),
+                )
+            }
+        } else {
+            h.feed(&ev::timer(1, gid(0), 0).as_ref())
+        };
+        for c in &out.items {
+            match c {
+                hft_testkit::sdk_mock::Captured::Place(_) => n[0] += 1,
+                hft_testkit::sdk_mock::Captured::Cancel(_) => n[1] += 1,
+                _ => {}
+            }
+            fnv(&mut hash, format!("{c:?}").as_bytes());
+        }
+        // Most places are acknowledged: the quote becomes Live with a resting order.
+        for i in 0..6 {
+            let q = h.strategy().fast.quotes[i];
+            if q.state == QState::Placing && rng.below(5) != 0 {
+                next_slot += 1;
+                let r = OrderRef {
+                    venue: VB,
+                    account: A1,
+                    _pad: [0; 2],
+                    slot: next_slot,
+                    r#gen: 1,
+                };
+                let m = &mut h.strategy_mut().fast.quotes[i];
+                m.state = QState::Live;
+                m.r = Some(r);
+                h.views_mut().set_order(OrderView {
+                    r,
+                    group: gid(i as u32),
+                    inst: SLOTS[i],
+                    side: Side::Buy,
+                    tif: Tif::PostOnly,
+                    class: IntentClass::Open,
+                    px: Px(q.px),
+                    qty: Qty(10_000_000),
+                    filled: Qty(0),
+                    state: OrderStateView::Live,
+                    tag: binary_maker::fast::tag_of(i as u16),
+                });
+            }
+        }
+        let f = &h.strategy().fast;
+        if f.comp.ok {
+            n[2] += 1;
+        }
+        fnv(
+            &mut hash,
+            format!("{:?}{:?}{:?}", f.quotes, f.comp, f.fv).as_bytes(),
+        );
+    }
+    fnv(&mut hash, &h.snapshot());
+    (hash, n)
+}
+
+#[test]
+fn bmk_034_decision_trace_is_stable() {
+    let base = params(|_| {});
+    let fv = params_with(&[
+        ("fv_limit", 1),
+        ("nochase_ms", 500),
+        ("streak_k", 2),
+        ("max_window_cost", 30_000_000),
+    ]);
+    let comp = comp_params(&[("fv_limit", 1), ("comp_imb1_sd", 674_103_869)]);
+    let lag = comp_params(&[
+        ("load_gate_ns", 150_000_000),
+        ("mdslow_gate_ns", 90_000_000),
+        ("comp_imb1_sd", 674_103_869),
+    ]);
+    let got = [
+        decision_trace(&base, &fv, 1),
+        decision_trace(&fv, &comp, 2),
+        decision_trace(&comp, &lag, 3),
+        decision_trace(&lag, &base, 4),
+    ];
+    // Recorded with the v7 inline implementation (before the features moved to hft-feature).
+    let want: [(u64, [u32; 4]); 4] = [
+        (0x154a_b946_f140_8d49, [626, 533, 0, 417]),
+        (0xeaeb_f288_1178_f3ae, [631, 552, 6253, 382]),
+        (0x8f25_fd82_3dd8_f9a4, [1119, 977, 11589, 646]),
+        (0xa5fc_cf6a_5c2b_8311, [797, 704, 2335, 536]),
+    ];
+    assert_eq!(got, want, "BMK-034");
+}
