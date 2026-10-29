@@ -447,3 +447,71 @@ fn rpl_306_research_calib_option() {
         .unwrap();
     assert_eq!(o.status.code(), Some(2), "RPL-306.2");
 }
+
+#[test]
+fn rpl_307_calib_builds_pools_that_research_reads() {
+    let (t, files) = dst_journal(0, 2_000);
+    let dir = files[0].parent().unwrap().to_path_buf();
+    let out = t.path().join("calib.json");
+    let exe = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join(format!("replay_probe{}", std::env::consts::EXE_SUFFIX));
+    // .1 the pools of account 1: decision → Ack samples under the leg-only key, the table loads.
+    let o = std::process::Command::new(&exe)
+        .args([
+            "--fixture-dst",
+            "calib",
+            "--journal",
+            dir.to_str().unwrap(),
+            "--account",
+            "1",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "RPL-307.1 {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let text = std::fs::read(&out).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&text).unwrap();
+    let n = v["meta"]["samples"]["ack"].as_u64().unwrap();
+    assert!(n > 0, "RPL-307.1 {v}");
+    assert_eq!(
+        v["pools"]["ack"].as_array().map(Vec::len),
+        Some(n as usize),
+        "RPL-307.1"
+    );
+    assert!(
+        v["pools"]["ack"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s.as_f64().is_some_and(|x| x > 0.0)),
+        "RPL-307.1"
+    );
+    let mut p = SimParams::default();
+    hft_replay::calib::apply(&text, &mut p).unwrap();
+    assert!(p.venue.pools.is_some(), "RPL-307.1");
+    // .2 a missing --account: exit 2.
+    let o = std::process::Command::new(&exe)
+        .args([
+            "--fixture-dst",
+            "calib",
+            "--journal",
+            dir.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(2), "RPL-307.2");
+}

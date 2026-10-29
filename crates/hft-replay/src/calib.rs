@@ -46,6 +46,9 @@ struct CalibJson {
     /// `"leg|load|move|phase"`, `"leg|load"` or `"leg"` (leg `ack` = place, `cxl` = cancel,
     /// `take` = taker) → samples in seconds.
     pools: Option<BTreeMap<String, Vec<f64>>>,
+    /// Provenance written by `replayer calib` (not interpreted).
+    #[allow(dead_code)]
+    meta: Option<serde_json::Value>,
 }
 
 fn leg_of(s: &str) -> Option<PoolLeg> {

@@ -18,7 +18,7 @@ spec: README.md
 | 命令行 | RSR-001、RSR-004、RPL-303、RPL-306 |
 | 驱动 | RPL-300、RPL-301 |
 | 账户屏蔽 | RSR-003、RPL-300、RPL-301 |
-| 模拟场所 | RPL-300、RPL-305、RPL-306 |
+| 模拟场所 | RPL-300、RPL-305、RPL-306、RPL-307 |
 | 参数变体 | RSR-001、RPL-302 |
 | 确定性 | RPL-300、SIM-231 |
 | 输出 | RSR-002、RPL-303 |

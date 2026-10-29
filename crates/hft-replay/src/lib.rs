@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod calib;
+pub mod calib_build;
 pub mod driver;
 pub mod parity;
 pub mod run;

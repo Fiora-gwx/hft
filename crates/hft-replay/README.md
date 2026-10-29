@@ -117,6 +117,10 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 
 **`--own`**:被模拟账户在日志里的 `OrderDecision{New}`(未拒)与被屏蔽的 `OrderEvent` 维护日志自有挂单:`Ack` 后隐藏未成交量,成交减少,终态(`Fill`、`CancelAck`、`Reject`、`Expired`)取消隐藏;同一数量在互补代币的对手侧 `1 − px` 上一并隐藏(Polymarket 的互补流动性)。只作用于模拟场所的簿;引擎自己的簿视图(策略看到的)仍含日志里的自有挂单。
 
+#### 校准表的生成(`replayer calib`)
+
+`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+
 每次交出 Input 前驱动记下它的引擎 UTC,`emit` 时交给 `ResearchVenue::on_utc`:重播种区间与 `phase` 都按决策所在 Input 的引擎 UTC。
 
 ### 参数变体
@@ -161,6 +165,7 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 | `src/source.rs` | 流式读取(逻辑记录、段校准、预读) |
 | `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver`、条件跟踪、`--own` |
 | `src/calib.rs` | 校准表 |
+| `src/calib_build.rs` | 从实盘 journal 生成校准表的延迟池 |
 | `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
 | `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
 | `src/parity.rs` | 重算决策与日志决策的匹配 |
@@ -191,7 +196,7 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 ## 已知限制与后续工作
 
 - 只读未压缩的 `.jrn` 段(`.jrn.zst` 先 `zstd -d`);一次运行一个 journal 运行(多个运行的目录请分开调用)。
-- 返利只在研究报告里另算(不进成交与 `windows.parquet`);校准表需由研究侧的延迟池或后续的 `replayer calib` 生成,`replayer calib` 尚未实现。
+- 返利只在研究报告里另算(不进成交与 `windows.parquet`);`replayer calib` 只生成下单与撤单的延迟池,不含成交回报延迟与吃单延迟。
 - `--own` 不改引擎的簿视图:策略在回放里仍看到日志中自己的挂单(与实盘相同,与 `bm_port.py` 的剔除不同)。
 - N 个变体各自读 journal、各自重建簿;共享解析与参数无关特征是后续优化(先按 M1 实测决定)。
 - `features` 子命令随特征导出接入。

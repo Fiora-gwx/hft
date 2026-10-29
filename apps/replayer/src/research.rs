@@ -224,3 +224,61 @@ pub(crate) fn execute_parity<S: StrategySet>(
     let differs = base["logged_only"].as_u64().unwrap_or(1) + base["regen_only"].as_u64().unwrap_or(1) > 0;
     Ok(i32::from(differs))
 }
+
+const CALIB_USAGE: &str =
+    "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N]";
+
+/// `replayer calib`: the conditional latency pools of one account from a live journal.
+pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
+    let mut journal = None;
+    let mut out = None;
+    let mut account = None;
+    let (mut window_s, mut phase_s) = (300u32, 5u32);
+    let mut i = 1;
+    while i < args.len() {
+        let key = args[i].as_str();
+        let value = args
+            .get(i + 1)
+            .filter(|s| !s.starts_with("--"))
+            .ok_or_else(|| (2, format!("{key} needs a value; {CALIB_USAGE}")))?
+            .clone();
+        i += 2;
+        let n = |v: &str| {
+            v.parse::<u32>()
+                .map_err(|_| (2, format!("{key} {v}: not a number")))
+        };
+        match key {
+            "--journal" => journal = Some(PathBuf::from(value)),
+            "--out" => out = Some(PathBuf::from(value)),
+            "--account" => {
+                account = Some(hft_types::AccountId(
+                    u8::try_from(n(&value)?).map_err(|_| (2, format!("--account {value}: 1..=255")))?,
+                ))
+            }
+            "--window-s" => window_s = n(&value)?,
+            "--phase-s" => phase_s = n(&value)?,
+            _ => return Err((2, format!("unsupported option {key}; {CALIB_USAGE}"))),
+        }
+    }
+    let (Some(journal), Some(out), Some(account)) = (journal, out, account) else {
+        return Err((2, CALIB_USAGE.into()));
+    };
+    let mut files = Vec::new();
+    crate::discover(&journal, &mut files)?;
+    files.sort();
+    if files.is_empty() {
+        return Err((3, "no journal segment found".into()));
+    }
+    let v = hft_replay::calib_build::build(&hft_replay::calib_build::CalibOpts {
+        files,
+        account,
+        reassembly: 128 << 20,
+        window_s,
+        phase_s,
+    })
+    .map_err(|e| (3, e))?;
+    let text = serde_json::to_string_pretty(&v).map_err(|e| (2, e.to_string()))?;
+    std::fs::write(&out, text).map_err(|e| (2, format!("{}: {e}", out.display())))?;
+    writeln!(stdout, "{}", v["meta"]).map_err(|e| (2, e.to_string()))?;
+    Ok(0)
+}

@@ -110,6 +110,9 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     if args.first().is_some_and(|s| s == "research") {
         return research::execute::<S>(args, stdout);
     }
+    if args.first().is_some_and(|s| s == "calib") {
+        return research::execute_calib(args, stdout);
+    }
     if args.first().is_some_and(|s| s == "parity") {
         return research::execute_parity::<S>(args, stdout);
     }
