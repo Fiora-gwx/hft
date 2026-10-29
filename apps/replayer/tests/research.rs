@@ -1,5 +1,5 @@
 //! `replayer research` over generated journals (TESTS.md RPL-3xx).
-use hft_replay::{DriverCfg, RunCfg, SimParams, Variant, run_one};
+use hft_replay::{DriverCfg, FeatureCfg, RunCfg, SimParams, Variant, run_one};
 use hft_testkit::dst::{RerunPolicy, run_record};
 use hft_testkit::scenarios::{SeqEngine, replay_config, suites};
 use hft_testkit::strategies::TestStrategies;
@@ -36,6 +36,7 @@ fn cfg(files: &[PathBuf]) -> RunCfg {
         sim: SimParams::default(),
         driver: DriverCfg::default(),
         reassembly: 128 << 20,
+        features: None,
     }
 }
 
@@ -514,4 +515,158 @@ fn rpl_307_calib_builds_pools_that_research_reads() {
         .output()
         .unwrap();
     assert_eq!(o.status.code(), Some(2), "RPL-307.2");
+}
+
+fn col<'a>(t: &'a hft_replay::table::Table, name: &str) -> &'a hft_replay::table::Col {
+    &t.cols
+        .iter()
+        .find(|c| c.0 == name)
+        .unwrap_or_else(|| panic!("column {name}"))
+        .1
+}
+
+#[test]
+fn rpl_308_features_rows_at_decisions_and_on_the_grid() {
+    use hft_replay::table::Col;
+    let (t, files) = dst_journal(0, 2_000);
+    let mut c = cfg(&files);
+    c.accounts = Some(Vec::new());
+    c.driver.engine_timers = false;
+    let base = run_one::<TestStrategies>(&c).unwrap();
+    c.features = Some(FeatureCfg {
+        every_ms: 1000,
+        at_decisions: true,
+    });
+    let a = run_one::<TestStrategies>(&c).unwrap();
+    // .1 one Input per round does not change the decisions.
+    assert_eq!(a.decisions, base.decisions, "RPL-308.1");
+    assert!(base.features.cols.is_empty(), "RPL-308.1");
+    let f = &a.features;
+    assert!(f.rows() > 0, "RPL-308.2");
+    let (Col::U8(cause), Col::U64(seq), Col::U8(strat), Col::I64(grid)) = (
+        col(f, "cause"),
+        col(f, "seq"),
+        col(f, "strategy"),
+        col(f, "grid_utc_ns"),
+    ) else {
+        panic!("RPL-308 column types");
+    };
+    let (Col::U64(trig), Col::U8(dstrat)) = (col(&a.decisions, "trigger_seq"), col(&a.decisions, "strategy"))
+    else {
+        panic!("RPL-308 decision column types");
+    };
+    let decided: std::collections::BTreeSet<(u64, u8)> =
+        trig.iter().copied().zip(dstrat.iter().copied()).collect();
+    let with_cols: std::collections::BTreeSet<u8> = strat.iter().copied().collect();
+    // .2 decision rows: exactly the (deciding Input, strategy) pairs of strategies with columns.
+    let rows: std::collections::BTreeSet<(u64, u8)> = (0..f.rows())
+        .filter(|&i| cause[i] == hft_replay::features::DECISION)
+        .map(|i| (seq[i], strat[i]))
+        .collect();
+    let want: std::collections::BTreeSet<(u64, u8)> = decided
+        .iter()
+        .copied()
+        .filter(|p| with_cols.contains(&p.1))
+        .collect();
+    assert!(!want.is_empty(), "RPL-308.2");
+    assert_eq!(rows, want, "RPL-308.2");
+    // .3 grid rows: whole seconds of engine UTC, increasing per strategy; probe-target has no
+    // columns and no rows.
+    let g: Vec<usize> = (0..f.rows())
+        .filter(|&i| cause[i] == hft_replay::features::GRID)
+        .collect();
+    assert!(!g.is_empty(), "RPL-308.3");
+    for &i in &g {
+        assert!(
+            grid[i] > 0 && grid[i] % 1_000_000_000 == 0,
+            "RPL-308.3 {}",
+            grid[i]
+        );
+    }
+    for s in &with_cols {
+        let mine: Vec<i64> = g.iter().filter(|&&i| strat[i] == *s).map(|&i| grid[i]).collect();
+        assert!(mine.windows(2).all(|w| w[0] < w[1]), "RPL-308.3");
+    }
+    let Col::U64(kind) = col(f, "kind_id") else {
+        panic!()
+    };
+    assert!(kind.iter().all(|k| *k != 0xFF02), "RPL-308.3");
+    // .4 the values are the strategy's own counters: opens never decrease per strategy.
+    let Col::OptI64(opens) = col(f, "g0_opens") else {
+        panic!()
+    };
+    for s in &with_cols {
+        let v: Vec<i64> = (0..f.rows())
+            .filter(|&i| strat[i] == *s)
+            .filter_map(|i| opens[i])
+            .collect();
+        assert!(!v.is_empty() && v.windows(2).all(|w| w[0] <= w[1]), "RPL-308.4");
+    }
+    // .5 the command: features.parquet and features.json, byte-identical on a second run.
+    let dir = files[0].parent().unwrap().to_path_buf();
+    let exe = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples")
+        .join(format!("replay_probe{}", std::env::consts::EXE_SUFFIX));
+    assert!(exe.is_file(), "CI prerequisite missing: {}", exe.display());
+    let run = |out: &std::path::Path| {
+        std::process::Command::new(&exe)
+            .args([
+                "--fixture-dst",
+                "features",
+                "--journal",
+                dir.to_str().unwrap(),
+                "--out",
+                out.to_str().unwrap(),
+                "--every-ms",
+                "500",
+            ])
+            .output()
+            .unwrap()
+    };
+    let (o1, o2) = (t.path().join("f1"), t.path().join("f2"));
+    for o in [&o1, &o2] {
+        let r = run(o);
+        assert_eq!(
+            r.status.code(),
+            Some(0),
+            "RPL-308.5 {}",
+            String::from_utf8_lossy(&r.stderr)
+        );
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(o1.join("features.json")).unwrap()).unwrap();
+    let names: Vec<&str> = meta["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["g0_opens", "g0_closes"], "RPL-308.5");
+    assert!(meta["runs"][0]["rows"].as_u64().unwrap() > 0, "RPL-308.5");
+    assert_eq!(
+        std::fs::read(o1.join("features.parquet")).unwrap(),
+        std::fs::read(o2.join("features.parquet")).unwrap(),
+        "RPL-308.5"
+    );
+    // .6 nothing to export, or a research-only option: exit 2.
+    for bad in [&["--every-ms", "0", "--no-decisions"][..], &["--seeds", "1"][..]] {
+        let r = std::process::Command::new(&exe)
+            .args([
+                "--fixture-dst",
+                "features",
+                "--journal",
+                dir.to_str().unwrap(),
+                "--out",
+            ])
+            .arg(t.path().join("f3"))
+            .args(bad)
+            .output()
+            .unwrap();
+        assert_eq!(r.status.code(), Some(2), "RPL-308.6 {bad:?}");
+    }
 }

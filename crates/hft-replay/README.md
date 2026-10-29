@@ -23,6 +23,7 @@ status: impl
   - [确定性](#确定性)
   - [输出](#输出)
   - [parity](#parity)
+  - [特征导出](#特征导出)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -42,6 +43,7 @@ pub struct ResearchOpts {
     pub driver: DriverCfg,
     pub reassembly: usize,                   // 多段记录重组上限(字节)
     pub jobs: usize,                         // 并行运行数(线程;每个运行各自读 journal)
+    pub features: Option<FeatureCfg>,        // Some = 另写 features.parquet(见"特征导出")
     pub out: PathBuf,
 }
 pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value, String>;   // 写出全部表与 run.json,返回 run.json
@@ -78,6 +80,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--log-timers` | 照读日志里的堆定时器,不由引擎状态触发 | 关 |
 | `--jobs N` | 并行运行数 | `1` |
 | `--reassembly-bytes N` | 多段记录重组上限 | 128 MiB |
+| `--features EVERY_MS` | 另写 `features.parquet`:决策点 + 每 `EVERY_MS` 引擎 UTC 毫秒一行(0 = 只在决策点) | 不写 |
 
 ### 驱动
 
@@ -141,7 +144,8 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `fills.parquet` | 一笔模拟成交 | `utc_ns`、`account`、`inst`、`side`、`px`、`qty`、`fee`、`slot`、`gen` |
 | `orders.parquet` | 一张被接受的模拟订单 `(account, slot, gen)` | `inst`、`side`、`px`、`qty`、`t_dec`、`t_ack`、`t_cxl_dec`、`t_done`、`first_fill`(UTC ns,0 = 无)、`cum`、`last_event`(`OrderEventKind`)、`reject_code` |
 | `windows.parquet` | 每次交付(`ExternalFill{Delivery}`)结束的 (账户, inst) 区间;日志结束时未交付的区间 `end_s = −1` | `end_s`、`bought`、`cost`、`sold`、`proceeds`、`fees`(报价资产单位)、`delivered`、`payout_px`、`pnl` = 交付值 + 卖出 − 买入 − 费、`n_fills` |
-| `run.json` | 运行元数据(也作为每个 Parquet 文件的 `hft.run` 键值元数据) | `version`、`code_sha`(构建时 `HFT_GIT_SHA`)、`journal`、`sim`、`calib_sha`(`SimParams` 的 SHA-256)、`engine_timers`、`wall_s`、`runs[]`:`variant`、`seed`、`set`、`params_sha`(每个被模拟账户的实例当前参数 blob SHA-256)、`accounts`、`first_seq`、`start_snapshot`、`stats`(驱动计数)、`sim_state_hash` |
+| `features.parquet` | 给了 `--features` 时:见[特征导出](#特征导出) | 同特征导出 |
+| `run.json` | 运行元数据(也作为每个 Parquet 文件的 `hft.run` 键值元数据) | `version`、`code_sha`(构建时 `HFT_GIT_SHA`)、`journal`、`sim`、`calib_sha`(`SimParams` 的 SHA-256)、`engine_timers`、`features`、`wall_s`、`runs[]`:`variant`、`seed`、`set`、`params_sha`(每个被模拟账户的实例当前参数 blob SHA-256)、`accounts`、`first_seq`、`start_snapshot`、`stats`(驱动计数)、`sim_state_hash` |
 
 ### parity
 
@@ -152,6 +156,21 @@ pub struct ParityOpts { pub files: Vec<PathBuf>, pub variants: Vec<Variant>, pub
 pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, String>;
 pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64, pub logged_only: u64, pub regen_only: u64, pub first_diff_trigger: u64 }
 ```
+
+`ParityOpts` 另有 `features: Option<FeatureCfg>`(`parity` 不读,`features` 用)。
+
+### 特征导出
+
+`features<S>(&ParityOpts)`(`replayer features`)与 `research --features`:策略自己声明的特征列([hft-strategy-sdk 特征导出](../hft-strategy-sdk/README.md#特征导出),`S::feature_columns` / `S::export_features`)按采样点逐实例写成一行。`features` 的运行与 parity 相同(不模拟、照读日志定时器、变体作用于全部实例),所以基线行就是实盘策略当时读到的值;`research --features` 的行属于模拟运行。
+
+```rust
+pub struct FeatureCfg { pub every_ms: u32, pub at_decisions: bool }
+pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, String>;   // opts.features 必须是 Some
+```
+
+- 采样点:`at_decisions` —— 一个 Input 处理完后,本 Input 上发出过 `OrderDecision` 的每个实例一行(`cause` 0);`every_ms` > 0 —— 引擎 UTC 越过下一个 `every_ms` 整数倍时,每个已创建的实例一行(`cause` 1,`grid_utc_ns` = 越过的格点;一次跳过多个格点只写一行)。第一个格点从运行的第一个 Input 之后开始。导出时每轮只取一个 Input(`per_round = 1`),输入序列与不导出时相同,决策因此不变。
+- 列:`variant`、`seed`、`utc_ns`、`engine_ns`(采样时的 `Now`)、`grid_utc_ns`(决策行 0)、`seq`(回放 seq)、`log_seq`(该 Input 的日志 seq,插入的 Input 为 0)、`cause`、`strategy`、`account`(主账户)、`kind_id`,然后是策略集合全部 kind 的特征列按名字合并的并集(同名列的单位与指数不同 → 报错);一个 kind 没有的列为 null,`NA` 也写成 null。特征列是可空 Int64,Arrow 字段元数据带 `unit`(`ratio`/`px`/`qty`/`ns`/`count`/`minute`)与 `exp`;研究侧按 `值 × 10^exp` 换成浮点。没有特征列的 kind 不出行。
+- `features.json`(也作为 `features.parquet` 的 `hft.run` 元数据):`version`、`code_sha`、`journal`、`every_ms`、`at_decisions`、`columns[]`(`name`、`unit`、`exp`)、`runs[]`(`variant`、`set`、`params_sha`、`start_snapshot`、`rows`)。不含耗时,同一 journal 两次运行的 Parquet 逐字节相同。
 
 ## 实现说明
 
@@ -169,6 +188,7 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 | `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
 | `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
 | `src/parity.rs` | 重算决策与日志决策的匹配 |
+| `src/features.rs` | 特征导出的采样与列并集 |
 
 - 截获的 Output 在下一次 `take` 时按引擎此刻的 `Now`(即触发它的 Input 处理之后)盖 `utc_ns`/`engine_ns`;模拟回报按其 tsc 用引擎当前的时钟锚换算。
 - 被模拟的 Live 账户在引擎里仍是 Live(出环、`Settle` → `Deliver`),只是指令去了模拟场所;Sim 账户的 `SimSettle` 由 `SimExchange` 处理。
@@ -199,7 +219,7 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 - 返利只在研究报告里另算(不进成交与 `windows.parquet`);`replayer calib` 只生成下单与撤单的延迟池,不含成交回报延迟与吃单延迟。
 - `--own` 不改引擎的簿视图:策略在回放里仍看到日志中自己的挂单(与实盘相同,与 `bm_port.py` 的剔除不同)。
 - N 个变体各自读 journal、各自重建簿;共享解析与参数无关特征是后续优化(先按 M1 实测决定)。
-- `features` 子命令随特征导出接入。
+- 特征导出只有策略自己声明的列(binary-maker 目前 7 列);研究面板里的其余特征要先按设计 §7.1② 固化成节点并加进策略的 `FEATURES`。
 - 从非创建处起步的模拟账户没有起点时的模拟挂单(实盘 journal 每次启动从空订单开始,不受影响)。
 
 ### 开发备忘

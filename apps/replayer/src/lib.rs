@@ -116,6 +116,9 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     if args.first().is_some_and(|s| s == "parity") {
         return research::execute_parity::<S>(args, stdout);
     }
+    if args.first().is_some_and(|s| s == "features") {
+        return research::execute_features::<S>(args, stdout);
+    }
     if args == ["--version"] {
         writeln!(stdout, "{VERSION}").map_err(|e| (2, e.to_string()))?;
         for kind in S::kinds() {

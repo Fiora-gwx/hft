@@ -1859,6 +1859,16 @@ fn bmk_035_feature_export_row() {
     f.export(&mut row);
     assert_eq!(row.len(), 7, "BMK-035");
     assert_eq!(buf, [20_001_000, 0, sigma, 399, NA, NA, NA, 7, 7], "BMK-035");
+    // .3 the Strategy hooks (research export) are the same columns and values.
+    assert_eq!(
+        <binary_maker::BinaryMaker as hft_strategy_sdk::Strategy>::FEATURES,
+        COLUMNS,
+        "BMK-035.3"
+    );
+    let mut via = [7i64; 9];
+    let mut row = FeatureRow::new(&mut via);
+    hft_strategy_sdk::Strategy::export_features(h.strategy(), &mut row);
+    assert_eq!(via, buf, "BMK-035.3");
     let mut short = [0i64; 3];
     let mut row = FeatureRow::new(&mut short);
     f.export(&mut row);

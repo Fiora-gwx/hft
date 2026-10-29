@@ -28,6 +28,7 @@ status: spec
   - [Advice 载荷](#advice-载荷)
   - [预热注入](#预热注入)
   - [装配:StrategySet 与 strategy_set!](#装配strategyset-与-strategy_set)
+  - [特征导出](#特征导出)
   - [运行模式下意图的行为表](#运行模式下意图的行为表)
   - [确定性规则](#确定性规则)
   - [版本与兼容规则](#版本与兼容规则)
@@ -1158,6 +1159,8 @@ pub trait StrategySet: 'static {
     #[cfg(feature = "schema-json")]
     fn schema_json(kind_id: u16) -> Option<String>;          // = params::schema_json(&DESC, Model::LAYOUT, schema.version);GetSchema 与 `hft-core schemas`(经 registry::export_schemas)
     fn cmds(kind_id: u16) -> &'static [CmdDesc];             // ctl-gateway 校验 StrategyCmd 用;集合外的 kind_id → 空
+    fn feature_columns(kind_id: u16) -> &'static [ColumnDesc] { &[] }      // = Strategy::FEATURES(见"特征导出");集合外 → 空
+    fn export_features(s: &Self::Inst, row: &mut FeatureRow<'_>) {}       // = Strategy::export_features
 }
 /// 与 hft-event CmdPreview 的同名字段同名同宽,原样进入 SetParams 的预览。
 pub struct ResetPreview { pub reset_groups: u32, pub no_open_ms: u32 }
@@ -1174,6 +1177,26 @@ hft_strategy_sdk::strategy_set! {
 - 宏生成三个枚举(实例、模型、参数)与 `impl StrategySet`;每个方法是一层 `match` + 内联调用,静态分派、无 `dyn`。编译期断言:`kind_id`、`name`、`schema.id` 各自唯一。行上可带 `#[cfg(...)]`(optional 策略用 Cargo feature 门控)。
 - `hft-sequencer` 是 `Sequencer<S: StrategySet>`;advisor 是 `Advisor<S>`;ctl-gateway 用 `S::decode_params` + `S::validate_params` 校验 `SetParams`、用 `S::model_mem_bytes`/`S::model_snapshot_bytes` 算 advisor 预算的输入、用 `S::reset_preview` 生成结构参数改动的预览、用 `S::kinds()` 的 `non_prod_only` 查绑定、用 `S::cmds` 校验 `StrategyCmd`、用 `S::schema_json` 回答 `GetSchema`。
 - 列出真实策略的调用只在 [strategies/registry](../../strategies/registry/README.md) 一处,hft-core 与 replayer 因此天然使用同一列表。replayer 遇到列表外的 `kind_id` → `UnknownStrategyKind` 并失败,不跳过。hft-testkit 另有一次只含 CI 测试策略(kind_id 0xFF00–0xFFFF)的调用,不含任何真实策略。本 crate 自己的 `tests/`(宏的分派与编译期测试)另有只含测试策略(kind_id 0xFF00–0xFFFF)的调用。`cargo xtask deps` 检查:除这三处外任何 crate 不得调用 `strategy_set!`;除 registry 外任何 crate 不得依赖 `strategies/*`;引擎 crate(含 dev 依赖)与 hft-testkit 不得依赖 registry。
+
+### 特征导出
+
+```rust
+// Strategy 的两个可选项(缺省:没有列、什么都不写):
+const FEATURES: &'static [ColumnDesc] = &[];
+fn export_features(&self, row: &mut FeatureRow<'_>) {}
+
+pub mod features {
+    pub enum Unit { Ratio, Px, Qty, Ns, Count, Minute }        // 列值 = 原始值 × 10^exp 个该单位;Px/Qty 的 exp 相对 inst 的 px_exp/qty_exp
+    pub struct ColumnDesc { pub name: &'static str, pub unit: Unit, pub exp: i8 }
+    pub const NA: i64 = i64::MIN;                               // 缺值
+    pub struct FeatureRow<'a> { .. }                            // put / put_opt / len:按 FEATURES 顺序写进调用方的存储,超出的值丢弃但计入 len
+}
+```
+
+- 策略把自己规则读的特征按 `FEATURES` 的顺序写出(通常就是特征节点的 `Feature::export`,[hft-feature](../hft-feature/README.md));研究导出([hft-replay 特征导出](../hft-replay/README.md#特征导出))因此拿到的是策略在线用的同一个值,不是研究侧的重写。
+- 冷路径:引擎从不调用 `export_features`;它只读状态、不改状态、不分配(存储由调用方给)。没有特征的策略不实现这两项。
+- 列名在一个 `StrategySet` 内按名字合并:两个 kind 声明同名列时,单位与指数必须相同(研究导出检查,否则报错)。
+- `ColumnDesc`、`FeatureRow`、`NA`、`Unit` 由 hft-feature 原样再导出,节点库与策略用同一组类型。
 
 ### 运行模式下意图的行为表
 

@@ -86,4 +86,8 @@ impl Strategy for BinaryMaker {
     fn restore(&mut self, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
         self.fast.restore(r)
     }
+    const FEATURES: &'static [hft_strategy_sdk::ColumnDesc] = features::COLUMNS;
+    fn export_features(&self, row: &mut hft_strategy_sdk::FeatureRow<'_>) {
+        self.fast.feat.export(row);
+    }
 }

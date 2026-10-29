@@ -19,6 +19,8 @@ pub enum Col {
     U8(Vec<u8>),
     F64(Vec<f64>),
     Str(Vec<String>),
+    /// Nullable i64 (`None` → null).
+    OptI64(Vec<Option<i64>>),
 }
 
 impl Col {
@@ -29,6 +31,7 @@ impl Col {
             Col::U8(v) => v.len(),
             Col::F64(v) => v.len(),
             Col::Str(v) => v.len(),
+            Col::OptI64(v) => v.len(),
         }
     }
     fn array(&self) -> (DataType, ArrayRef) {
@@ -38,6 +41,7 @@ impl Col {
             Col::U8(v) => (DataType::UInt8, Arc::new(UInt8Array::from(v.clone()))),
             Col::F64(v) => (DataType::Float64, Arc::new(Float64Array::from(v.clone()))),
             Col::Str(v) => (DataType::Utf8, Arc::new(StringArray::from(v.clone()))),
+            Col::OptI64(v) => (DataType::Int64, Arc::new(Int64Array::from(v.clone()))),
         }
     }
 }
@@ -46,11 +50,16 @@ impl Col {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Table {
     pub cols: Vec<(&'static str, Col)>,
+    /// Arrow field metadata `(column, key, value)`.
+    pub field_meta: Vec<(&'static str, String, String)>,
 }
 
 impl Table {
     pub fn new(cols: Vec<(&'static str, Col)>) -> Table {
-        Table { cols }
+        Table {
+            cols,
+            field_meta: Vec::new(),
+        }
     }
     pub fn rows(&self) -> usize {
         self.cols.first().map_or(0, |c| c.1.len())
@@ -74,6 +83,7 @@ impl Table {
                 (Col::U8(x), Col::U8(y)) => x.extend(y),
                 (Col::F64(x), Col::F64(y)) => x.extend(y),
                 (Col::Str(x), Col::Str(y)) => x.extend(y),
+                (Col::OptI64(x), Col::OptI64(y)) => x.extend(y),
                 _ => return Err(format!("table column {na}: type differs")),
             }
         }
@@ -89,7 +99,13 @@ impl Table {
                 return Err(format!("column {name}: {} rows, expected {n}", c.len()));
             }
             let (ty, a) = c.array();
-            fields.push(Field::new(*name, ty, false));
+            let meta: std::collections::HashMap<String, String> = self
+                .field_meta
+                .iter()
+                .filter(|m| m.0 == *name)
+                .map(|m| (m.1.clone(), m.2.clone()))
+                .collect();
+            fields.push(Field::new(*name, ty, matches!(c, Col::OptI64(_))).with_metadata(meta));
             arrays.push(a);
         }
         let schema = Arc::new(Schema::new(fields));

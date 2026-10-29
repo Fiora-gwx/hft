@@ -18,6 +18,7 @@ use hft_types::{AccountId, GroupId, InstId, Side, StrategyId, VenueId};
 use zerocopy::TryFromBytes;
 
 use crate::driver::{Captured, DriverCfg, DriverStats, ResearchDriver, blob_input, read_prefix};
+use crate::features::{FeatureCfg, Sampler};
 use crate::source::Source;
 use crate::table::{Col, Table};
 use crate::variants::{Variant, hex, variant_blob};
@@ -33,6 +34,8 @@ pub struct RunCfg {
     pub sim: SimParams,
     pub driver: DriverCfg,
     pub reassembly: usize,
+    /// Export feature rows (README "特征导出"); the run then takes one Input per round.
+    pub features: Option<FeatureCfg>,
 }
 
 /// What one run produced.
@@ -52,6 +55,8 @@ pub struct RunOut {
     pub fills: Table,
     pub orders: Table,
     pub windows: Table,
+    /// Feature rows (`features` set), otherwise empty.
+    pub features: Table,
     /// Nothing simulated: the regenerated decisions against the logged ones.
     pub parity: Option<(Table, crate::parity::ParitySummary)>,
 }
@@ -90,7 +95,15 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         .ok_or("no StateSnapshot")?;
     check_snapshot::<S>(&prefix, at).map_err(err("start snapshot"))?;
     let setup = EngineSetup::from_snapshot(&prefix, at).map_err(err("start snapshot"))?;
-    let drv = ResearchDriver::new(prefix, src, cfg.driver);
+    let mut dcfg = cfg.driver;
+    let mut sampler = match cfg.features {
+        Some(f) => {
+            dcfg.per_round = 1;
+            Some(Sampler::new::<S>(f)?)
+        }
+        None => None,
+    };
+    let drv = ResearchDriver::new(prefix, src, dcfg);
     let plan = RecoverPlan {
         start: SnapshotSel::AtSeq(at),
         replay_tail: true,
@@ -125,7 +138,11 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
     let cmd_ids = inject_variant::<S>(&mut seq, &targets, &cfg.variant)?;
     loop {
         match seq.step() {
-            StepOutcome::Busy => {}
+            StepOutcome::Busy => {
+                if let Some(f) = &mut sampler {
+                    f.after_input(&seq);
+                }
+            }
             StepOutcome::Idle | StepOutcome::Done { .. } => break,
             StepOutcome::Fatal(f) => return Err(format!("engine fatal: {f:?}")),
         }
@@ -181,6 +198,7 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         fills,
         orders,
         windows,
+        features: sampler.map(Sampler::table).unwrap_or_default(),
         parity,
     })
 }

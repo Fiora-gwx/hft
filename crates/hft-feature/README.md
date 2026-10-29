@@ -56,6 +56,7 @@ impl FeatureRow<'_> { pub fn new(vals: &mut [i64]) -> FeatureRow<'_>; pub fn put
 - 处理器不做截断(cutoff):输入相同即更新,不因"值没变"跳过下游。
 - 带参数的求值(如 `recent(k)`、`at(t)`、`net(x, o, from)`)是节点的固有方法;`export` 只写不带参数的求值。
 - `FeatureRow` 超出缓冲的值不写,但计入 `len`(调用方据此发现缓冲不足)。
+- `Unit`、`ColumnDesc`、`NA`、`FeatureRow` 定义在 [hft-strategy-sdk 特征导出](../hft-strategy-sdk/README.md#特征导出),本 crate 原样再导出:策略的 `Strategy::FEATURES` / `export_features` 与节点的 `COLUMNS` / `export` 是同一组类型。
 
 ### 节点库
 
@@ -84,7 +85,7 @@ impl FeatureRow<'_> { pub fn new(vals: &mut [i64]) -> FeatureRow<'_>; pub fn put
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib.rs` | `Feature`、`Events`、`Unit`、`ColumnDesc`、`NA`、`FeatureRow` |
+| `src/lib.rs` | `Feature`、`Events`;`Unit`、`ColumnDesc`、`NA`、`FeatureRow` 再导出自 SDK |
 | `src/fixed.rs` | `ONE`、`LN2_NANO`、`isqrt`、`atanh2`、`ln_ratio`、`ln_rate`、`imbalance`、`quantile_x10` |
 | `src/norm.rs` | Φ 表与 `cdf`、`inv_cdf` |
 | `src/vol.rs`、`src/top.rs`、`src/hist.rs`、`src/flow.rs`、`src/depth.rs`、`src/lag.rs`、`src/zscore.rs` | 节点(见节点库) |

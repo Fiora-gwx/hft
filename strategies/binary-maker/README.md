@@ -109,7 +109,7 @@ v7 的实盘参数 = v6 实盘参数(`clip_shares` 5、`inv_max_shares` 10、`si
 | 槽位 `Trade` | 大单环 → 槽位逐秒环 → 延迟统计 |
 | 其他事件 | 槽位逐秒环 → 延迟统计 |
 
-参考逐秒环、大单环与槽位逐秒环只在方向分数开启(`comp_skip` 或 `comp_dir` 非 0)时运行,延迟统计只在延迟闸门开启(`load_gate_ns` 或 `mdslow_gate_ns` 非 0)时运行。`MakerFeatures::export` 按 `features::COLUMNS` 写出一行定点列:`ref_mid_x2`、`ref_imb`、`ref_sigma`(至少 1 个样本即有)、`ref_samples`、`lag_minute`、`lag_p90`、`lag_p50`(上一结束分钟,×100 ns;无则 `NA`)。
+参考逐秒环、大单环与槽位逐秒环只在方向分数开启(`comp_skip` 或 `comp_dir` 非 0)时运行,延迟统计只在延迟闸门开启(`load_gate_ns` 或 `mdslow_gate_ns` 非 0)时运行。`MakerFeatures::export` 按 `features::COLUMNS` 写出一行定点列:`ref_mid_x2`、`ref_imb`、`ref_sigma`(至少 1 个样本即有)、`ref_samples`、`lag_minute`、`lag_p90`、`lag_p50`(上一结束分钟,×100 ns;无则 `NA`)。`Strategy::FEATURES` = `features::COLUMNS`,`export_features` 写出同一行([hft-strategy-sdk 特征导出](../../crates/hft-strategy-sdk/README.md#特征导出)),`replayer features` 由此导出。
 
 ### 规则
 

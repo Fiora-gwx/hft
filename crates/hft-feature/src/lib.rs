@@ -59,62 +59,9 @@ impl Events {
     }
 }
 
-/// Unit of an exported column; the column value is `raw × 10^exp` of that unit.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum Unit {
-    /// Dimensionless (returns, imbalances, probabilities, standard deviations).
-    Ratio,
-    /// Price in the inst's `px_exp` (exp is relative to it).
-    Px,
-    /// Quantity in the inst's `qty_exp` (exp is relative to it).
-    Qty,
-    Ns,
-    Count,
-    /// UTC minute number (minutes since 1970-01-01).
-    Minute,
-}
-
-/// One exported column: name, unit and decimal exponent. `NA` marks a missing value.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct ColumnDesc {
-    pub name: &'static str,
-    pub unit: Unit,
-    pub exp: i8,
-}
-
-/// Missing value of an exported column.
-pub const NA: i64 = i64::MIN;
-
-/// A row of exported fixed-point columns, written in `COLUMNS` order into caller-owned storage.
-#[derive(Debug)]
-pub struct FeatureRow<'a> {
-    vals: &'a mut [i64],
-    n: usize,
-}
-
-impl<'a> FeatureRow<'a> {
-    pub fn new(vals: &'a mut [i64]) -> FeatureRow<'a> {
-        FeatureRow { vals, n: 0 }
-    }
-    /// Appends one value; values beyond the storage are dropped (counted in `len`).
-    pub fn put(&mut self, v: i64) {
-        if let Some(x) = self.vals.get_mut(self.n) {
-            *x = v;
-        }
-        self.n += 1;
-    }
-    /// Appends `v` or `NA`.
-    pub fn put_opt(&mut self, v: Option<i64>) {
-        self.put(v.unwrap_or(NA));
-    }
-    /// Values written (may exceed the storage length).
-    pub fn len(&self) -> usize {
-        self.n
-    }
-    pub fn is_empty(&self) -> bool {
-        self.n == 0
-    }
-}
+/// Column descriptors, `NA` and the export row are the SDK's (`Strategy::FEATURES`,
+/// `Strategy::export_features`), re-exported here unchanged.
+pub use hft_strategy_sdk::features::{ColumnDesc, FeatureRow, NA, Unit};
 
 /// A feature node: a handler over its `Input` (called for every event of `EVENTS`) and the export
 /// of its evals (`COLUMNS` order).

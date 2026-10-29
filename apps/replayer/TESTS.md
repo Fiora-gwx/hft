@@ -24,6 +24,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | research | RPL-300–RPL-303、RPL-305、RPL-306 |
 | parity | RPL-304 |
 | calib | RPL-307 |
+| features | RPL-308 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
 | bench(可选扩展) | RPL-256 |
@@ -2495,3 +2496,20 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 |---|---|---|
 | RPL-307.1 | `calib --journal <段目录> --account 1 --out calib.json` | 退出 0;`meta.samples.ack` > 0,`pools.ack` 有同样多的正值样本;`calib::apply` 读入后 `venue.pools` 有值 |
 | RPL-307.2 | 缺 `--account` | 退出 2 |
+
+### RPL-308 特征导出:决策点与 UTC 网格上的策略特征行
+
+- 规则:[features](README.md#features)、[hft-replay 特征导出](../../crates/hft-replay/README.md#特征导出)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300(2 000 步);`accounts = Some(空)`,`engine_timers` 关;hft-testkit 的 `probe-taker`/`probe-np` 声明 `g0_opens`、`g0_closes`(第一个 group 的开、平次数),`probe-target` 不声明;`replay_probe` 示例程序(`--fixture-dst`)
+- 实现:`apps/replayer/tests/research.rs::rpl_308_features_rows_at_decisions_and_on_the_grid`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-308.1 | 同一配置不导出 / 导出(`every_ms = 1000`、`at_decisions`) | 决策表相同;不导出时特征表为空 |
+| RPL-308.2 | 取 `cause = 0` 的行 | (`seq`, `strategy`) 集合 = 决策表中有特征列的策略的 (`trigger_seq`, `strategy`) 集合,非空 |
+| RPL-308.3 | 取 `cause = 1` 的行 | 非空;`grid_utc_ns` > 0 且为整秒,同一策略严格递增;没有 `probe-target`(0xFF02)的行 |
+| RPL-308.4 | 每个策略按行序读 `g0_opens` | 非空且不减 |
+| RPL-308.5 | `features --journal <段目录> --out <dir> --every-ms 500` 跑两次 | 退出 0;`features.json` 的列为 `g0_opens`、`g0_closes`(两个 kind 的同名列合并),`runs[0].rows` > 0;两次的 `features.parquet` 逐字节相同 |
+| RPL-308.6 | `--every-ms 0 --no-decisions`;`--seeds 1` | 都退出 2 |

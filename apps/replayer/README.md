@@ -122,6 +122,10 @@ verify 是**离线**工具(夜跑与 CI);hft-core 冷启动用 `RecoverDriver`(�
 
 决策一致性:不模拟、用日志里的真实回报驱动,重算决策并与日志决策逐条匹配(每个变体一次;匹配规则、输出与口径归 [hft-replay parity](../../crates/hft-replay/README.md#parity))。退出码:0 基线变体(日志自身参数)的决策与日志完全一致;1 基线有差异(参数变体的差异不影响退出码);2 选项错误;3 输入或运行失败。
 
+### features
+
+特征导出:与 parity 相同的运行方式(不模拟、日志回报驱动),把策略自己声明的特征列(`Strategy::FEATURES`,在线规则读的同一个值)在决策点与引擎 UTC 网格上逐实例写成 `features.parquet` 与 `features.json`;采样、列与元数据归 [hft-replay 特征导出](../../crates/hft-replay/README.md#特征导出)。选项:parity 的全部选项,加 `--every-ms N`(网格,缺省 1000;0 = 不按网格)与 `--no-decisions`(不在决策点取行)。`research --features EVERY_MS` 在模拟运行里写同样的表。退出码:0 成功;2 选项错误(未知选项、`--every-ms 0` 与 `--no-decisions` 同给);3 输入或运行失败。
+
 ### compare
 
 逐决策比对两个实例的 seq journal,用于上线前正式实例 Shadow 运行期间与同参数模拟实例的对照([launch](../../docs/runbooks/launch.md) D 步,步骤与判定归 launch)。两个实例各有自己的 refdata 编号与行情连接,所以比对按名字映射、按时间对齐,不按 seq。D-shadow 的每日用法:

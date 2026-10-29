@@ -401,6 +401,19 @@ macro_rules! strategy_set {
                     _ => &[],
                 }
             }
+            fn feature_columns(kind_id: u16) -> &'static [$crate::ColumnDesc] {
+                match kind_id {
+                    $($($attr)* k if k == <$($path)* as $crate::Strategy>::DESC.kind_id => {
+                        <$($path)* as $crate::Strategy>::FEATURES
+                    })*
+                    _ => &[],
+                }
+            }
+            fn export_features(s: &Self::Inst, row: &mut $crate::FeatureRow<'_>) {
+                match s {
+                    $($($attr)* __strategy_set::Inst::$var(x) => <$($path)* as $crate::Strategy>::export_features(x, row),)*
+                }
+            }
         }
     };
 }

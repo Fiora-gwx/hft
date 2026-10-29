@@ -5,6 +5,7 @@
 pub mod calib;
 pub mod calib_build;
 pub mod driver;
+pub mod features;
 pub mod parity;
 pub mod run;
 pub mod source;
@@ -18,6 +19,7 @@ use hft_strategy_sdk::StrategySet;
 use serde_json::json;
 
 pub use driver::{DriverCfg, ResearchDriver};
+pub use features::FeatureCfg;
 pub use parity::ParitySummary;
 pub use run::{RunCfg, RunOut, run_one};
 pub use variants::Variant;
@@ -36,6 +38,8 @@ pub struct ResearchOpts {
     pub reassembly: usize,
     /// Runs in parallel (threads; each run reads the journal itself).
     pub jobs: usize,
+    /// Also write `features.parquet` (README "特征导出").
+    pub features: Option<FeatureCfg>,
     pub out: PathBuf,
 }
 
@@ -62,6 +66,7 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
                 },
                 driver: opts.driver,
                 reassembly: opts.reassembly,
+                features: opts.features,
             });
         }
     }
@@ -69,13 +74,19 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
     let results = run_all::<S>(&jobs, opts.jobs.max(1));
     let wall_s = started.elapsed().as_secs_f64();
     std::fs::create_dir_all(&opts.out).map_err(|e| format!("{}: {e}", opts.out.display()))?;
-    let mut tables: [table::Table; 4] = Default::default();
+    let mut tables: [table::Table; 5] = Default::default();
     let mut runs = Vec::new();
     for (cfg, r) in jobs.iter().zip(results) {
         let mut r = r.map_err(|e| format!("variant {} seed {}: {e}", cfg.variant.name, cfg.sim.seed))?;
-        for (k, t) in [&mut r.decisions, &mut r.fills, &mut r.orders, &mut r.windows]
-            .into_iter()
-            .enumerate()
+        for (k, t) in [
+            &mut r.decisions,
+            &mut r.fills,
+            &mut r.orders,
+            &mut r.windows,
+            &mut r.features,
+        ]
+        .into_iter()
+        .enumerate()
         {
             run::tag(t, &r.variant, r.seed);
             tables[k].extend(std::mem::take(t))?;
@@ -102,11 +113,18 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
         "calib_file_sha": opts.sim.calib_file_sha,
         "own": opts.sim.own,
         "engine_timers": opts.driver.engine_timers,
+        "features": opts.features.map(|f| json!({"every_ms": f.every_ms, "at_decisions": f.at_decisions})),
         "wall_s": wall_s,
         "runs": runs,
     });
     let kv = [("hft.run", meta.to_string())];
-    for (name, t) in ["decisions", "fills", "orders", "windows"].iter().zip(&tables) {
+    for (name, t) in ["decisions", "fills", "orders", "windows", "features"]
+        .iter()
+        .zip(&tables)
+    {
+        if *name == "features" && opts.features.is_none() {
+            continue;
+        }
         t.write(&opts.out.join(format!("{name}.parquet")), &kv)?;
     }
     write_json(&opts.out.join("run.json"), &meta)?;
@@ -121,6 +139,8 @@ pub struct ParityOpts {
     pub variants: Vec<Variant>,
     pub reassembly: usize,
     pub jobs: usize,
+    /// `Some` = the feature export (`features`), not decision parity.
+    pub features: Option<FeatureCfg>,
     pub out: PathBuf,
 }
 
@@ -140,6 +160,7 @@ pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, St
                 ..DriverCfg::default()
             },
             reassembly: opts.reassembly,
+            features: opts.features,
         })
         .collect();
     let results = run_all::<S>(&jobs, opts.jobs.max(1));
@@ -169,6 +190,62 @@ pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, St
     });
     table.write(&opts.out.join("parity.parquet"), &[("hft.run", meta.to_string())])?;
     write_json(&opts.out.join("parity.json"), &meta)?;
+    Ok(meta)
+}
+
+/// The feature export (README "特征导出"): every variant without simulation (the journal's own
+/// reports, so the baseline rows are the values the live strategy read), `features.parquet` and
+/// `features.json`.
+pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, String> {
+    let cfg = opts.features.ok_or("features: no FeatureCfg")?;
+    let jobs: Vec<RunCfg> = opts
+        .variants
+        .iter()
+        .map(|v| RunCfg {
+            files: opts.files.clone(),
+            accounts: Some(Vec::new()),
+            variant: v.clone(),
+            sim: SimParams::default(),
+            driver: DriverCfg {
+                engine_timers: false,
+                ..DriverCfg::default()
+            },
+            reassembly: opts.reassembly,
+            features: Some(cfg),
+        })
+        .collect();
+    let results = run_all::<S>(&jobs, opts.jobs.max(1));
+    std::fs::create_dir_all(&opts.out).map_err(|e| format!("{}: {e}", opts.out.display()))?;
+    let mut table = table::Table::default();
+    let mut runs = Vec::new();
+    for (c, r) in jobs.iter().zip(results) {
+        let mut r = r.map_err(|e| format!("variant {}: {e}", c.variant.name))?;
+        run::tag(&mut r.features, &r.variant, 0);
+        runs.push(json!({
+            "variant": r.variant,
+            "set": c.variant.set,
+            "params_sha": r.params_sha.iter().map(|(a, s)| json!({"account": a.0, "sha256": s})).collect::<Vec<_>>(),
+            "start_snapshot": r.start_snapshot,
+            "rows": r.features.rows(),
+        }));
+        table.extend(std::mem::take(&mut r.features))?;
+    }
+    let cols = features::columns::<S>()?;
+    let meta = json!({
+        "tool": "replayer features",
+        "version": env!("CARGO_PKG_VERSION"),
+        "code_sha": option_env!("HFT_GIT_SHA").unwrap_or("unknown"),
+        "journal": opts.files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        "every_ms": cfg.every_ms,
+        "at_decisions": cfg.at_decisions,
+        "columns": cols.iter().map(|c| json!({"name": c.name, "unit": c.unit.name(), "exp": c.exp})).collect::<Vec<_>>(),
+        "runs": runs,
+    });
+    table.write(
+        &opts.out.join("features.parquet"),
+        &[("hft.run", meta.to_string())],
+    )?;
+    write_json(&opts.out.join("features.json"), &meta)?;
     Ok(meta)
 }
 

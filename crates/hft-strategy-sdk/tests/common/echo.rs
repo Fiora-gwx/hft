@@ -330,6 +330,22 @@ impl Strategy for EchoProbe {
         }
         Ok(())
     }
+    const FEATURES: &'static [ColumnDesc] = &[
+        ColumnDesc {
+            name: "mode",
+            unit: features::Unit::Count,
+            exp: 0,
+        },
+        ColumnDesc {
+            name: "groups",
+            unit: features::Unit::Count,
+            exp: 0,
+        },
+    ];
+    fn export_features(&self, row: &mut FeatureRow<'_>) {
+        row.put(i64::from(self.mode));
+        row.put(self.groups.len() as i64);
+    }
 }
 
 impl EchoProbe {

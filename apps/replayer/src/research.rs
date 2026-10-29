@@ -12,7 +12,7 @@ const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
 [--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
-[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N]";
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--features EVERY_MS]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -27,6 +27,7 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut driver = DriverCfg::default();
     let mut jobs = 1usize;
     let mut reassembly = 128usize << 20;
+    let mut features = None;
     let mut i = 1;
     while i < args.len() {
         let key = args[i].as_str();
@@ -150,6 +151,12 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                     .max(1)
             }
             "--reassembly-bytes" => reassembly = usize::try_from(num(&value)?).map_err(|_| "too large")?,
+            "--features" => {
+                features = Some(hft_replay::FeatureCfg {
+                    every_ms: u32::try_from(num(&value)?).map_err(|_| "--features too large")?,
+                    at_decisions: true,
+                })
+            }
             _ => return Err(format!("unsupported option {key}; {USAGE}")),
         }
     }
@@ -173,6 +180,7 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
         driver,
         reassembly,
         jobs,
+        features,
         out,
     })
 }
@@ -205,6 +213,7 @@ pub(crate) fn parse_parity(args: &[String]) -> Result<hft_replay::ParityOpts, St
         variants: o.variants,
         reassembly: o.reassembly,
         jobs: o.jobs,
+        features: None,
         out: o.out,
     })
 }
@@ -223,6 +232,54 @@ pub(crate) fn execute_parity<S: StrategySet>(
     let base = &meta["runs"][0]["summary"];
     let differs = base["logged_only"].as_u64().unwrap_or(1) + base["regen_only"].as_u64().unwrap_or(1) > 0;
     Ok(i32::from(differs))
+}
+
+const FEATURES_USAGE: &str = "usage: replayer features --journal <file|dir> --out <dir> [--every-ms N] [--no-decisions] [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--jobs N] [--reassembly-bytes N]";
+
+/// `replayer features`: the parity options plus the sampling (`--every-ms`, default 1000;
+/// `--no-decisions`).
+pub(crate) fn parse_features(args: &[String]) -> Result<hft_replay::ParityOpts, String> {
+    let mut cfg = hft_replay::FeatureCfg {
+        every_ms: 1000,
+        at_decisions: true,
+    };
+    let mut rest = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--no-decisions" => cfg.at_decisions = false,
+            "--every-ms" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("--every-ms needs a value; {FEATURES_USAGE}"))?;
+                cfg.every_ms = v.parse().map_err(|_| format!("--every-ms {v}: not a number"))?;
+                i += 1;
+            }
+            _ => rest.push(args[i].clone()),
+        }
+        i += 1;
+    }
+    if cfg.every_ms == 0 && !cfg.at_decisions {
+        return Err(format!(
+            "--every-ms 0 with --no-decisions exports nothing; {FEATURES_USAGE}"
+        ));
+    }
+    let mut o = parse_parity(&rest).map_err(|e| e.replace(PARITY_USAGE, FEATURES_USAGE))?;
+    o.features = Some(cfg);
+    Ok(o)
+}
+
+pub(crate) fn execute_features<S: StrategySet>(
+    args: &[String],
+    stdout: &mut impl Write,
+) -> Result<i32, Failure> {
+    let opts = parse_features(args).map_err(|e| (2, e))?;
+    if opts.files.is_empty() {
+        return Err((3, "no journal segment found".into()));
+    }
+    let meta = hft_replay::features::<S>(&opts).map_err(|e| (3, e))?;
+    writeln!(stdout, "{meta}").map_err(|e| (2, e.to_string()))?;
+    Ok(0)
 }
 
 const CALIB_USAGE: &str =

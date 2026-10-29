@@ -174,3 +174,34 @@ fn rsr_004_calibration_table() {
         );
     }
 }
+
+#[test]
+fn rsr_005_nullable_feature_column_and_field_metadata() {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let dir = std::env::temp_dir().join(format!("rsr-005-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut t = Table::new(vec![("x", Col::OptI64(vec![Some(-3), None, Some(7)]))]);
+    t.field_meta = vec![
+        ("x", "unit".into(), "px".into()),
+        ("x", "exp".into(), "-2".into()),
+    ];
+    let p = dir.join("f.parquet");
+    t.write(&p, &[]).unwrap();
+    let b = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&p).unwrap()).unwrap();
+    // .1 the column is nullable and carries its unit and exponent.
+    let f = b.schema().field_with_name("x").unwrap().clone();
+    assert!(f.is_nullable(), "RSR-005.1");
+    assert_eq!(
+        (
+            f.metadata().get("unit").map(String::as_str),
+            f.metadata().get("exp").map(String::as_str)
+        ),
+        (Some("px"), Some("-2")),
+        "RSR-005.1"
+    );
+    // .2 a missing value reads back as null.
+    let batch = b.build().unwrap().next().unwrap().unwrap();
+    let a = batch.column(0);
+    assert_eq!((a.len(), a.null_count(), a.is_null(1)), (3, 1, true), "RSR-005.2");
+    let _ = std::fs::remove_dir_all(&dir);
+}

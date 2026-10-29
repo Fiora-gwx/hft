@@ -8,6 +8,7 @@ use crate::StrategyDesc;
 use crate::advice::AdviceOut;
 use crate::ctx::{Ctx, SubsBuilder};
 use crate::event::EventRef;
+use crate::features::{ColumnDesc, FeatureRow};
 use crate::group::GroupTable;
 use crate::layout::ModelLayoutDesc;
 use crate::params::ParamError;
@@ -73,6 +74,11 @@ pub trait Strategy: Sized {
     /// `r.desc_version()` = `StrategyDesc.version` when the section was written; accept the
     /// current and the previous version, otherwise `VersionUnsupported`.
     fn restore(&mut self, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError>;
+    /// Exported feature columns (README "特征导出"); none by default.
+    const FEATURES: &'static [ColumnDesc] = &[];
+    /// Writes `FEATURES` of the current state, in order (cold: research export only; never called
+    /// by the engine).
+    fn export_features(&self, _row: &mut FeatureRow<'_>) {}
 }
 
 /// Next chunk of `Model::snapshot_chunk`.
