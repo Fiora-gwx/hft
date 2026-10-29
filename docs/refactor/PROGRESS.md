@@ -66,7 +66,7 @@
 |---|---|---|---|
 | `feat/refdata-account-set`:refdata 接受一个实例绑定多个账户(`accounts_of`,主账户 = id 最小);sequencer 实例账户集合(≤ 8)覆盖 cell、模式、风控组表、执行层 cell、halt、行情闸门、连接通知、StrategyCmd;SDK `RefView::accounts`;hft-core 每实例一份参数 blob | done | b5155926 | REF-019(改写)、SEQ-451;单账户行为不变(sequencer 515、exec 283、refdata 84) |
 | `feat/gw-per-account`:槽镜像按 (账户, 槽) | doing | c4100bac(镜像) | VEN-411;**未做**:hft-core 的 REST 池/账户客户端/conn-builder 只装 `accounts[0]`、`AccountCapacity`、按账户 `src_ip`、撤单独立限速桶 |
-| `feat/router-stp-agg-risk` | todo | | |
+| `feat/router-stp-agg-risk` | doing | b6796b5f(STP) | SEQ-452:策略下单与同实例其他账户的挂单(同 venue/inst、反向、价格可达)交叉时 `RejectBits::SELF_TRADE`,在风控之前;**未做**:`RoutePolicy` 路由、互补 token 的 STP(需要 refdata 的互补关系字段,负责人决定)、实例聚合限额(需要改 RiskParams `RKP1` 格式,负责人决定) |
 | `feat/prod-sim-accounts` | todo | | |
 | `strat/bm-multi-account` | todo | | |
 
@@ -102,7 +102,7 @@
 | SEQ-448、SEQ-449、SDK-214 | M1 | `bbo_stamp`/`stamps`、`open_orders`、提供的默认方法与 `Tif::FAK` |
 | RPL-304 | M1 | parity |
 | SIM-232–SIM-239、RSR-004、RPL-305–RPL-307 | M2 | 场所模型、校准、`--own`、`replayer calib` |
-| REF-019(改写)、SEQ-451、VEN-411 | M4 | 账户集合、gw 每账户镜像 |
+| REF-019(改写)、SEQ-451、VEN-411、SEQ-452 | M4 | 账户集合、gw 每账户镜像、自成交防护 |
 | SEQ-450、PY-170 | M5 | UTC 线交叉验证、起点段 |
 | RSR-001–RSR-003 | M1 | 变体规格、Parquet 写出、被替换回报的账户字段 |
 | RPL-300–RPL-303 | M1 | 研究回放确定性、不模拟时与日志一致、变体、CLI |
