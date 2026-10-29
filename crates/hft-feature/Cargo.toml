@@ -1,0 +1,18 @@
+[package]
+name = "hft-feature"
+description = "Event-driven fixed-point feature nodes for strategy fast parts: handler + on-demand eval, exported columns; spec: crates/hft-feature/README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-strategy-sdk.workspace = true
+
+[dev-dependencies]
+hft-strategy-sdk = { workspace = true, features = ["testing"] }
+hft-refdata.workspace = true

@@ -93,14 +93,14 @@ L0 纯基础    hft-types ← hft-refdata(含 VenueCaps、AccountMeta)← hft-ev
 L0 策略接口  hft-strategy-sdk(只依赖 L0)
 L1 纯领域    hft-venue-proto ← venue-<x>;hft-ctl-proto;hft-book  hft-oms  hft-risk(含 hft-risk::mode)  hft-ledger  hft-exec
              (oms/risk/ledger/exec 可依赖 hft-strategy-sdk 的视图与意图类型;book 只用其快照读写类型)
-L2 策略构件  hft-strat-lib(L0 + hft-strategy-sdk)
+L2 策略构件  hft-strat-lib(L0 + hft-strategy-sdk)  hft-feature(hft-strategy-sdk)
 L3 运行时    hft-rt  hft-journal  hft-net  hft-venue(依赖 hft-venue-proto,不依赖具体 venue)
 L4 装配核    hft-sequencer(hft-strategy-sdk + L1 + hft-journal + hft-rt;对 StrategySet 泛型,不依赖任何策略包)
 L5 冷/工具   hft-ctl  hft-telemetry  hft-sim  hft-py(reader + ledger + SDK params 编解码)  hft-testkit(共用 hft-sim 撮合器;不依赖 registry)
 应用装配    hft-core → hft-venue-proto;dev: hft-testkit + hft-ctl-proto
 测试装配    hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional     hft-ext-proto  hft-amm  hft-chain-evm  hft-chain-solana(冻结)
-strategies   strategies/<name>:只依赖 hft-strategy-sdk + hft-strat-lib(Python pipeline 插件随包在 strategies/<name>/pipeline/);strategies/registry(hft-strategy-registry):唯一策略清单,依赖各策略包;dev: hft-ctl + hft-ctl-proto
+strategies   strategies/<name>:只依赖 hft-strategy-sdk + hft-strat-lib + hft-feature(Python pipeline 插件随包在 strategies/<name>/pipeline/);strategies/registry(hft-strategy-registry):唯一策略清单,依赖各策略包;dev: hft-ctl + hft-ctl-proto
 apps         hft-core、replayer(二者经 hft-strategy-registry 取得同一 StrategySet)journal-archiver watchtower reconciler kill-switch;optional:chain-core chain-grpc-relay mock-exchange
 tools        hft-cfg(按 schema 通用编码) xtask hft-verify hostprobe az-probe hft-secrets latency-slice(M1.5 探针专用)
 python       框架包 ops_bot  pipeline  treasury;optional:research

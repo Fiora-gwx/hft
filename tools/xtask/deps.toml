@@ -36,7 +36,8 @@ chain_allowed = ["crates/hft-amm", "crates/hft-chain-evm", "apps/chain-core", "c
 # rule 7: packages that must not have hft-rt in their closure (rule T4); strategies/* always included.
 no_rt = [
     "crates/hft-venue-proto", "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger",
-    "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-amm", "crates/venue-*",
+    "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-feature", "crates/hft-amm",
+    "crates/venue-*",
 ]
 rt = "crates/hft-rt"
 # rule 8: hft-journal's `writer` feature only in the closure of `journal_writer_allowed`; checked for the
@@ -85,6 +86,12 @@ deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 [pkg."crates/hft-strat-lib"]
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+# Feature nodes of strategy fast parts (crates/hft-feature/README.md).
+[pkg."crates/hft-feature"]
+tier = "pure"
+deps = ["crates/hft-strategy-sdk"]
+dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 
 # ---------------------------------------------------------------- L1: protocol trait and venues
 [pkg."crates/hft-venue-proto"]
@@ -244,7 +251,7 @@ deps = [
 # ---------------------------------------------------------------- strategies
 [pkg."strategies/*"]
 tier = "hot"
-deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib"]
+deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-feature"]
 # Tests build refdata fixtures (RDB1 encoder) and group tables for the SDK test stubs.
 dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 

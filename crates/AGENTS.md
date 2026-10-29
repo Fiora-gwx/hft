@@ -25,13 +25,13 @@ hft-types ← hft-refdata ← hft-event                      (L0,被所有人依
 hft-strategy-sdk → L0                                     (策略接口,只依赖 L0)
 hft-venue-proto ← venue-<x>                               (L1:trait 与纯协议)
 hft-book  hft-oms  hft-risk  hft-ledger  hft-exec         (L1,彼此不依赖;oms/risk/ledger/exec 可依赖 hft-strategy-sdk 的视图与意图类型,book 只用其快照读写类型;RejectBits 在 hft-types;hft-risk 只输出 KillBits)
-hft-strat-lib → L0 + hft-strategy-sdk
+hft-strat-lib → L0 + hft-strategy-sdk ;  hft-feature → hft-strategy-sdk
 hft-rt ;  hft-journal → hft-rt ;  hft-net → hft-rt + hft-event(只用 `ConnRole`);  hft-venue → hft-venue-proto + hft-net + hft-journal + hft-rt
 hft-sequencer → hft-strategy-sdk + L1 + hft-journal + hft-rt(对 StrategySet 泛型;LiveDriver 写 KillWord = AtomicU32)
 hft-ctl / hft-telemetry / hft-sim / hft-py / hft-testkit → 按需(各 README 的依赖节;都不依赖 hft-strategy-registry)
 hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional 链上:hft-ext-proto → L0 ;  hft-amm → hft-types ;  hft-chain-evm → 以其 README 依赖节为准
-strategies/<name> → hft-strategy-sdk + hft-strat-lib(细则见 strategies/AGENTS.md)
+strategies/<name> → hft-strategy-sdk + hft-strat-lib + hft-feature(细则见 strategies/AGENTS.md)
 strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer 依赖);dev: hft-ctl + hft-ctl-proto
 ```
 
