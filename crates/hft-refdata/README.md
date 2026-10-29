@@ -269,7 +269,7 @@ pub struct ChainToken { pub chain: VenueId, pub asset: AssetId, pub address: [u8
 #[repr(u8)] pub enum MaintKind  { VenueMaintenance = 1, MarketClosed = 2 /* 标的市场休市(Equity 类资产) */, Delisting = 3 }
 #[repr(u8)] pub enum AssetClass { Crypto = 1, Stable = 2, Equity = 3 /* 股票类代币 */, Commodity = 4 }
 #[repr(u8)] pub enum LimitScope { Ip = 1, Uid = 2, Account = 3, Conn = 4, Inst = 5 }
-#[repr(u8)] pub enum LimitBucket { Orders = 1, Weight = 2, WsInMsgs = 3, NewConns = 4, Amends = 5 }
+#[repr(u8)] pub enum LimitBucket { Orders = 1, Weight = 2, WsInMsgs = 3, NewConns = 4, Amends = 5, Cancels = 6 /* 撤单的独立额度;没有该行的 venue 撤单计入 Orders */ }
 #[repr(u8)] pub enum EndpointRole { MdPublic = 1, MdMarket = 2, UserData = 3, OrderWs = 4, Rest = 5, RestBackup = 6 }
 #[repr(u8)] pub enum EndpointEnv  { Prod = 1, Testnet = 2, Demo = 3 }
 #[repr(u8)] pub enum TsUnit       { Ms = 1, Us = 2, Ns = 3 }

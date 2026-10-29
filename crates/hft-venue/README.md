@@ -477,7 +477,7 @@ struct GwAccount<P: VenueProtocol> {
     hold: HoldBuf,                // 解析不到槽的成交类 OrderEvent 暂存(≤ gw.unmatched_hold_cap,预分配)
     acct: AcctSched,              // 账户查询的调度状态(§4a)
     inflight: [u16; 3],           // 每连接已发未回的请求数
-    rate: RateCounters,           // 发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 按窗口校正,不降低本地已记账的用量(未匹配窗口按占用比例保守折算);一个账户的限速风暴不消耗另一个账户的配额
+    rate: RateCounters,           // Orders 窗口;cancel_rate: RateCounters 为 Cancels 窗口(venue 声明时 Cancel/CancelAll 用它,否则为空)。发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 按窗口校正,不降低本地已记账的用量(未匹配窗口按占用比例保守折算);一个账户的限速风暴不消耗另一个账户的配额
     frame: MaskedFrame<CAP>, warm_frame: MaskedFrame<CAP>,
 }
 ```
@@ -494,7 +494,7 @@ struct GwAccount<P: VenueProtocol> {
 
 1. **`drain_out()`**:以 `read_batch` 取得当前已发布的 `GwCmd`(≤ `cmds_per_loop` 与可用空间)，复制到预分配批缓冲后一次 Release 归还环槽。**本批内重排**:稳定地把 `oflags & RISK_REDUCING` 的 `Place`/`Amend` 移到批首,其余保持原序;例外——目标槽(`target_slot`)在同批更早一条 `Place` 中的 `Cancel`/`Amend`/`Query` 不越过那条 `Place`(这样的 RR `Amend` 留在原位)。每账户每轮至多 `gw.cmds_per_account_per_loop` 条,超出的留在本地暂存(容量 = `cmds_per_loop`)下一轮先发(每次 `drain_out` 先发暂存中这一圈配额未用完的账户的命令,再从出环取至多 min(`cmds_per_loop`, 暂存空位) 条),使一个账户的突发不推迟另一个账户。跨批的优先级与 (venue, account) 配额由 sequencer 侧 OMS 的扇出队列保证([hft-oms](../hft-oms/README.md) 的输出扇出)。维护类 `op` 按"出环"表处理;订单类 `c` 按下列步骤:
    1. **kill 检查**(仅 `op ∈ {Place, Amend}`;位定义归 [hft-types `KillBits`](../hft-types/README.md),规则归 [hft-risk kill 字](../hft-risk/README.md#kill-字唯一的跨线程共享可变量)):`k = kill.load(Acquire) & (kill_mask | acct.acct_bits)`(`u32`;`acct` = `c.account` 的 `GwAccount`);`k & (HARD | account_hard(ix)) != 0` → 一律拒(含 `RISK_REDUCING`);否则 `k != 0` 且 `c.oflags & RISK_REDUCING == 0` → 拒;拒绝回 `SendReport{status: KillBlocked}`。判定是纯函数 `pub fn kill_admit(word: u32, mask: u32, acct_bits: u32, ix: u8, op: GwOp, oflags: u16) -> bool`,gw 与 hft-core 的启动自检调用同一个函数。`RISK_REDUCING`(对冲第二腿、平仓、HedgeFix)由 sequencer 置位,gw 只看位(置位规则在 [hft-oms](../hft-oms/README.md#risk_reducing-判定))。`Cancel`、`CancelAll`、`Query` 与维护类 `op` 永远放行。
-   2. **限速兜底**:该 (venue, account) 的发送侧计数显示会超交易所硬上限 → `SendReport{status: RateLimited}`(风控令牌桶应先拦住,这里是最后一道)。同时检查该账户所有 Account/Uid 的 Orders 窗口,任一窗口不足则全部窗口不扣额度。延迟响应只提高计数,不释放本地已占配额;ResetRate 清零。计数按 (venue, account) 分开;交易所按 IP 计的限额以每账户独立出口 IP(`venues.<v>.gw.src_ip`)隔离,共享 IP 的配置加载时拒绝;协议声明 `SHARED_EGRESS_IP` 的 venue(Polymarket)例外,共用一个出口 IP 的账户共用该 IP 的计数(按 `src_ip_idx`)。
+   2. **限速兜底**:该 (venue, account) 的发送侧计数显示会超交易所硬上限 → `SendReport{status: RateLimited}`(风控令牌桶应先拦住,这里是最后一道)。同时检查该账户所有 Account/Uid 的 Orders 窗口,任一窗口不足则全部窗口不扣额度。refdata 为该 venue 声明了 Account/Uid 的 `Cancels` 窗口时,`Cancel`/`CancelAll` 改按这些窗口计(撤单的独立额度,不占 Orders;规则同上),没有声明时撤单照旧计入 Orders;`RateObs` 只校正同一 bucket 的窗口。延迟响应只提高计数,不释放本地已占配额;ResetRate 清零。计数按 (venue, account) 分开;交易所按 IP 计的限额以每账户独立出口 IP(`venues.<v>.gw.src_ip`)隔离,共享 IP 的配置加载时拒绝;协议声明 `SHARED_EGRESS_IP` 的 venue(Polymarket)例外,共用一个出口 IP 的账户共用该 IP 的计数(按 `src_ip_idx`)。
    3. 选连接:该账户 primary;primary 不是 `Open` → standby;都没有 → `SendReport{status: NoConn}`。
    4. 从槽镜像取 `TargetRef`(Cancel/Amend/Query);`order_channel(op) = Rest` 的 op 走 `P::encode_rest` 并提交 REST 池(其后的第 5 步换成 `RestPool::submit`,`SendReport` 规则相同:`sent_tsc` 与 `RawTx` 的记录头 `tsc` 取该请求 `sendmsg` 返回后的 TSC,`RestPool::pending_sent`);两条通道的编码(REST 含请求签名)都在延迟打点 `EncodeStart`/`EncodeEnd` 之间;其余 `P::encode(rd, tpl, &c, &tgt, &wall_clock, frame.body_mut())`:写入价/量/client id/请求 id/时间戳/过期字段;reduce-only 字段只在 `oflags` 带 `REDUCE_ONLY` 时填;`needs_per_order_signing()` 的 venue 在此签名(Hyperliquid)。`EncodeErr` → `SendReport{status: EncodeError}`;其中 **`op = Query` 无法编码**(槽镜像里没有该槽、venue 不支持按 client id 查询且没有 exch id)→ `SendReport{status: QueryUnsupported}`([hft-event](../hft-event/README.md#执行0x02xx) `SendStatus` = 8):OMS 保持该槽 `Unknown` 并转交 reconciler。
    5. `frame.seal(Text, len, mask)` → `conn.send_frame(&frame)`;推 `TxTag`(若启用);`inflight[conn] += 1`;New 写槽镜像。
@@ -648,6 +648,7 @@ struct IdTable {
 
 ### 7. 会话建立(warm 线程 `conn-builder`,`SessionDriver`)
 
+0. **账户**:gw 为私有连接(`Order`/`UserStream`/该账户 REST 池的 `Rest`)发出的 `BuildReq` 带该连接所属账户(hft-net `BuildReq.account`,行情与公共 REST 为 0);一个 gw 服务多个账户时,conn-builder 按它取该账户的会话凭据与账户客户端(重新认证、listenKey),REST 池按账户各建各的连接(`set_rest_pools(account, …)`,每账户一次)。
 1. `P::bootstrap(role, cfg, cred)`(`cred` = 该账户的 REST 凭证,行情角色为 `None`)返回 `Some(BootCall)` 时先执行该 REST 请求(Binance USDT-M listenKey、KuCoin bullet token),2xx 响应体作为 `endpoint` 的 `boot`。
 2. `P::endpoint` 生成 path/query/额外头(可能含签名,如 KuCoin 私有 WS URL)→ `Connector::submit`。行情角色(`Md`)不调用 `P::endpoint`:公共行情的 path 按路由固定,装配时已写进 `Connector` 的端点表,而 `BuildReq` 不带路由号(M1.5 探针上以路由 0 调用时 Binance 现货与 USDT-M 返回 `Unsupported`,行情连接全部建不起来)。
 3. `Open` 后:Order/UserStream 角色调 `P::login`,等 `P::login_result`(多步挑战式登录用 `Continue`;返回 `LoginStep::Sent` 的登录帧交易所不回复,发出即视为登录完成);失败按 `LoginResult::Rejected(code)` 上报并退避。

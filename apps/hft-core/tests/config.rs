@@ -690,6 +690,7 @@ fn core_430_production_orders_polymarket_only() {
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
         presign: true,
+        extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
     let path = support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
@@ -763,6 +764,7 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
         presign: true,
+        extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -950,6 +952,7 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
         presign: true,
+        extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
     let live_path =
@@ -1030,10 +1033,10 @@ fn core_441_shared_account_ip() {
         .map(|e| e.code)
         .collect();
     assert!(
-        codes.contains(&"AccountCapacity") && codes.contains(&"SharedAccountIp"),
+        !codes.contains(&"AccountCapacity") && codes.contains(&"SharedAccountIp"),
         "CORE-441.5 {codes:?}"
     );
-    // .6 the live Polymarket configuration with a second account: only the assembly's capacity.
+    // .6 the live Polymarket configuration with a second account on the one `src_ip`: allowed.
     #[cfg(feature = "polymarket")]
     {
         let live = support::PmLive {
@@ -1043,6 +1046,7 @@ fn core_441_shared_account_ip() {
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
             presign: true,
+            extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1063,12 +1067,129 @@ fn core_441_shared_account_ip() {
         accounts.push(second);
         std::fs::write(&pm, toml::to_string(&config).unwrap()).unwrap();
         let codes: Vec<_> = hft_core::config::load(&pm, false)
-            .unwrap_err()
+            .err()
+            .unwrap_or_default()
             .iter()
             .map(|e| e.code)
             .collect();
-        assert!(codes.contains(&"AccountCapacity"), "CORE-441.6 {codes:?}");
+        assert!(!codes.contains(&"AccountCapacity"), "CORE-441.6 {codes:?}");
         assert!(!codes.contains(&"SharedAccountIp"), "CORE-441.6 {codes:?}");
+    }
+}
+
+#[test]
+fn core_446_live_accounts_of_one_venue() {
+    // .2–.3 Binance (`public`, no `SHARED_EGRESS_IP`): per-account `src_ip` and the gw's capacity.
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let codes_with = |n: u8, own_ip: bool| {
+        let mut accounts = String::new();
+        for a in 1..=n {
+            accounts += &format!(
+                "[[venues.public.accounts]]
+account = {a}
+api_key_path = 'k'
+session_seed_path = 's'
+rest_api_key_path = 'k'
+rest_secret_path = 's'
+"
+            );
+            if own_ip && a > 1 {
+                accounts += &format!(
+                    "src_ip = '127.0.1.{a}'
+"
+                );
+            }
+        }
+        std::fs::write(
+            &path,
+            text.replace(
+                "[sim]",
+                &format!(
+                    "src_ip = '127.0.0.1'
+bind_device = 'lo'
+{accounts}[sim]"
+                ),
+            ),
+        )
+        .unwrap();
+        hft_core::config::load(&path, false)
+            .err()
+            .unwrap_or_default()
+            .iter()
+            .map(|e| e.code)
+            .collect::<Vec<_>>()
+    };
+    let two = codes_with(2, true);
+    assert!(
+        !two.contains(&"SharedAccountIp")
+            && !two.contains(&"AccountCapacity")
+            && !two.contains(&"ConfigParse"),
+        "CORE-446.2 {two:?}"
+    );
+    let c = hft_core::config::parse(&path).unwrap();
+    let ips: Vec<_> = c.venues["public"].accounts.iter().map(|k| k.src_ip).collect();
+    assert_eq!(
+        ips,
+        [None, Some(std::net::Ipv4Addr::new(127, 0, 1, 2))],
+        "CORE-446.2"
+    );
+    assert!(!codes_with(12, true).contains(&"AccountCapacity"), "CORE-446.3");
+    assert!(codes_with(13, true).contains(&"AccountCapacity"), "CORE-446.3");
+    // .1 the live Polymarket maker with `--live-account`: accounts 2 and 3 in the one gw.
+    #[cfg(feature = "polymarket")]
+    {
+        use hft_types::{AccountId, StrategyId, VenueId};
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+            day_loss_carry: None,
+            daily_loss_abs: None,
+            daily_loss_max_resumes: None,
+            presign: true,
+            extra_accounts: vec![
+                ("0f5e8d2a-4444-5555-6666-".into(), d.path().join("keys2")),
+                ("0f5e8d2a-7777-8888-9999-".into(), d.path().join("keys3")),
+            ],
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot2"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        let l = hft_core::config::load(&pm, false).unwrap();
+        let (a1, a2, a3) = (AccountId(1), AccountId(2), AccountId(3));
+        assert_eq!(l.rd.accounts_of(StrategyId(1)), &[a1, a2, a3], "CORE-446.1");
+        for (a, label) in [(a2, "pm-live-2"), (a3, "pm-live-3")] {
+            let m = l.rd.account(a);
+            assert_eq!(&*m.label, label, "CORE-446.1");
+            assert!(m.is_prod && m.bound_instance == StrategyId(1), "CORE-446.1");
+        }
+        let keys = &l.cfg.venues["pm"].accounts;
+        assert_eq!(
+            keys.iter().map(|k| k.account).collect::<Vec<_>>(),
+            [1, 2, 3],
+            "CORE-446.1"
+        );
+        assert!(
+            keys[1].api_key_path.starts_with(d.path().join("keys2")),
+            "CORE-446.1"
+        );
+        assert!(
+            keys[2].rest_secret_path.starts_with(d.path().join("keys3")),
+            "CORE-446.1"
+        );
+        let v = VenueId::POLYMARKET_CLOB;
+        assert_eq!(
+            l.setup.keys_required,
+            [(a1, v, 3), (a2, v, 3), (a3, v, 3)],
+            "CORE-446.1"
+        );
     }
 }
 
@@ -1110,6 +1231,7 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
             presign: true,
+            extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1187,6 +1309,7 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
             presign: true,
+            extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1229,6 +1352,7 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
         presign: true,
+        extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -1349,6 +1473,7 @@ fn core_435_live_polymarket_daily_loss_option() {
             daily_loss_abs: abs,
             daily_loss_max_resumes: resumes,
             presign: true,
+            extra_accounts: Vec::new(),
         };
         let path = support::write_polymarket_maker_live(
             d.path(),
@@ -1514,6 +1639,7 @@ fn core_439_polymarket_maker_param_values() {
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
         presign: true,
+        extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live_with(
         d.path(),
@@ -1616,6 +1742,7 @@ fn core_445_venue_presign() {
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
             presign: false,
+            extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),

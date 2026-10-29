@@ -889,3 +889,80 @@ fn ven_409_rest_send_report_carries_the_write_tsc() {
         .unwrap();
     assert_eq!(rec.tsc, 4_777, "VEN-409.2");
 }
+
+/// Completes every build until `n` were handed over; returns `(conn, role, account)` of each.
+fn complete_builds<const V: u32>(
+    h: &mut Gh<Stub<2048, V>>,
+    now: u64,
+    n: usize,
+) -> Vec<(ConnId, hft_net::ConnRole, hft_types::AccountId)> {
+    let mut seen = Vec::new();
+    for _ in 0..100 {
+        h.poll(now);
+        let bs: Vec<_> = h.builds.iter().map(|b| (b.conn, b.role, b.account)).collect();
+        for b in bs {
+            h.complete(b.0);
+            seen.push(b);
+        }
+        if seen.len() >= n {
+            h.poll(now);
+            return seen;
+        }
+    }
+    panic!("gw did not build {n} connections: {seen:?}");
+}
+
+#[test]
+fn ven_413_private_builds_and_rest_pools_per_account() {
+    use hft_net::ConnRole;
+    const V: u32 = V_REST_ORDERS | stub::V_USER_STREAM;
+    let mut h = gw_with::<Stub<2048, V>, 2048>(g0(), &[A1, A2], GhOpts::default()).unwrap();
+    // .1 every private build names its account: two order connections and one user stream each.
+    let private = complete_builds(&mut h, 1_000, 6);
+    for a in [A1, A2] {
+        let roles: Vec<_> = private.iter().filter(|b| b.2 == a).map(|b| b.1).collect();
+        assert_eq!(roles.len(), 3, "VEN-413.1 {a:?} {private:?}");
+        assert_eq!(
+            roles.iter().filter(|r| **r == ConnRole::Order).count(),
+            2,
+            "VEN-413.1"
+        );
+        assert_eq!(
+            roles.iter().filter(|r| **r == ConnRole::UserStream).count(),
+            1,
+            "VEN-413.1"
+        );
+    }
+    h.cmd(hft_event::GwCmd::set_epoch(5, false, 0));
+    h.poll(2_000);
+    h.reps();
+    // .2 one REST pool per account: each builds its own lanes, tagged with its account.
+    for a in [A1, A2] {
+        let pool = RestPool::with_lanes(b"a.test", &net::net_cfg(), mempeer::clock(), 2, 0).unwrap();
+        h.rt.set_rest_pools(a, vec![(EndpointId(0), pool)]).unwrap();
+    }
+    let rest = complete_builds(&mut h, 3_000, 4);
+    assert!(rest.iter().all(|b| b.1 == ConnRole::Rest), "VEN-413.2 {rest:?}");
+    let conns_of = |a| -> Vec<ConnId> { rest.iter().filter(|b| b.2 == a).map(|b| b.0).collect() };
+    let (c1, c2) = (conns_of(A1), conns_of(A2));
+    assert_eq!((c1.len(), c2.len()), (2, 2), "VEN-413.2 {rest:?}");
+    // .3 a REST place of each account is written on that account's pool.
+    let p2 = h.place(A2, 7, 1, S2, false);
+    let p1 = h.place(A1, 7, 1, S1, false);
+    h.cmd(p2);
+    h.cmd(p1);
+    h.poll(4_000);
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), 2, "VEN-413.3 {r:?}");
+    for x in &r {
+        assert_eq!(x.status, SendStatus::Written, "VEN-413.3 {x:?}");
+        let own = if x.account == A1 { &c1 } else { &c2 };
+        assert!(own.contains(&x.conn), "VEN-413.3 {x:?} not on {own:?}");
+    }
+    // .4 a second pool for the same account is refused.
+    let pool = RestPool::with_lanes(b"a.test", &net::net_cfg(), mempeer::clock(), 2, 0).unwrap();
+    assert!(
+        h.rt.set_rest_pools(A2, vec![(EndpointId(0), pool)]).is_err(),
+        "VEN-413.4"
+    );
+}

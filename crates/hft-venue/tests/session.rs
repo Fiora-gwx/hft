@@ -53,6 +53,7 @@ fn req(conn: u8, role: ConnRole) -> BuildReq {
         src_ip_idx: 0,
         rx_queue: 0,
         deadline_ns: i64::MAX,
+        account: hft_types::AccountId(0),
     }
 }
 

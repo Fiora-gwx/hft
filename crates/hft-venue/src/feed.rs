@@ -515,7 +515,7 @@ impl<P: VenueProtocol> St<P> {
             sw_rx_ns: ts.sw_rx_ns,
             prev_override: 0,
             conn: m.id,
-            account: AccountId(0),
+            account: hft_types::AccountId(0),
             _pad: [0; 2],
             ts_flags: ts.flags,
             rx_empty_gap_ns: ts.rx_empty_gap_ns,
@@ -1958,6 +1958,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             src_ip_idx: ep.src_ip_idx,
             rx_queue: 0,
             deadline_ns: i64::MAX,
+            account: hft_types::AccountId(0),
         };
         if self.build.try_push(req).is_err() {
             self.free_id(id);

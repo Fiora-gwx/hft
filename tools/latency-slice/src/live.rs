@@ -341,6 +341,7 @@ impl Ballast {
                         src_ip_idx: 0,
                         rx_queue: 0,
                         deadline_ns: utc_ns() + 10_000_000_000,
+                        account: hft_types::AccountId(0),
                     };
                     if self.build.try_push(req).is_ok() {
                         c.st = BState::Building;

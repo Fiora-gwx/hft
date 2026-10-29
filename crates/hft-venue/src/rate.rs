@@ -4,6 +4,8 @@ use hft_venue_proto::RateObs;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RateCounters {
     windows: Box<[Window]>,
+    /// The windows are the `Cancels` bucket's (`cancels`), not `Orders`.
+    cancel: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Window {
@@ -38,6 +40,7 @@ impl RateCounters {
                     used: 0,
                 })
                 .collect(),
+            cancel: false,
         }
     }
     pub fn weight_available(&mut self, weight: u32, urgent: bool, now: u64) -> bool {
@@ -69,17 +72,26 @@ impl RateCounters {
                     used: 0,
                 })
                 .collect(),
+            cancel: false,
         }
     }
     /// Allocates only during startup; subsequent operations visit the fixed window table.
     pub fn new(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
+        Self::order_class(limits, LimitBucket::Orders, ms)
+    }
+    /// The account/UID `Cancels` windows: a venue that declares them budgets cancels apart from
+    /// places; empty (`is_empty`) = cancels count against `Orders`.
+    pub fn cancels(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
+        Self::order_class(limits, LimitBucket::Cancels, ms)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.windows.is_empty()
+    }
+    fn order_class(limits: &[RateLimit], bucket: LimitBucket, ms: impl Fn(u64) -> u64) -> Self {
         Self {
             windows: limits
                 .iter()
-                .filter(|l| {
-                    matches!(l.scope, LimitScope::Account | LimitScope::Uid)
-                        && l.bucket == LimitBucket::Orders
-                })
+                .filter(|l| matches!(l.scope, LimitScope::Account | LimitScope::Uid) && l.bucket == bucket)
                 .map(|l| Window {
                     limit: l.limit,
                     ms: l.window_ms,
@@ -89,6 +101,7 @@ impl RateCounters {
                     used: 0,
                 })
                 .collect(),
+            cancel: bucket == LimitBucket::Cancels,
         }
     }
     pub fn take(&mut self, now: u64) -> bool {
@@ -115,7 +128,12 @@ impl RateCounters {
     }
     /// A delayed observation may tighten, but never release quota already charged locally.
     pub fn observe_window(&mut self, obs: RateObs, now: u64) {
-        if obs.bucket != LimitBucket::Orders {
+        let own = if self.cancel {
+            LimitBucket::Cancels
+        } else {
+            LimitBucket::Orders
+        };
+        if obs.bucket != own {
             return;
         }
         let exact = self.windows.iter().any(|w| w.ms == obs.window_ms);

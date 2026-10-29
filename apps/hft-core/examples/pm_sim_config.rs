@@ -10,6 +10,9 @@
 //! `daily_loss_max_resumes` (`Resume{DailyLoss}` per UTC day).
 //! `--no-presign` (live only): no `venues.pm.presign` table (the live default pre-signs, see
 //! `PM_LIVE_PRESIGN`).
+//! `--live-account UID KEYS_DIR` (live only, repeatable, at most 11): a further Live account
+//! (`pm-live-2`, `pm-live-3`, …, accounts 2, 3, …) with venue UID `UID` and credential files in
+//! `KEYS_DIR`, bound to the same binary-maker instance with `pm-live`'s risk limits.
 //! `--param NAME=RAW` (repeatable; `--maker` or `--live`): sets the binary-maker parameter `NAME` to
 //! the raw schema value `RAW` after the defaults (and the live parameters); an unknown name or a
 //! value outside the schema's range is refused.
@@ -60,7 +63,7 @@ fn take(all: &mut Vec<String>, flag: &str, usage: &str) -> Option<String> {
 }
 
 fn main() {
-    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign]] [--param NAME=RAW ...] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
+    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...]] [--param NAME=RAW ...] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
     let mut all: Vec<String> = std::env::args().skip(1).collect();
     let mut params = Vec::new();
     while let Some(p) = take(&mut all, "--param", usage) {
@@ -72,6 +75,17 @@ fn main() {
     if let Err(e) = support::check_maker_params(&params) {
         panic!("{e}");
     }
+    let mut extra_accounts = Vec::new();
+    while let Some(i) = all.iter().position(|a| a == "--live-account") {
+        assert!(i + 2 < all.len(), "{usage}");
+        let v: Vec<String> = all.drain(i..i + 3).collect();
+        extra_accounts.push((v[1].clone(), std::path::PathBuf::from(&v[2])));
+    }
+    assert!(
+        extra_accounts.len() < usize::from(hft_types::KillBits::MAX_ACCOUNTS_PER_GW),
+        "--live-account: at most {} accounts per venue",
+        hft_types::KillBits::MAX_ACCOUNTS_PER_GW
+    );
     let daily_loss = take(&mut all, "--daily-loss", usage).map(|v| {
         usdc(&v)
             .filter(|p| *p > 0)
@@ -109,9 +123,14 @@ fn main() {
             daily_loss_abs: daily_loss,
             daily_loss_max_resumes: resumes,
             presign: !no_presign,
+            extra_accounts: std::mem::take(&mut extra_accounts),
         }
     });
     assert!(!no_presign || live.is_some(), "--no-presign needs --live");
+    assert!(
+        extra_accounts.is_empty() || live.is_some(),
+        "--live-account needs --live"
+    );
     assert!(carry.is_none() || live.is_some(), "--day-loss-carry needs --live");
     assert!(
         daily_loss.is_none() || live.is_some(),

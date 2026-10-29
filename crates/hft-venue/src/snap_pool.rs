@@ -213,6 +213,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                         src_ip_idx: c.src_ip_idx,
                         rx_queue: 0,
                         deadline_ns: ns.saturating_add(i64::from(self.cfg.timeout_ms) * 1_000_000),
+                        account: hft_types::AccountId(0),
                     };
                     match c.connector.submit(req) {
                         Ok(job) => c.building = Some((job, id)),
@@ -276,6 +277,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                         .clock
                         .utc_ns(Tsc(now))
                         .saturating_add(i64::from(self.cfg.timeout_ms) * 1_000_000),
+                    account: hft_types::AccountId(0),
                 };
                 if c.build.try_push(req).is_ok() {
                     work = true;

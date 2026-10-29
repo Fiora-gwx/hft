@@ -209,7 +209,7 @@ spec: README.md
 | REF-009.20 | VenueCaps 0 `testnet` | 4 | `[{Structure, 13, 0}]` |
 | REF-009.21 | VenueCaps 0 `fee_asset_rule` 判别 | 5 | `[{Structure, 13, 0}]` |
 | REF-009.22 | RateLimits 0 `scope` | 6 | `[{Structure, 7, 0}]` |
-| REF-009.23 | RateLimits 0 `bucket` | 6 | `[{Structure, 7, 0}]` |
+| REF-009.23 | RateLimits 0 `bucket` | 7 | `[{Structure, 7, 0}]` |
 | REF-009.24 | Endpoints 0 `role` | 7 | `[{Structure, 8, 0}]` |
 | REF-009.25 | Endpoints 0 `env` | 4 | `[{Structure, 8, 0}]` |
 | REF-009.26 | F0 + Maint 行 `kind` | 4 | `[{Structure, 9, 0}]` |
@@ -1325,7 +1325,7 @@ spec: README.md
 | REF-075.3 | `MaintKind` | VenueMaintenance 1、MarketClosed 2、Delisting 3 |
 | REF-075.4 | `AssetClass` | Crypto 1、Stable 2、Equity 3、Commodity 4 |
 | REF-075.5 | `LimitScope` | Ip 1、Uid 2、Account 3、Conn 4、Inst 5 |
-| REF-075.6 | `LimitBucket` | Orders 1、Weight 2、WsInMsgs 3、NewConns 4、Amends 5 |
+| REF-075.6 | `LimitBucket` | Orders 1、Weight 2、WsInMsgs 3、NewConns 4、Amends 5、Cancels 6 |
 | REF-075.7 | `EndpointRole` | MdPublic 1、MdMarket 2、UserData 3、OrderWs 4、Rest 5、RestBackup 6 |
 | REF-075.8 | `EndpointEnv`、`TsUnit` | Prod 1、Testnet 2、Demo 3;Ms 1、Us 2、Ns 3 |
 | REF-075.9 | `StaleGuardKind` | None 1、RecvWindow 2、ExpireAt 3 |

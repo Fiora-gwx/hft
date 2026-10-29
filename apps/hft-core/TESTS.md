@@ -53,7 +53,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
 | 优雅退出与 kill 语义 | CORE-300–CORE-314、CORE-429 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
-| 多账户 | CORE-330、CORE-168、CORE-441、CORE-247、CORE-313、CORE-427、CORE-428 |
+| 多账户 | CORE-330、CORE-168、CORE-441、CORE-446、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
 | 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445 |
@@ -1833,8 +1833,22 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-441.2 | `shared_ok = false`,账户 2 改为 10.0.1.11;只有账户 1 | 都是 `None` |
 | CORE-441.3 | `shared_ok = true`,账户 1、2 都是 10.0.1.10 | `None` |
 | CORE-441.4 | `venues::shared_egress_ip` | `binance-spot`、`binance-usdm` 为 `false`;`polymarket-clob` 为 `true` |
-| CORE-441.5 | `public` 改为网络模式的两个 Live 账户(同一 `src_ip`),`load(…, false)` | 含 `AccountCapacity` 与 `SharedAccountIp` |
-| CORE-441.6 | Polymarket 实盘配置再加一个账户 2,`load(…, false)` | 含 `AccountCapacity`,不含 `SharedAccountIp` |
+| CORE-441.5 | `public` 改为网络模式的两个 Live 账户(同一 `src_ip`),`load(…, false)` | 含 `SharedAccountIp`,不含 `AccountCapacity` |
+| CORE-441.6 | Polymarket 实盘配置再加一个账户 2,`load(…, false)` | 不含 `AccountCapacity` 与 `SharedAccountIp` |
+
+### CORE-446 一个 venue 的多个 Live 账户:每账户出口 IP、gw 账户容量与实盘配置生成
+
+- 规则:[多账户](README.md#多账户)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:table
+- 里程碑:M4
+- 前置:`support::write` 的配置(venue `public` = `binance-spot`)改为网络模式的 N 个 Live 账户;Polymarket 实盘做市配置(Cargo feature `polymarket`)带 `PmLive.extra_accounts`(`pm_sim_config --live-account`)
+- 实现:`apps/hft-core/tests/config.rs::core_446_live_accounts_of_one_venue`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-446.1 | Polymarket 实盘配置另加两个账户(UID、`keys2`/`keys3`),`load(…, false)` | 成功;实例 1 的账户集合 = {1, 2, 3};账户 2、3 的 label 为 `pm-live-2`、`pm-live-3`,`is_prod`,绑定实例 1;`venues.pm.accounts` 的账户为 1、2、3,凭据路径在各自目录下;`keys_required` 含三个账户 |
+| CORE-446.2 | `public` 两个 Live 账户,账户 2 写 `src_ip = 127.0.1.2` | 不含 `SharedAccountIp`、`AccountCapacity`、`ConfigParse`;`accounts[].src_ip` = [无, 127.0.1.2] |
+| CORE-446.3 | `public` 12 个、13 个 Live 账户(各自 `src_ip`) | 12 个不含 `AccountCapacity`;13 个含 |
 
 ### CORE-169 snap-fetch 复用第一条 `stream = md` 的 `src_ip`,acct-fetch 复用该账户的 `gw.src_ip`
 

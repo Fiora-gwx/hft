@@ -251,7 +251,7 @@ fn ref_009_bad_discriminants() {
             edit_row::<RateLimitRow, _>(r, 7, 0, |x| x.scope = 6)
         }),
         ("REF-009.23", 7, |r| {
-            edit_row::<RateLimitRow, _>(r, 7, 0, |x| x.bucket = 6)
+            edit_row::<RateLimitRow, _>(r, 7, 0, |x| x.bucket = 7)
         }),
         ("REF-009.24", 8, |r| {
             edit_row::<EndpointRow, _>(r, 8, 0, |x| x.role = 7)

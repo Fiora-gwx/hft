@@ -36,7 +36,7 @@ spec: README.md
 | 累计量与费用来源 | PMK-027, PMK-031 |
 | 结果未知码表 | PMK-026, PMK-034 |
 | 账户配置核验 | PMK-030 |
-| VenueCaps 默认值 | PMK-011, PMK-033, PMK-034 |
+| VenueCaps 默认值 | PMK-011, PMK-033, PMK-034, PMK-037 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011, PMK-036 |
 | 测试与验收 | 不适用:非规范 |
@@ -509,6 +509,15 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 |---|---|---|
 | PMK-033.1 | `PolymarketClob::stale_guard()` | `ExpireAt{default_ms: GTD_S × 1000}`,`GTD_S = 300` |
 | PMK-033.2 | 编码 `Place{UP, Buy, 0.45, 5 份, PostOnly}` | `expiration` − 时钟秒 = `default_ms / 1000`(声明的窗口就是签出订单的寿命) |
+
+### PMK-037 限速默认值:撤单有自己的窗口
+
+- 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)
+- 级别:unit
+- 里程碑:M4
+- 前置:无
+- 期望:`PolymarketClob::rate_rules()` 依次为 (Ip, NewConns, 300 000 ms, 300)、(Conn, WsInMsgs, 1 000 ms, 10)、(Account, Orders, 1 000 ms, 20)、(Account, Cancels, 1 000 ms, 40)
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_037_cancels_have_their_own_rate_rule`
 
 ### PMK-034 先撤后到:回执未到的撤单按签出的哈希发出,应答按先后定终态
 

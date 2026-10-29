@@ -41,6 +41,7 @@ fn build<P: VenueProtocol>(
             src_ip_idx: 0,
             rx_queue: 0,
             deadline_ns: utc_ns() + 20_000_000_000,
+            account: hft_types::AccountId(0),
         };
         let j = c.submit(req).map_err(|e| format!("submit: {e:?}"))?;
         jobs.push((j, id));

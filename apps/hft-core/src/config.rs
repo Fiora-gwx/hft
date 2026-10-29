@@ -369,6 +369,10 @@ pub struct Keys {
     pub rest_secret_path: PathBuf,
     pub rest_sign_alg: Option<String>,
     pub passphrase_path: Option<PathBuf>,
+    /// This account's egress IP (README "多账户"); absent = the venue's `src_ip`. Bound to the
+    /// venue's `bind_device`.
+    #[serde(default)]
+    pub src_ip: Option<std::net::Ipv4Addr>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -673,16 +677,23 @@ pub fn load_timed(
             }
         }
         if !dry {
-            if v.accounts.len() > 1 {
+            // One gw polls every Live account of the venue: its kill word has one bit per account.
+            if v.accounts.len() > usize::from(hft_types::KillBits::MAX_ACCOUNTS_PER_GW) {
                 errors.push(Error::config(
                     "AccountCapacity",
-                    "one live account per venue in this assembly",
+                    format!(
+                        "venues.{name}: at most {} live accounts per venue",
+                        hft_types::KillBits::MAX_ACCOUNTS_PER_GW
+                    ),
                 ));
             }
-            // This assembly has one egress IP per venue: every account of it uses `src_ip`.
+            // Each account's egress IP: its own `src_ip`, else the venue's.
             if let Some(ip) = v.src_ip {
-                let rows: Vec<(u8, std::net::Ipv4Addr)> =
-                    v.accounts.iter().map(|k| (k.account, ip)).collect();
+                let rows: Vec<(u8, std::net::Ipv4Addr)> = v
+                    .accounts
+                    .iter()
+                    .map(|k| (k.account, k.src_ip.unwrap_or(ip)))
+                    .collect();
                 if let Some(e) = shared_account_ip(name, crate::venues::shared_egress_ip(&v.protocol), &rows)
                 {
                     errors.push(e);

@@ -269,6 +269,7 @@ pub struct BuildReq {
     pub src_ip_idx: u8,             // 本实例出口 IP 表 src_ips[] 的下标
     pub rx_queue: u16,              // 目标 RX 队列;只在 rss_plan 启用时使用
     pub deadline_ns: i64,           // 整个作业的截止;与各阶段超时先到者生效
+    pub account: AccountId,         // 私有连接(下单、用户流、账户 REST)所属账户,供会话取凭据;0 = 不属于账户(行情、公共 REST)
 }
 
 /// 一个池只连一个端点(BuildReq.endpoint);同一 venue 的多个 REST 端点由上层各持一个池(hft-venue §4a)。

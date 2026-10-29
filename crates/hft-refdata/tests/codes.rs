@@ -97,7 +97,7 @@ fn ref_075_code_tables() {
     );
     assert_eq!(
         LimitBucket::ALL.iter().map(|x| *x as u8).collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5],
+        vec![1, 2, 3, 4, 5, 6],
         "REF-075.6"
     );
     for (scope, bucket) in LimitScope::ALL.iter().zip(LimitBucket::ALL) {
