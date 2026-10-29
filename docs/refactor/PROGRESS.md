@@ -49,7 +49,7 @@
 |---|---|---|---|
 | `feat/venue-sim-pm`:hft-sim `VenueModel`(默认全关,默认下回报与 `state_hash` 不变):`MakerFill::QueueCap`、撤单竞速与墓碑(`cancel_us`、`tombstone`)、吃单延迟与慢尾(`taker`)、二元吃单费 `FeeModel::BinaryTaker`、GTD 到期、条件延迟池(`set_condition`);hft-replay 的条件计算(上一完整分钟 md lag p90 三分位、1 s 参考价变动、窗口相位)与 `--own` 叠加层 | 待验收 | 648ea1ce、5452840a(并行代理,合并 76a8bd8f) | SIM-232–239、RSR-004、RPL-305–306;**待**(研究机):§5.2 对账(88 窗每窗 \|Δ\| ≤ 0.3、撤单后成交比例 ≥ 6 %)。顺带修复 M1 的驱动从未调用 `on_utc`(区间重播种未生效) |
 | `feat/replay-calib`:`replayer calib`(Ack/CancelAck 延迟池 + 条件标签 + 三分位阈值)、`--calib`(含研究侧 `latc.json` 格式) | 待验收 | 67ed01fe | RPL-307;吃单延迟、成交回报延迟与费率不由它估计 |
-| `feat/paper-venue-sim`:sim-gw 薄壳、行情旁路环、`[sim]` 引用校准表 | doing | 965f20ba(条件跟踪与校准表解析移入 hft-sim,`calib` feature) | SIM-240;**未做**:hft-core `[sim] calib` 与 sim-gw 调用 `set_venue_model`/`CondTracker`(等 M4 hft-core 装配合并,避免同文件并行改动) |
+| `feat/paper-venue-sim`:sim-gw 用同一个 hft-sim `VenueModel` 与 `CondTracker`;`[sim] calib` 引用校准表(与 `research --calib` 同一份解析) | 待验收 | 965f20ba、94c7ef08 | SIM-240、CORE-447;"行情旁路环"不做:sim-gw 已从 seq journal 尾读行情,顺序与引擎一致,另开环只省一次读;**待**:`sim` 实例带校准表 2 账户 × 2 变体 48 h 长跑(服务器)
 | `feat/pm-fak-gw` | blocked | | 仓内没有可核实的 Polymarket marketable/FAK 线上格式(金额/份额取整、`orderType`、过期);需要 py-clob-client-v2 `create_market_order` 的 BUY/SELL 金样(按 tick 的金额与份额取整及请求体)。实盘探针需负责人批准 |
 
 ### M3 特征层
@@ -108,7 +108,7 @@
 | RPL-300–RPL-303 | M1 | 研究回放确定性、不模拟时与日志一致、变体、CLI |
 | FEA-001–FEA-010 | M3 | 特征节点 |
 | SDK-215、RSR-005、RPL-308 | M3 | 策略特征导出钩子、可空特征列、`replayer features` |
-| SIM-240 | M2 | 条件跟踪的三个分量 |
+| SIM-240、CORE-447 | M2 | 条件跟踪的三个分量、`[sim] calib` |
 | CORE-446、VEN-412、VEN-413、PMK-037(新增);CORE-441.5/.6、REF-075.6、REF-009.23(改写) | M4 | 多 Live 账户 gw 装配、撤单限速桶 |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
 
@@ -120,6 +120,7 @@
 | 2026-10-29 | `RestPool::pending_sent` 与既有 `pending_conn` 并存,`submit` 签名不变 | 不改 hft-net 的公开提交接口与其测试;按标签取写出时刻 |
 | 2026-10-30 | 研究回放中被模拟账户每个 (账户, venue, 资产) 保留第一条日志 `BalanceReport` | 账本现金从第一条 BalanceReport 初始化(`UNINIT`);全部屏蔽时 DST 里的第二腿 `LINK_FUNDS` 拒单 |
 | 2026-10-30 | 研究回放丢弃日志里 owner ≠ Sys 的 `Timer`,由引擎堆触发 | 回放的订单流与实盘不同,堆定时器(OMS、风控、执行层、策略)必须跟随回放状态;Sys 定时器(滚段、日切、关键帧)是环境 |
+| 2026-10-30 | sim-gw 不另开行情旁路环,继续尾读 seq journal | 尾读即引擎看到的顺序,条件跟踪与撮合都按它;旁路环只省一次读,且要另处理与决策屏障的先后 |
 | 2026-10-30 | 变体字段只作用于 schema 含它的被模拟实例;所有实例都没有才报错 | 一个 journal 可有多种策略;拼写错误仍会被发现 |
 | 2026-10-30 | `hft-replay` 标 `scope: optional` | 上线不依赖研究回放(Agent Note:门槛不变) |
 | 2026-10-30 | M3 由并行代理在 `E:\hft-m3` worktree 完成后合入 | 设计 §8.6:M1 ∥ M3,crate 不相交 |
