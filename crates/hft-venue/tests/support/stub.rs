@@ -40,6 +40,8 @@ pub const V_USER_STREAM: u32 = 8;
 pub const V_MD_SPLIT: u32 = 16;
 /// REST Places without client ids (`REST_PLACE_BINDS_ID`) and run-time order bindings.
 pub const V_BINDS_ID: u32 = 32;
+/// Every order op over REST (Polymarket's shape).
+pub const V_REST_ORDERS: u32 = 64;
 
 pub struct Stub<const FCAP: usize, const V: u32>;
 pub type StubProto = Stub<2048, 0>;
@@ -983,7 +985,10 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn order_channel(op: GwOp) -> OrderChannel {
         let c = cfg();
-        if (op == GwOp::Query && c.rest_query) || (op == GwOp::CancelAll && V & V_REST_CANCEL_ALL != 0) {
+        if (op == GwOp::Query && c.rest_query)
+            || (op == GwOp::CancelAll && V & V_REST_CANCEL_ALL != 0)
+            || V & V_REST_ORDERS != 0
+        {
             OrderChannel::Rest
         } else {
             OrderChannel::Ws

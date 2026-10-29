@@ -51,6 +51,8 @@ pub trait VenueProtocol: Sized + 'static {
     const BBO_SNAPSHOT_BATCH: u16 = 1;   // 一次 BBO 补帧请求可覆盖的 inst 上限(契约 24);u16::MAX = 只受 RestReqBuf 长度限制
     const USER_STREAM: bool = false;     // true:私有频道在独立的用户流连接上(Binance USDT-M listenKey 流),而不是下单连接(hft-venue §4b)
     const REST_PLACE_BINDS_ID: bool = false; // true:订单不带 client id,REST Place 的 Ack 把它给出的交易所 id 绑到该请求(契约 29;Polymarket)
+    const GW_REST_CONNS: u8 = 2;         // gw 的 REST 池(每 (账户, 端点) 一个)的默认连接数:hft-venue gw.rest_conns 的缺省值,1..=GW_REST_CONNS_MAX(hft-venue)
+    const GW_REST_CANCEL_RESERVE: u8 = 0; // 该池留给撤单的空闲连接数:hft-venue gw.rest_cancel_reserve 的缺省值,< GW_REST_CONNS(Polymarket 8 / 1)
     type AcctCtx: Default;               // 账户查询跨序列的 venue 私有状态(如上一次的 ADL 档);acct-fetch 每账户一个(契约 27)
     type AcctScratch: Default;           // 一次账户查询序列的中间结果;定长,不含堆(契约 16、17)
 
@@ -539,7 +541,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 <details><summary>实现要点</summary>
 
-- 本 crate 只有类型与 trait,默认项只有 `CANCEL_ALL_SWEEP`、`BBO_SNAPSHOT_BATCH`、`encode_batch`、`needs_per_order_signing`、`bbo_probe`、`bbo_snapshot_request`/`decode_bbo_snapshot`、`order_channel`、`encode_rest`、`session_keepalive_request`、`decode_rest`;`TradeIdRing` 与 `dedup_key` 是唯一带实现的辅助项(纯数据结构与纯函数,供各 venue 复用)。
+- 本 crate 只有类型与 trait,默认项只有 `CANCEL_ALL_SWEEP`、`BBO_SNAPSHOT_BATCH`、`GW_REST_CONNS`、`GW_REST_CANCEL_RESERVE`、`encode_batch`、`needs_per_order_signing`、`bbo_probe`、`bbo_snapshot_request`/`decode_bbo_snapshot`、`order_channel`、`encode_rest`、`session_keepalive_request`、`decode_rest`;`TradeIdRing` 与 `dedup_key` 是唯一带实现的辅助项(纯数据结构与纯函数,供各 venue 复用)。
 - 所有热路径方法显式接收 `rd: &RefData`(refdata 在进程生命周期内不变,hft-core 以 `&'static RefData` 传入);`FeedCtx`/`GwCtx`/`AcctCtx` 不缓存 refdata 的任何指针,若将来做 refdata 热替换,接口不变。
 - `SeqRule::Chain` 统一链续判定(增量深度,可选扩展):交易所特有的判定(Binance 合约 `pu`、现货 `U/u` 重叠、OKX `prevSeqId`、Bitget `pseq`)全部在 `peek` 里换算成 `prev_id/last_id`,运行时的断裂检测是一段通用代码;只有快照衔接仍需原始序号(`align_first(snap_id, &RawSeq)`)。core 的深度是分档快照(契约 26),不经这条路径。
 - REST 请求与解码不在热线程:BBO 补帧与(启用增量深度时的)快照由 snap-fetch 用自己的 `FeedCtx` 调用(契约 25),feed 任务只调用 `align_first` 并把 snap-fetch 送回的分片推进环([hft-venue §3b](../hft-venue/README.md#3b-快照获取snap-fetch));账户查询由 acct-fetch 用自己的 `AcctCtx` 调用(契约 27,[hft-venue §4a](../hft-venue/README.md#4a-账户查询保证金轮询与配置核验))。

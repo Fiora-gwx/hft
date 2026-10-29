@@ -148,6 +148,7 @@ pub(crate) fn submit<const N: usize>(
     pool: &mut RestPool<N>,
     req: &RestReqBuf,
     tag: u64,
+    urgent: bool,
     now: u64,
 ) -> Result<ConnId, RestErr> {
     let mut headers = [(&[][..], &[][..]); 32];
@@ -177,7 +178,11 @@ pub(crate) fn submit<const N: usize>(
         body: req.body.as_slice(),
         tag,
     };
-    pool.submit(&r, now)?;
+    if urgent {
+        pool.submit_urgent(&r, now)?;
+    } else {
+        pool.submit(&r, now)?;
+    }
     pool.pending_conn(tag).ok_or(RestErr::NoConn)
 }
 impl<const N: usize> AcctTransport for AcctRestPools<N> {
@@ -190,7 +195,7 @@ impl<const N: usize> AcctTransport for AcctRestPools<N> {
         }
         let ix = usize::from(req.endpoint);
         let pool = self.pools.get_mut(ix).ok_or(RestErr::Proto)?;
-        let conn = submit(pool, req, tag, now)?;
+        let conn = submit(pool, req, tag, false, now)?;
         self.active = Some(ix);
         self.tag = tag;
         Ok(conn)

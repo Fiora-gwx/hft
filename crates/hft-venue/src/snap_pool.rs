@@ -530,7 +530,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                 if !valid || self.rate.available(now) {
                     self.tag = self.tag.wrapping_add(1);
                     let sent = if valid {
-                        crate::rest::submit(&mut self.pool, &wire, self.tag, now)
+                        crate::rest::submit(&mut self.pool, &wire, self.tag, false, now)
                     } else {
                         Err(RestErr::Proto)
                     };

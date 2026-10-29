@@ -36,7 +36,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264、VEN-404 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
-| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402 |
+| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402、VEN-405 |
 | 实现说明 | 不适用:见子节 |
 | 1. 线程与环(由 hft-core 装配) | VEN-013、VEN-020–VEN-027、VEN-030–VEN-036、VEN-069–VEN-074、VEN-086、VEN-087、VEN-212、VEN-380、VEN-383 |
 | 2. `FeedRuntime::poll_once` 的固定顺序 | VEN-017、VEN-040–VEN-046、VEN-050–VEN-056、VEN-060–VEN-069、VEN-075、VEN-077–VEN-084、VEN-330、VEN-367、VEN-384 |
@@ -44,7 +44,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
 | 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397、VEN-399 |
-| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402 |
+| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402、VEN-405–VEN-408 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
 | 5. 心跳 | VEN-120、VEN-134、VEN-280–VEN-283 |
@@ -3834,3 +3834,58 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-410.2 | 再一圈空闲 | 这次调用的是另一个账户 |
 | VEN-410.3 | A1、A2 的 `idle_left` 各 1,连续三圈 | `did_work` 依次 true、true、false;`idle_work` + 2 |
 | VEN-410.4 | 出环一条 `Place` 后一圈 | `did_work = true`;本圈不调用 `gw_idle` |
+### VEN-405 `gw.rest_conns` 与 `gw.rest_cancel_reserve` 的取值范围
+
+- 规则:[配置项](README.md#配置项)、[运行时入口](README.md#运行时入口)
+- 级别:table
+- 里程碑:M3
+- 前置:`G0`;`StubProto`;A1
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_405_rest_pool_size_and_reserve_checked`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-405.1 | `GwCfg::default()` | `rest_conns = 2`、`rest_cancel_reserve = 0` |
+| VEN-405.2 | (`rest_conns`, `rest_cancel_reserve`) ∈ {(0, 0), (17, 0), (4, 4)} | `GwRuntime::new` 依次 `InitErr::Cfg("gw.rest_conns")`、`Cfg("gw.rest_conns")`、`Cfg("gw.rest_cancel_reserve")`;`GwCfg::rest_pool` 都是 `None` |
+| VEN-405.3 | (16, 15) | `GwRuntime::new` 成功;`GwCfg::rest_pool` 的池 `lanes() = 16` |
+
+### VEN-406 下单不占留给撤单的 REST 连接
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)(撤单优先)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`(`V_REST_ORDERS`:全部订单类 op 走 REST);`G0`;A1 的 REST 池 `with_lanes(4, 1)`(`rest_timeout_ms = 60000`),连接 114–117 已交接;A1 `Place{slot 1..=3, S1}` 于 4000 ns 各得 `Written`,分在三条连接上
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_406_places_leave_the_reserved_connection_to_cancels`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-406.1 | `Place{slot 4}` | 恰一条 `SendReport{NoConn, conn 0}`;槽镜像 4 不 live |
+| VEN-406.2 | `Cancel{target_slot 1}` | 恰一条 `SendReport{op: Cancel, target_slot 1, Written}`,`conn` 是第四条连接;`rest_cancel_queued` = 0 |
+
+### VEN-407 连接全忙时撤单排队,连接空出时按序写出
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)(撤单优先)
+- 级别:table
+- 里程碑:M3
+- 前置:同 VEN-406;另 `Cancel{target_slot 1}` 已在保留的连接上写出(连接 c1),四条连接都有在途
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_407_cancels_wait_for_a_free_connection_in_order`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-407.1 | `Cancel{target_slot 2}`、`Cancel{target_slot 3}` | 没有 `SendReport`;`encode_rest` 未调用;`rest_cancel_queued` = 2 |
+| VEN-407.2 | `Place{slot 5}` | `SendReport{NoConn}`(不越过排队的撤单) |
+| VEN-407.3 | 槽 1 的 Place 所在连接的应答于 5000 ns 到达并交出 | 恰一条 `SendReport{target_slot 2, Written}`,`conn` = 该连接,`sent_tsc` ≥ 5000 |
+| VEN-407.4 | c1 的应答于 6000 ns 交出 | 恰一条 `SendReport{target_slot 3, Written, conn: c1}`;撤单的 `encode_rest` 共 2 次(写出时各一次);`rest_cancel_dropped` = 0 |
+
+### VEN-408 撤单队列满或等待超过 `gw.inflight_timeout_ms` 时回 NoConn
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)(撤单优先)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:同 VEN-407 的前置(四条连接都有在途),但 `gw.inflight_timeout_ms = 10000`;`n` = `GW_REST_CANCEL_QUEUE`(32);第 k 条撤单于 `t_k = 1 s + k × 150 ms`(在账户下单限速之内)
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_408_queued_cancel_fails_when_the_queue_is_full_or_waits_too_long`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-408.1 | `Cancel{target_slot 2}` × (n + 1),k = 0..=n | 只有第 n + 1 条立即得 `SendReport{NoConn, conn 0}`;`rest_cancel_queued` = n、`rest_cancel_dropped` = 1 |
+| VEN-408.2 | 轮询于 `t_0 + 10 s`;再于 `t_{n−1} + 10 s + 1`;其后一条连接的应答交出 | 第一次无报告;第二次 n 条 `SendReport{NoConn, target_slot 2}`;应答交出后无报告、无撤单编码 |
+| VEN-408.3 | `Cancel{target_slot 3}` 两条(第一条用空出的连接),再 `retire_all` | 第一条 `Written`;`retire_all` 时第二条得 `SendReport{NoConn}` |

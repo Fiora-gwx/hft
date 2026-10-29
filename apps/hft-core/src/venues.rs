@@ -413,8 +413,11 @@ where
             }
         }
     }
+    let (rest_conns, rest_cancel_reserve) = v.gw.resolve((P::GW_REST_CONNS, P::GW_REST_CANCEL_RESERVE));
     let mut gwcfg = GwCfg {
         env: c.instance.order_env().venue_env(),
+        rest_conns,
+        rest_cancel_reserve,
         oms_slots: v
             .accounts
             .iter()
@@ -531,7 +534,7 @@ where
             (ConnRole::Md, 32),
             (ConnRole::Order, 4),
             (ConnRole::UserStream, 2),
-            (ConnRole::Rest, 2),
+            (ConnRole::Rest, u16::from(gwcfg.rest_conns)),
         ],
         &net,
         clock,
@@ -761,7 +764,9 @@ where
         gw.set_rest(rest_order_tx, rest_reply_rx);
         gw.set_rep_bulk(rep_bulk_tx);
         if let Some((endpoint, host)) = gateway_rest {
-            let pool = hft_net::RestPool::<2>::new(host.as_bytes(), &net, clock);
+            let pool = gwcfg
+                .rest_pool(host.as_bytes(), &net, clock)
+                .ok_or_else(|| Error::config("RestPool", name))?;
             gw.set_rest_pools(AccountId(v.accounts[0].account), vec![(endpoint, pool)])
                 .map_err(|_| Error::config("RestPool", name))?;
         }
@@ -1037,6 +1042,24 @@ pub fn presign_error(name: &str, v: &Venue) -> Option<Error> {
     None
 }
 
+/// `(GW_REST_CONNS, GW_REST_CANCEL_RESERVE)` of a built protocol (`None`: not built or unknown,
+/// reported by `registered`).
+pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
+    fn of<P: hft_venue_proto::VenueProtocol>() -> (u8, u8) {
+        (P::GW_REST_CONNS, P::GW_REST_CANCEL_RESERVE)
+    }
+    Some(match protocol {
+        "binance-usdm" => of::<venue_binance::Usdm>(),
+        "binance-spot" => of::<venue_binance::Spot>(),
+        #[cfg(feature = "bitget")]
+        "bitget-usdt-futures" => of::<venue_bitget::BitgetUsdtFutures>(),
+        #[cfg(feature = "bitget")]
+        "bitget-spot" => of::<venue_bitget::BitgetSpot>(),
+        #[cfg(feature = "polymarket")]
+        "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
+        _ => return None,
+    })
+}
 pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     let expected = match protocol {
         "binance-usdm" => VenueId::BINANCE_USDM,

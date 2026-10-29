@@ -81,6 +81,9 @@ pub fn feed_cmd_dest(c: &FeedCmd) -> FeedCmdDest;
 pub const FEEDCMD_PER_POLL: usize = 8;     // 每次 poll_once 至多取的 FeedCmd
 pub const FRAME_EVENTS_MAX: usize = 64;    // 非 Bbo 路由单帧可产出的事件上限;超过 → 整帧按解码错误处理(§1 环满)
 pub const SNAP_BBO_BATCH_MAX: usize = 32;  // snap-fetch 一次合并的 BBO 补帧请求上限(§3b;另受 P::BBO_SNAPSHOT_BATCH 限制)
+pub const GW_REST_CONNS_MAX: usize = 16;   // gw.rest_conns 的上限 = gw REST 池的通道容量
+pub const GW_REST_CANCEL_QUEUE: usize = 32; // 每账户等待空闲 REST 连接的撤单上限(§4 撤单优先;启动期分配)
+pub type GwRestPool = hft_net::RestPool<GW_REST_CONNS_MAX>;   // 用其中 gw.rest_conns 条通道;GwCfg::rest_pool(host, net, clock) 按 gw.rest_conns、gw.rest_cancel_reserve 建池(越界 → None)
 
 pub struct FeedRuntime<P: VenueProtocol> { /* 见实现说明 §2 */ }
 impl<P: VenueProtocol> FeedRuntime<P> {
@@ -240,6 +243,8 @@ pub struct AcctDeps {
 | `gw.cmds_per_account_per_loop` | u16 | 8 | 每账户每轮最多发送的订单类 `GwCmd`(超出的下一轮先发) |
 | `gw.aux_every` | u16 | 8 | standby 下单连接与 gw 的 REST 池中**有在途请求**的连接每 N 圈 poll 一次;primary 与独立 UserStream 连接每圈都 poll(§4) |
 | `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建;hft-net `rest_max_idle_ms` 非 0 时同一次检查另退役一条空闲过久的连接,补建经 build 环交给 conn-builder,下单不在新建中的连接上发出)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
+| `gw.rest_conns` | u8 | 2;hft-core 缺省取 `P::GW_REST_CONNS`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派);Polymarket 8,其余 2) | gw 每个 REST 池(每 (账户, 端点) 一个)的连接数,1..=`GW_REST_CONNS_MAX`;越界 → `InitErr::Cfg("gw.rest_conns")`。hft-core 按它定该 venue `ConnArena` 的 `Rest` 槽数并以 `GwCfg::rest_pool` 建池(hft-net `RestPool::with_lanes`) |
+| `gw.rest_cancel_reserve` | u8 | 0;hft-core 缺省取 `P::GW_REST_CANCEL_RESERVE`(Polymarket 1,其余 0) | 该池中只给撤单用的空闲连接数(hft-net 保留通道,§4 撤单优先):撤单以外的 REST 请求不占最后这几条空闲连接;≥ `gw.rest_conns` → `InitErr::Cfg("gw.rest_cancel_reserve")` |
 | `gw.rotate_wait_max_ms` | u32 | 60000 | 计划切换等待"无在途"的上限;超时放弃本次,再过同样时长后重新开始等待 |
 | `gw.warm_interval_ns` | u64 | 0(关) | 空闲时"填帧 + 掩码 + scratch 加密"预热;可选,默认关,启用条件:直方图证明冷路径代价显著 |
 | `gw.id_table_cap` | u32 | 16384 | 每账户 exch id 表容量(2 的幂,≥ 2 × (OMS 槽数 + `gw.id_tomb_cap`),负载 ≤ 0.5;不满足 → `InitErr::IdTableCap`) |
@@ -248,7 +253,7 @@ pub struct AcctDeps {
 | `gw.unmatched_hold_ms` | u32 | 5000 | 无法归属到槽的成交类 `OrderEvent` 在 gw 暂存等待 Ack 补表的时长;超时才转 `ExternalFill{cause: Unknown}`(§4 第 2 步)。Ack 一到即释放,正常情况下暂存只有毫秒级 |
 | `gw.unmatched_hold_cap` | u16 | 256 | 上述暂存缓冲条数(每账户,预分配;按 5 s 窗口取值);满 → 最老一条立即按超时处理并计数 |
 | `gw.dedup_reseed_ms` | u32 | 900000 | 启动时从 raw-gw journal 尾部重建去重环所读的时间窗(§6a) |
-| `gw.inflight_timeout_ms` | u32 | 3000 | 请求超过此时长无响应 → 每个请求推一次 `ConnState::Degraded{reason=INFLIGHT_TIMEOUT}` 并移出 `inflight`(之后迟到的响应照常解码,不再减计数) |
+| `gw.inflight_timeout_ms` | u32 | 3000 | 请求超过此时长无响应 → 每个请求推一次 `ConnState::Degraded{reason=INFLIGHT_TIMEOUT}` 并移出 `inflight`(之后迟到的响应照常解码,不再减计数);也是撤单在 REST 撤单队列里的最长等待(§4 撤单优先) |
 | `gw.report_decode_down_after` | u8 | 3 | 同一连接 60 s 内连续 N 次回报解码失败 → 按 Down 处理(retire + `ConnState{Down}`);该连接任一帧解码成功即清零,第 N 次与这一轮的第一次相隔 > 60 s 时以这一次为新一轮的第一次 |
 | `gw.stale_guard_ms` | u32 | 1500 | 覆盖 `P::stale_guard()` 的默认值,也是请求过期字段的窗口([05 §7](../../design/05-CEX执行层.md) "收紧到 1–2 s") |
 | `gw.margin_poll_min_ms` | u32 | 1000 | `margin_data = Poll{interval_ms}` 的下限;refdata 给出更小的值 → `GwRuntime::new` 返回 `InitErr::MarginPoll` |
@@ -259,7 +264,7 @@ pub struct AcctDeps {
 | `gw.acct_body_max` | u32 | 262144 | 账户查询响应体上限(字节);超过 → 该序列 `Failed{TooLarge}`,原始响应只记元数据 |
 | `gw.unknown_evt_note_every` | u32 | 1000 | 未知用户流事件的第 1 条与第 k × N 条(k ≥ 1)各写一条 Meta Note(源 `Venue`) |
 
-**取值为 0 的键**:`feed.bbo_conns`、`feed.depth_conns`、`feed.bbo_frames_per_poll`、`feed.frames_per_poll`、`feed.bbo_ping_ms`、`feed.bbo_dead_ms`、`snap.parallel`、`gw.cmds_per_loop`、`gw.cmds_per_account_per_loop`、`gw.aux_every`、`gw.unmatched_hold_cap`、`gw.acct_query_degraded_after`、`gw.report_decode_down_after` 为 0 时,用到它的运行时 `new()` 返回 `InitErr::Cfg(<键名>)`。
+**取值为 0 的键**:`gw.rest_conns`、`feed.bbo_conns`、`feed.depth_conns`、`feed.bbo_frames_per_poll`、`feed.frames_per_poll`、`feed.bbo_ping_ms`、`feed.bbo_dead_ms`、`snap.parallel`、`gw.cmds_per_loop`、`gw.cmds_per_account_per_loop`、`gw.aux_every`、`gw.unmatched_hold_cap`、`gw.acct_query_degraded_after`、`gw.report_decode_down_after` 为 0 时,用到它的运行时 `new()` 返回 `InitErr::Cfg(<键名>)`。
 
 环容量(`snapreq-*`、`snap-*`、`acctreq-*`、`acct-*` 与各 bulk 环)不在本表:唯一权威值是 hft-core 的环容量表(ECF1 段 4,[hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段));本 crate 只规定字节环的单条记录 ≤ 容量 / 4。
 
@@ -465,7 +470,8 @@ struct GwAccount<P: VenueProtocol> {
     pool: ConnPool<3>,            // PrimaryStandby:primary + 已登录 standby + 在建
     user: Option<ConnId>,         // 独立的用户数据流连接(交易所要求时,如 Binance USDT-M listenKey 流)
     priv_owner: Option<ConnId>,   // 当前持有私有频道订阅的连接(§4b);None = 私有频道缺口
-    rest: [RestPool<2>; MAX_REST_ENDPOINTS],   // 本 crate 常量 = 4;gw 用到的 REST 端点各一个池:订单查询、REST 型死手、listenKey 续期、下单兜底(账户查询在 acct-fetch,§4a)
+    rest: [GwRestPool; MAX_REST_ENDPOINTS],   // 本 crate 常量 = 4;gw 用到的 REST 端点各一个池(gw.rest_conns 条连接,gw.rest_cancel_reserve 条留给撤单):订单查询、REST 型死手、listenKey 续期、下单兜底(账户查询在 acct-fetch,§4a)
+    cancels: VecDeque<QueuedCancel>,   // 等待空闲 REST 连接的撤单(FIFO,≤ GW_REST_CANCEL_QUEUE,启动期分配;§4 撤单优先)
     tpl: P::Templates, ctx: P::GwCtx,   // 模板启动期构建一次;ctx 含去重环(契约 22)与推送型保证金缓存
     ids: IdTable,                 // exch id → (epoch, slot, gen),私有;含终态保留条目(§6)
     hold: HoldBuf,                // 解析不到槽的成交类 OrderEvent 暂存(≤ gw.unmatched_hold_cap,预分配)
@@ -493,6 +499,7 @@ struct GwAccount<P: VenueProtocol> {
    4. 从槽镜像取 `TargetRef`(Cancel/Amend/Query);`order_channel(op) = Rest` 的 op 走 `P::encode_rest` 并提交 REST 池(其后的第 5 步换成 `RestPool::submit`,`SendReport` 规则相同);其余 `P::encode(rd, tpl, &c, &tgt, &wall_clock, frame.body_mut())`:写入价/量/client id/请求 id/时间戳/过期字段;reduce-only 字段只在 `oflags` 带 `REDUCE_ONLY` 时填;`needs_per_order_signing()` 的 venue 在此签名(Hyperliquid)。`EncodeErr` → `SendReport{status: EncodeError}`;其中 **`op = Query` 无法编码**(槽镜像里没有该槽、venue 不支持按 client id 查询且没有 exch id)→ `SendReport{status: QueryUnsupported}`([hft-event](../hft-event/README.md#执行0x02xx) `SendStatus` = 8):OMS 保持该槽 `Unknown` 并转交 reconciler。
    5. `frame.seal(Text, len, mask)` → `conn.send_frame(&frame)`;推 `TxTag`(若启用);`inflight[conn] += 1`;New 写槽镜像。
    6. 推 `SendReport{decision_seq, sent_tsc, slot, gen, op, target_slot, target_gen, venue, account, conn, status: Written, os_errno: 0}`(`target_gen` 取自槽镜像;所有状态都带这三项);然后追加 `RawTx`(记录头 `tsc = sent_tsc`;含签名的帧 `rflags = REDACTED`,只记元数据)。
+   **撤单优先**(`order_channel = Rest` 的订单类 op):撤单(`Cancel`、`inst ≠ 0` 的 `CancelAll`)以 hft-net `RestPool::submit_urgent` 提交,可以用 `gw.rest_cancel_reserve` 条保留的连接;其余 REST 请求(下单、改单、查单、死手、会话维护、sweep)用 `RestPool::submit`,不占它们,找不到连接仍回 `NoConn`。撤单找不到空闲的 Open 连接(全部在途,或池里没有 Open 连接)时不回 `NoConn`、不编码,进入该账户的撤单队列(FIFO,容量 `GW_REST_CANCEL_QUEUE`);队列不空时新到的撤单排在队尾。每次 `poll_once`、每个 REST 应答交出之后(先于随后的 `drain_out()`)以及每个订单类 REST 请求之前,gw 按序处理队首:等待已超过 `gw.inflight_timeout_ms` → `SendReport{status: NoConn}`(与无连接时同一报告),取下一条;有空闲的 Open 连接 → 以此刻的时钟编码(签名时间戳取发出时刻)并提交,结果按第 4–6 步报告(`Written` 的 `conn` 与 `sent_tsc` 是实际写出的连接与时刻;编码失败、限速同立即发送);没有 → 停。队列满 → 该撤单立即 `SendReport{status: NoConn}`。在队列里的撤单还没有 `SendReport`;`retire_all`(停机)给每条回 `NoConn`。计数 `rest_cancel_queued`(入队)、`rest_cancel_dropped`(队列满、超时、停机)。WS 通道的撤单不经此队列。
    `SendErr::NotOpen/TxBacklog` 保证未加密,换 standby 重试一次,仍失败 → `NoConn`;`SendErr::Io` → `SendReport{status: WriteError, os_errno}`:**密文已产生、结果未知**,sequencer 把该槽推入 `Unknown`([defensive-patterns](../../docs/defensive-patterns.md));该 Place 同样写槽镜像(之后的 Query 需要它)。
 2. **回报**:`P::classify_report` → `P::decode_report(rd, ctx, c, payload, rx, sink)`。
    - **`OrderEvent` 的槽解析**:client id 判定为本系统的单(`P::parse_cid` 成功:规范文本合法、ver/校验位正确、venue/account 与连接一致,规则见 [hft-types `ClientOrderId`](../hft-types/README.md#clientorderid-编解码))→ 直接得 `(epoch, slot, gen)`;否则查 `IdTable`(条目存 epoch;终态保留条目同样命中,§6);都不行 → `slot = SlotId::UNRESOLVED`。`OrderEvent.epoch` 一律填解析出的 epoch,OMS 按 `(epoch, slot, gen)` 匹配(迟到成交落到旧代时由 OMS 的墓碑规则处理,见 [hft-oms](../hft-oms/README.md))。

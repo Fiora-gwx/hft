@@ -187,6 +187,12 @@ pub trait VenueProtocol: Sized + 'static {
     /// Orders carry no client id: the `Ack` that `decode_rest` produces for a REST Place binds
     /// the exchange id it names to that request (contract 29; Polymarket).
     const REST_PLACE_BINDS_ID: bool = false;
+    /// Default connections of the gw REST pool of one (account, endpoint) (hft-venue
+    /// `gw.rest_conns`); 1..=hft-venue `GW_REST_CONNS_MAX`.
+    const GW_REST_CONNS: u8 = 2;
+    /// Default free connections of that pool kept for cancels (hft-venue
+    /// `gw.rest_cancel_reserve`); below `GW_REST_CONNS`.
+    const GW_REST_CANCEL_RESERVE: u8 = 0;
 
     // ---- capability defaults (cold; hft-cfg only, never called by the runtime) ----
     /// Contract 15; asset names resolve through `asset` (unknown → `ASSET_NONE`).

@@ -221,6 +221,10 @@ pub struct Venue {
     /// absent = off.
     #[serde(default)]
     pub presign: Option<PresignOpts>,
+    /// hft-venue gw keys (`venues.<v>.gw.*`); `gw.rest_conns` and `gw.rest_cancel_reserve` in
+    /// this assembly.
+    #[serde(default)]
+    pub gw: GwOpts,
 }
 /// `venues.<v>.presign` (venue-polymarket "预签名"): prices `below`/`above` the last place's in
 /// `step`s (decimal USDC text), each order used within `max_age_ms` of its signing.
@@ -249,6 +253,40 @@ impl PresignOpts {
             format!("{frac:0<6}").parse().ok()?
         };
         int.checked_mul(1_000_000)?.checked_add(frac).filter(|v| *v > 0)
+    }
+}
+/// `venues.<v>.gw.{rest_conns,rest_cancel_reserve}` (hft-venue "配置项"): absent = the protocol's
+/// `GW_REST_CONNS` / `GW_REST_CANCEL_RESERVE`.
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GwOpts {
+    pub rest_conns: Option<u8>,
+    pub rest_cancel_reserve: Option<u8>,
+}
+impl GwOpts {
+    /// `(rest_conns, rest_cancel_reserve)` in effect over the protocol defaults `(conns, reserve)`.
+    pub fn resolve(&self, (conns, reserve): (u8, u8)) -> (u8, u8) {
+        (
+            self.rest_conns.unwrap_or(conns),
+            self.rest_cancel_reserve.unwrap_or(reserve),
+        )
+    }
+    /// The `BadValue` text when the effective pair is out of range (1..=`GW_REST_CONNS_MAX`
+    /// connections, reserve below them).
+    pub fn check(&self, name: &str, defaults: (u8, u8)) -> Option<String> {
+        let (conns, reserve) = self.resolve(defaults);
+        if conns == 0 || usize::from(conns) > hft_venue::GW_REST_CONNS_MAX {
+            Some(format!(
+                "venues.{name}.gw.rest_conns must be 1..={}",
+                hft_venue::GW_REST_CONNS_MAX
+            ))
+        } else if reserve >= conns {
+            Some(format!(
+                "venues.{name}.gw.rest_cancel_reserve must be below rest_conns ({conns})"
+            ))
+        } else {
+            None
+        }
     }
 }
 /// `venues.<v>.net.{rest_timeout_ms,rest_max_idle_ms}` (hft-net "配置项"): absent = the
@@ -594,6 +632,9 @@ pub fn load_timed(
                 "BadValue",
                 format!("venues.{name}.net.rest_timeout_ms must be positive"),
             ));
+        }
+        if let Some(why) = crate::venues::gw_rest_defaults(&v.protocol).and_then(|d| v.gw.check(name, d)) {
+            errors.push(Error::config("BadValue", why));
         }
         if dry && !v.accounts.is_empty() {
             errors.push(Error::config("SecretsInSim", name));

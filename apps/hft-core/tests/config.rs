@@ -1041,6 +1041,76 @@ fn core_433_venue_rest_timeout_and_max_idle() {
     }
 }
 
+#[test]
+fn core_440_gw_rest_conns_and_cancel_reserve() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let effective = |c: &hft_core::config::Config, v: &str| {
+        let venue = &c.venues[v];
+        venue
+            .gw
+            .resolve(hft_core::venues::gw_rest_defaults(&venue.protocol).unwrap())
+    };
+    // .1 absent: the protocol's defaults.
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(
+        hft_core::venues::gw_rest_defaults("binance-spot"),
+        Some((2, 0)),
+        "CORE-440.1"
+    );
+    assert_eq!(effective(&c, "public"), (2, 0), "CORE-440.1");
+    // .2 configured values replace them.
+    let with = |extra: &str| text.replace("[sim]", &format!("[venues.public.gw]\n{extra}\n[sim]"));
+    std::fs::write(&path, with("rest_conns = 4\nrest_cancel_reserve = 1")).unwrap();
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-440.2 {e:?}"),
+    };
+    assert_eq!(effective(&l.cfg, "public"), (4, 1), "CORE-440.2");
+    // .3 out of range or an unknown key is refused.
+    for (extra, code) in [
+        ("rest_conns = 0", "BadValue"),
+        ("rest_conns = 17", "BadValue"),
+        ("rest_conns = 2\nrest_cancel_reserve = 2", "BadValue"),
+        ("conns = 4", "ConfigParse"),
+    ] {
+        std::fs::write(&path, with(extra)).unwrap();
+        let e = hft_core::config::load(&path, true).unwrap_err();
+        assert!(e.iter().any(|e| e.code == code), "CORE-440.3 {extra}: {e:?}");
+    }
+    // .4 the live Polymarket configuration: eight connections, one kept for cancels.
+    #[cfg(feature = "polymarket")]
+    {
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+            day_loss_carry: None,
+            daily_loss_abs: None,
+            daily_loss_max_resumes: None,
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot2"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        let l = match hft_core::config::load(&pm, false) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-440.4 {e:?}"),
+        };
+        assert_eq!(
+            hft_core::venues::gw_rest_defaults("polymarket-clob"),
+            Some((8, 1)),
+            "CORE-440.4"
+        );
+        assert_eq!(effective(&l.cfg, "pm"), (8, 1), "CORE-440.4");
+    }
+}
+
 /// The live Polymarket configuration values USDC at par (the daily loss counts USDC losses), its
 /// daily loss is 15 USDC, and `--day-loss-carry` becomes the ECF1 carry row.
 #[cfg(feature = "polymarket")]
