@@ -292,10 +292,11 @@ impl RejectBits {
     LINK_STALE = 1<<28 /* 链接开仓:第二腿 inst 的 BBO 连接不健康(非 Live、重同步中或连接活性超时;判定归 hft-risk #5) */;
     LINK_FUNDS = 1<<29 /* 链接开仓:第二腿的可用计价资产或可用保证金不足以负担该链接 */;
     CAPACITY = 1<<30 /* OMS 订单槽或链接表容量耗尽,未建单未发送 */;
+    SELF_TRADE = 1<<31 /* 会与同一策略实例另一账户的未结订单成交(自成交防护) */;
 }
 ```
 
-`RejectBits` 放在这里是为了让 hft-oms、hft-exec、hft-event 的导出器与 hft-risk 同用一份位号,而不让 OMS/执行层依赖 hft-risk。`CAPACITY` 由 [sequencer 意图管线](../hft-sequencer/README.md#意图管线)置位;其余各位何时置位(检查链顺序、哪些类别适用)只在 [hft-risk](../hft-risk/README.md) 定义。
+`RejectBits` 放在这里是为了让 hft-oms、hft-exec、hft-event 的导出器与 hft-risk 同用一份位号,而不让 OMS/执行层依赖 hft-risk。`CAPACITY` 与 `SELF_TRADE` 由 [sequencer 意图管线](../hft-sequencer/README.md#意图管线)置位;其余各位何时置位(检查链顺序、哪些类别适用)只在 [hft-risk](../hft-risk/README.md) 定义。
 
 ### 对冲定价限值
 

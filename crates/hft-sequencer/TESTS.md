@@ -35,7 +35,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 引擎 UTC | SEQ-443–SEQ-446、SEQ-450 |
 | 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434、SEQ-440 |
-| 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
+| 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360、SEQ-452 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
@@ -366,6 +366,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | SEQ-451.1 | 读实例表 | s1 的主账户 1、账户集合 [1, 3];s1 的 cell 依次为账户 1、3 各一个;`ix_of_account(3)` = s1;SDK `RefView::accounts` 对账户 1、3 都是 [1, 3],对账户 2 是 [2] |
 | SEQ-451.2 | s1 在 `a1` 报价上下两单:账户 3、账户 2(绑定 s2) | 账户 3 的决定没有 `NOT_BOUND`;账户 2 的决定 `reject` 含 `NOT_BOUND` |
 | SEQ-451.3 | `SetMode{scope (s1, 账户 3), CloseOnly}`(确认) | `Applied` |
+
+### SEQ-452 多账户实例的自成交防护
+
+- 规则:[意图管线](README.md#意图管线) 第 5 步(自成交防护)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SEQ-451(s1 的账户集合 [1, 3])
+- 实现:`crates/hft-sequencer/tests/strategies.rs::seq_452_self_trade_between_instance_accounts`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-452.1 | s1 在账户 1 上挂卖 0.001 @ 50 100 并 Ack | 决定不含 `SELF_TRADE` |
+| SEQ-452.2 | s1 在账户 3 上买 @ 50 100、买 @ 50 050 | 前者 `reject` = `SELF_TRADE`;后者不含 `SELF_TRADE` |
+| SEQ-452.3 | s1 在账户 1 上买 @ 50 100(与自己账户的卖单交叉) | 不含 `SELF_TRADE`(只检查实例内的其他账户) |
 ### SEQ-018 策略只经静态分派进入本 crate
 
 - 规则:[策略集](README.md#策略集strategyset)、[依赖](README.md#依赖)

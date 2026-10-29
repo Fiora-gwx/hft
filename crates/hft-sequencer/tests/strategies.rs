@@ -202,3 +202,69 @@ fn seq_451_instance_account_set() {
     h.run();
     assert_eq!(h.result_of(id).map(|r| r.status), Some(0), "SEQ-451.3");
 }
+
+/// SEQ-452: self-trade prevention between the accounts of one instance — a place that would
+/// trade against another account's open order is refused with SELF_TRADE; a non-crossing one is
+/// not; a single-account instance is never checked.
+#[test]
+fn seq_452_self_trade_between_instance_accounts() {
+    use hft_types::{RejectBits, Side};
+    reset_script();
+    let mut b = b0();
+    let mut a3 = b.rd.accounts[2].clone();
+    a3.bound_instance = S1;
+    a3.venues = vbits(&[A, B]);
+    a3.label = "acct-3".into();
+    b.rd.accounts[2] = a3;
+    b.caps.max_timers += 64;
+    let mut h = b.boot();
+    h.steady();
+    let place = |h: &mut H, orders: Vec<(AccountId, Side, &'static str)>| {
+        let m = h.mark();
+        set_hook(move |hx, ev, ctx| {
+            if let hft_strategy_sdk::EventRef::Bbo { inst, .. } = ev
+                && *inst == A1
+                && hx.s.strategy == S1
+            {
+                for (a, side, p) in orders.iter() {
+                    let mut it = intent(
+                        hx,
+                        A1,
+                        *side,
+                        hft_types::Tif::Gtc,
+                        hft_strategy_sdk::IntentClass::Open,
+                        px(p),
+                        q("0.001"),
+                    );
+                    it.account = *a;
+                    let _ = ctx.place(it);
+                }
+            }
+        });
+        h.quote(A1, "50000", "50002");
+        h.run();
+        clear_hook();
+        decisions(&h.since(m))
+    };
+    // .1 account 1 rests a sell at 50 100 (acked).
+    let ds = place(&mut h, vec![(AC1, Side::Sell, "50100")]);
+    assert_eq!(ds.len(), 1, "SEQ-452.1 {ds:?}");
+    assert_eq!(ds[0].1.reject & RejectBits::SELF_TRADE.0, 0, "SEQ-452.1");
+    let rest = ds[0].1;
+    h.ack(&rest);
+    // .2 account 3 buys at 50 100 (would cross): SELF_TRADE; at 50 050 (below): not.
+    let ds = place(
+        &mut h,
+        vec![
+            (AccountId(3), Side::Buy, "50100"),
+            (AccountId(3), Side::Buy, "50050"),
+        ],
+    );
+    assert_eq!(ds.len(), 2, "SEQ-452.2 {ds:?}");
+    assert_eq!(ds[0].1.reject, RejectBits::SELF_TRADE.0, "SEQ-452.2 {ds:?}");
+    assert_eq!(ds[1].1.reject & RejectBits::SELF_TRADE.0, 0, "SEQ-452.2 {ds:?}");
+    // .3 the same account crossing its own resting sell: not a self-trade check (single
+    // account of the order book side).
+    let ds = place(&mut h, vec![(AC1, Side::Buy, "50100")]);
+    assert_eq!(ds[0].1.reject & RejectBits::SELF_TRADE.0, 0, "SEQ-452.3 {ds:?}");
+}

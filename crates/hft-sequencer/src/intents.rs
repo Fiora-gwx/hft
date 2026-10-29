@@ -505,7 +505,11 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             0,
         ],
     );
-    let res = {
+    // Self-trade prevention between the accounts of a multi-account instance (README "自成交防护").
+    let stp = matches!(src, Src::Strategy { .. }) && pair.is_none() && self_trade(e, inst, strategy, &it);
+    let res = if stp {
+        Err(RejectBits::SELF_TRADE)
+    } else {
         let v = RiskAdapter { v: views_noexec(e) };
         if let Some(p) = pair.as_mut() {
             e.risk.evaluate_pair(&iv, &p.view, &v, &e.now).map(|[a, b]| {
@@ -1166,6 +1170,38 @@ fn foreign_to_external(f: &hft_oms::ForeignFill) -> hft_event::ExternalFill {
         cash_qty: if f.cash.is_some() { f.qty } else { Qty(0) },
         cash_amount: f.cash.unwrap_or(Qty(0)),
     }
+}
+
+/// A strategy place of `strategy` would trade against an open order of another account of the
+/// same instance: same venue and inst, opposite side, the intent's price reaching it (a price of
+/// 0 reaches every order). Instances with one account: never (one pass over each other account's
+/// order table otherwise).
+fn self_trade<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    strategy: StrategyId,
+    it: &OrderIntent,
+) -> bool {
+    let Some(slot) = inst.get(strategy) else {
+        return false;
+    };
+    if slot.accounts().len() < 2 {
+        return false;
+    }
+    let mut hit = false;
+    for a in slot.accounts().iter().filter(|a| **a != it.account) {
+        e.oms.each_open(it.venue, *a, it.inst, |h| {
+            if let Some(o) = e.oms.slot(h)
+                && o.side != it.side
+            {
+                hit |= match it.side {
+                    hft_types::Side::Buy => it.px.0 == 0 || it.px.0 >= o.px.0,
+                    hft_types::Side::Sell => it.px.0 == 0 || it.px.0 <= o.px.0,
+                };
+            }
+        });
+    }
+    hit
 }
 
 /// Unused helpers kept for the pipeline's callers.
