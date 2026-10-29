@@ -171,6 +171,39 @@ pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport>;
 pub fn reply_parts(rd: &RefData, epoch: u16, msg: &RepMsg, bulk: &[u8], emit: impl FnMut(EventKind, &[&[u8]]));
 ```
 
+### 场所行为选项(`VenueModel`)
+
+`SimExchange::set_venue_model(VenueModel)`(构造之后、第一条指令之前,冷路径)打开 Polymarket 实盘验证过的成交与时序规则(研究侧参照 `bm_sim.py`);`VenueModel::default()` 全部关闭,行为、回报与 `state_hash` 与不调用时相同(SIM-239)。hft-core 的 sim-gw 不调用它;研究回放([hft-replay](../hft-replay/README.md#模拟场所))按命令行或校准表设置。
+
+```rust
+pub struct VenueModel {
+    pub cancel_us: Option<(u32, u32)>,   // 撤单自己的 (entry, resp) µs;None = 账户的 LatencyModel
+    pub tombstone: bool,                 // 先于订单到达的撤单留下墓碑:订单到达时被拒,只回 CancelAck(Polymarket "Already canceled")
+    pub taker: Option<TakerDelay>,       // Ioc/Fok 到达后再等撮合延迟,按那一刻的簿撮合
+    pub fee: FeeModel,                   // Refdata(费率行)| BinaryTaker{k_e9}:吃单费 = k·p·(1−p)·qty,挂单 0
+    pub gtd_ms: u32,                     // 挂单自到达起的有效期(0 = 无):到期回 Expired
+    pub fill_resp_us: Option<u32>,       // 挂单成交的回报延迟;None = 账户的 resp
+    pub pools: Option<LatPools>,         // 条件延迟池
+}
+pub struct TakerDelay { pub base_us: u32, pub slow_us: u32, pub slow_ppm: u32, pub resp_us: u32 }
+pub struct LatPools { pub split_us: u32, pub min_n: u16, pub pools: Vec<Pool> }
+pub struct Pool { pub leg: PoolLeg /* Place | Cancel | Taker */, pub load: Option<u8>, pub mv: Option<u8>, pub phase: Option<u8>, pub us: Vec<u32> }
+pub struct Cond { pub load: u8, pub mv: u8, pub phase: u8 }
+impl SimExchange {
+    pub fn set_venue_model(&mut self, m: VenueModel);
+    pub fn set_condition(&mut self, c: Cond);                      // 之后的指令按此条件抽样
+    pub fn hide_own(&mut self, i: InstId, side: Side, px: Px, dq: Qty); // 自有挂单叠加层(累加,下限 0)
+}
+```
+
+- **`MakerFill::QueueCap`**:挂单到达时 `ahead` = 该价显示量;此后该档每次更新 `ahead = min(ahead, 显示量)`;同价、对手方向的成交先消耗 `ahead` 再成交本单;穿价成交与对手侧越过本单价格都成交全部剩余(不受成交量或越价档位量限制)。`Queue` 的 500 ms 未解释减少规则不变。
+- **撤单竞速**:撤单的到达延迟取 `cancel_us`(或 `Cancel` 池);`tombstone` 开时,到达时找不到订单记录的撤单不回报、记下 (账户, 槽, gen)(至多 4 096 条),之后该订单到达即以 `CancelAck` 拒绝、不挂(计数 `tombstone_refusals`);订单已到达的撤单照常在到达时下架,其间的成交照常发生;回报延迟取 `cancel_us.1`(有 `Cancel` 池时取 `split_us`)。
+- **吃单延迟**:`taker` 开时,非 PostOnly、非 Gtc 的订单在到达时只做拒单检查,撮合排在到达 + `base_us`(以 `slow_ppm`/10⁶ 的概率为 `slow_us`;有 `Taker` 池时取池中样本)之后,用那一刻的簿(含叠加层)撮合,Ack、成交与剩余的 Expired 在撮合 + `resp_us` 回报。
+- **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。
+- **GTD**:挂单自到达起 `gtd_ms` 到期,与指令按事件时间排序,到期回 `Expired`(计数 `gtd_expired`);OMS 把交易所的 Expired 当作终态(hft-oms 自己的 `ExpireAt` 只处理 Unknown 槽,不重复终结)。
+- **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出(hft-sim 不计算条件)。
+- **自有挂单叠加层**:`hide_own` 登记的量从显示簿中扣除:挂单的 `ahead`/档位量、吃单与越价撮合看到的对手档位都不含它。
+
 ### 重启恢复
 
 hft-sim **不占快照节**,`SimExchange` 的状态也不写进 journal:模拟回报本身是 Input,恢复后的 ledger 与 OMS 已包含 journal 中全部已交付的模拟回报,所以模拟账户的交易所真值由该实例的快照与 journal 确定地恢复。干净 Drain 重启与非干净重启(崩溃、护栏停机超时、整机重启)用同一套步骤;`replayer sim` 从快照起步时用同一函数。
@@ -247,7 +280,7 @@ pub enum MmrSource { RefdataTiers, Flat(Rate) }
 | `transfer_delay_ms` | u32 | `SimTransfer` 到账延迟 | 300 000(待标定) |
 | `rate_limit` | bool | 按 refdata `RateLimitTable` 中 `Orders` 桶、范围 Ip/Uid/Account 的行计数(按到达时刻的固定窗口,到达第 10 条规则的新单计入),超限以 `RateLimited` 回拒 | true |
 | `late_fee` | bool | 模拟"成交后手续费另行到达"(`FeeOnly`)的所 | false(DST 打开) |
-| `maker_fill` | `TradeThrough` \| `Queue` | 挂单成交模型(§4) | `TradeThrough` |
+| `maker_fill` | `TradeThrough` \| `Queue` \| `QueueCap` | 挂单成交模型(§4;`QueueCap` 见[场所行为选项](#场所行为选项venuemodel)) | `TradeThrough` |
 
 改 `SimAccountCfg`(含换模型下标)= 改 refdata([tools/hft-cfg](../../tools/README.md))→ `ReplaceRefdata`(Drain + 重启);改 `SimTuning` 或两张模型表 = 改 hft-core 配置后重启。`[sim]` 全表随启动写入 journal(写法归 [hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段)),[replayer sim](../../apps/replayer/README.md#sim) 从 journal 取同一份,重演不读当前配置文件。
 

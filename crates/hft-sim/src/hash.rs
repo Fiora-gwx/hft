@@ -125,6 +125,21 @@ pub(crate) fn state_hash(ex: &SimExchange) -> u64 {
         u(&mut h, c.0.arrive);
         u(&mut h, c.0.seq);
         h.update(c.0.cmd.as_bytes());
+        if c.0.phase != 0 {
+            h.update(&[c.0.phase]);
+        }
+    }
+    // Venue-model state: empty under the default model, so the plain hash is unchanged.
+    for x in &ex.tombs {
+        h.update(&[x.0]);
+        h.update(&x.1.to_le_bytes());
+        h.update(&x.2.to_le_bytes());
+    }
+    for x in &ex.own {
+        h.update(&x.0.to_le_bytes());
+        h.update(&[x.1 as u8]);
+        i(&mut h, x.2);
+        i(&mut h, x.3);
     }
     for r in ex.replies.iter() {
         u(&mut h, r.0.due);

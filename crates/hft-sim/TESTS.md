@@ -18,6 +18,7 @@ spec: README.md
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
 | 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226、SIM-231 |
 | journal 衔接(`glue` 模块) | SIM-230 |
+| 场所行为选项(`VenueModel`) | SIM-232–SIM-239 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -1799,3 +1800,114 @@ spec: README.md
 | SIM-231.2 | 两者都 `reseed_account(A9, 777)`,再各下 4 张(同一决策时刻) | 每张 Ack 延迟相等 |
 | SIM-231.3 | `reseed_account(AccountId(77), 1)` | 无动作、不出错 |
 
+### SIM-232 `QueueCap`:排队截断、穿价与越价成交全部剩余
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:`rd_binary()`;`A9` 在 B5 有 1 000 USDT;Up 簿买 0.45 × 50、卖 0.47 × 50;`A9` 挂买 100 Up @ 0.45(GTC),每行从前置重新开始
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_232_queue_cap`
+
+| 行 | 行情 | 期望 |
+|---|---|---|
+| SIM-232.1 | 买 0.45 档降到 20;卖方成交 30 @ 0.45 | 成交 10 |
+| SIM-232.2 | 档位降到 20 再升到 80;卖方成交 25 @ 0.45 | 成交 5(`ahead` 不随档位回升) |
+| SIM-232.3 | 卖方成交 1 @ 0.44 | 成交 100 |
+| SIM-232.4 | 卖一降到 0.44 × 1 | 成交 100 |
+| SIM-232.5 | `Queue`,卖方成交 1 @ 0.44 | 成交 1(原规则不变) |
+
+### SIM-233 撤单竞速与墓碑
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿;`tombstone`,`cancel_us = (0.5 ms, 1 ms)`;下单延迟 2 ms
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_233_cancel_race_and_tombstone`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-233.1 | 100 ms 下买 10 @ 0.45,100.5 ms 撤 | 只有 `CancelAck`;`tombstone_refusals` = 1;没有挂单 |
+| SIM-233.2 | 100 ms 下单,103 ms 撤 | `Ack`、`CancelAck`;后者 due = 103.5 ms + 1 ms |
+| SIM-233.3 | 挂单后 120 ms 撤,120.1 ms 卖方成交 1 @ 0.44 | 撤单在途时成交 10 |
+| SIM-233.4 | 无 `tombstone`,同 .1 | `CancelReject`、`Ack`(撤单找不到,订单照挂) |
+
+### SIM-234 吃单撮合延迟
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿;`taker = {base 195 ms, slow 1.25 s, resp 15 ms}`
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_234_taker_delay`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-234.1 | 100 ms IOC 买 30 @ 0.50;250 ms 卖档变为 0.49 × 10 | 成交 10 @ 0.49,其余 `Expired`;首条回报 due = 102 + 195 + 15 ms |
+| SIM-234.2 | 不设 `taker`,同上 | 到达时成交 30 @ 0.47 |
+| SIM-234.3 | `slow_ppm` = 10⁶ | 首条回报 due = 102 ms + 1.25 s + 15 ms |
+| SIM-234.4 | PostOnly 买 10 @ 0.44 | 到达即 `Ack`,不延迟 |
+
+### SIM-235 二元代币吃单费
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿;`fee = BinaryTaker{k_e9 = 7 × 10⁷}`
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_235_binary_taker_fee`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-235.1 | IOC 买 10 @ 0.50(成交 0.47) | 费 0.17437 USDT |
+| SIM-235.2 | 挂单被穿价成交 | 费 0 |
+
+### SIM-236 GTD 到期
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的挂单;`gtd_ms = 300 000`
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_236_gtd_expiry`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-236.1 | 推进到到达 + 300 s 前 1 ns;再到 + 10 ms | 前者只有 `Ack`;后者 `Ack`、`Expired`;`gtd_expired` = 1 |
+| SIM-236.2 | 到期前被成交 | 不出 `Expired`;`gtd_expired` = 0 |
+
+### SIM-237 条件延迟池
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿;`split_us` 5 000、`min_n` 20;Place 池 (1, 0, 0) = 20 × 10 ms、(2, *, *) = 20 × 30 ms、(0, 0, 0) = 19 × 99 ms;账户模型 2 ms / 2 ms
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_237_conditional_pools`
+
+| 行 | 条件 | 期望(100 ms 下 PostOnly 买单的 Ack due) |
+|---|---|---|
+| SIM-237.1 | (1, 0, 0) | 105 ms + 2 ms |
+| SIM-237.2 | (2, 1, 1) | 125 ms + 2 ms(退到 (leg, load)) |
+| SIM-237.3 | (0, 0, 0) | 102 ms + 2 ms(样本不足且无退路:账户模型) |
+
+### SIM-238 自有挂单叠加层
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿,`QueueCap`
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_238_own_order_overlay`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-238.1 | `hide_own(Up, 买, 0.45, 30)` 后挂买 100 @ 0.45;卖方成交 30 @ 0.45 | 成交 10 |
+| SIM-238.2 | `hide_own(Up, 卖, 0.47, 40)`;IOC 买 30 @ 0.47 | 成交 10 |
+| SIM-238.3 | 再 `hide_own(…, −40)` | 成交 30 |
+
+### SIM-239 默认的场所行为选项与不设置相同
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿,`Queue`
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_239_default_model_is_the_plain_exchange`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-239.1 | 同一脚本(挂单、撤单、IOC、穿价成交)分别不调用与调用 `set_venue_model(VenueModel::default())` | 回报序列与 `state_hash` 相同 |

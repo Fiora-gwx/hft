@@ -15,10 +15,10 @@ spec: README.md
 | 概要 | RPL-300 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-303 |
-| 命令行 | RSR-001、RPL-303 |
+| 命令行 | RSR-001、RSR-004、RPL-303、RPL-306 |
 | 驱动 | RPL-300、RPL-301 |
 | 账户屏蔽 | RSR-003、RPL-300、RPL-301 |
-| 模拟场所 | RPL-300 |
+| 模拟场所 | RPL-300、RPL-305、RPL-306、RPL-307 |
 | 参数变体 | RSR-001、RPL-302 |
 | 确定性 | RPL-300、SIM-231 |
 | 输出 | RSR-002、RPL-303 |
@@ -72,6 +72,19 @@ spec: README.md
 |---|---|---|
 | RSR-003.1 | `OrderEvent`、`SendReport`、`ExternalFill`、`BalanceReport`、`PositionReport`、`FundingSettle` 体,`account` 字段 = 7 | 都属于被替换的种类;读出 `AccountId(7)` |
 | RSR-003.2 | `ConnState`、`AccountConfigReport`、`Bbo` | 不属于被替换的种类;无账户 |
+
+### RSR-004 校准表
+
+- 规则:[Polymarket 场所行为、校准表与条件延迟](README.md#polymarket-场所行为校准表与条件延迟)
+- 级别:table
+- 里程碑:M3
+- 前置:`SimParams::default()`
+- 实现:`crates/hft-replay/tests/unit.rs::rsr_004_calibration_table`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| RSR-004.1 | 含全部字段与 `pools`(`ack\|1\|0\|0`、`cxl\|2`、`take`、未知 leg `other`)的表 | 64 位 SHA-256;`QueueCap`、墓碑、撤单延迟、吃单延迟、`BinaryTaker{7×10⁷}`、GTD、成交回报延迟、阈值换成 ns;三个池(未知 leg 忽略),样本秒换成 µs、键的通配为 `None` |
+| RSR-004.2 | 未知字段;`maker_fill` 非法;`fee_k` 2.0 | 都拒绝 |
 
 ## 验收
 

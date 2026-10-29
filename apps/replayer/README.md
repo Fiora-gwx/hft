@@ -18,6 +18,7 @@ status: impl
   - [verify](#verify)
   - [sim](#sim)
   - [research](#research)
+  - [calib](#calib)
   - [parity](#parity)
   - [compare](#compare)
   - [latency](#latency)
@@ -43,7 +44,10 @@ replayer sim     --journal … [--from-seq N] [--to-seq M] [--accounts <a,b>] [-
                  [--advice recompute|journal] [--model-checkpoint <dir>] [--stress <case>[,<case>…]|gate|all] [--stress-spec <spec.toml>]
                  [--ab <paramsA> <paramsB>] [--emit-journal] --out <dir>
 replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]]
-                 [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|through] [--reseed-s N] [--log-timers] [--jobs N]
+                 [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N]
+                 [--calib calib.json] [--own] [--tombstone] [--cancel-latency E:R] [--taker-delay B[:S:P]] [--taker-resp-us N]
+                 [--fee-binary K] [--gtd-ms N] [--fill-resp-us N]
+replayer calib    --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N]
 replayer parity   --journal <file|dir> --out <dir> [--variants <file.toml>] [--set NAME=RAW[,…]] [--jobs N]
 replayer compare --a <journal> --b <journal> --map <a账户>=<b账户>[,…] [--from <utc>] [--to <utc>] [--window-ms 2000] --out <dir>
 replayer latency --journal … [--from <utc>] [--to <utc>] [--instance prod|sim] [--venue <v>[,<v>…]]
@@ -109,6 +113,10 @@ verify 是**离线**工具(夜跑与 CI);hft-core 冷启动用 `RecoverDriver`(�
 ### research
 
 研究回放:同一份 sequencer 与策略代码回放一个运行的 seq journal,被模拟账户的回报由进程内 `SimExchange` 重新生成,N 个参数变体 × M 个延迟种子各跑一次,写 `decisions/fills/orders/windows.parquet` 与 `run.json`。机制、选项缺省、屏蔽规则与输出列归 [hft-replay](../../crates/hft-replay/README.md)。它是研究与参数筛选工具([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md)):输出带参数与模拟参数的哈希,结论不替代模拟账户与上线门槛。退出码:0 成功;2 选项错误(未知选项、缺 `--journal`/`--out`、变体重名);3 输入或运行失败(读不到段、无启动快照、策略种类未注册、变体字段未知或越界、`SetParams` 被拒)。
+
+### calib
+
+从一个实盘运行的 journal 生成该账户的条件延迟池(决策 → Ack、决策 → CancelAck,带负载、参考价变动与窗口相位标签),写成 `research --calib` 可读的校准表;规则归 [hft-replay 校准表的生成](../../crates/hft-replay/README.md#校准表的生成replayer-calib)。退出码:0 成功;2 选项错误(缺 `--journal`/`--account`/`--out`、未知选项);3 输入失败。
 
 ### parity
 

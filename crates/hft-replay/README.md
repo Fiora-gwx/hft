@@ -65,7 +65,15 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--set NAME=RAW[,…]` | 追加一个变体 `set<k>` | 无 |
 | `--seeds S[,S…]` | 延迟随机种子 | `1` |
 | `--latency ENTRY_US:RESP_US` | `LatencyModel::Fixed` | `40000:0` |
-| `--maker-fill queue\|through` | 挂单成交模型 | `queue` |
+| `--maker-fill queue\|queue-cap\|through` | 挂单成交模型 | `queue` |
+| `--calib <file>` | 校准表([Polymarket 场所行为](#polymarket-场所行为校准表与条件延迟)) | 无 |
+| `--own` | 隐藏日志里被模拟账户自己的挂单 | 关 |
+| `--tombstone` | 撤单先到即墓碑 | 关 |
+| `--cancel-latency ENTRY_US:RESP_US` | 撤单自己的延迟 | 账户模型 |
+| `--taker-delay BASE_US[:SLOW_US:SLOW_PPM]`、`--taker-resp-us N` | 吃单撮合延迟与回报延迟 | 关 |
+| `--fee-binary K` | 二元吃单费系数 | 费率行 |
+| `--gtd-ms N` | 挂单有效期 | 0(无) |
+| `--fill-resp-us N` | 挂单成交的回报延迟 | 账户模型 |
 | `--reseed-s N` | 重播种间隔(UTC 秒,0 = 不重播种) | `300` |
 | `--log-timers` | 照读日志里的堆定时器,不由引擎状态触发 | 关 |
 | `--jobs N` | 并行运行数 | `1` |
@@ -91,6 +99,29 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 ### 模拟场所
 
 `ResearchVenue` 为 `mask` 内账户(Live 或 Sim)建一个 `SimExchange`:每个账户 venue 上每个报价资产给 10⁹ 个单位的初始余额(引擎自己的账本与风控决定能否下单,模拟现金不成为约束);`MarginModel` 为固定 0.5 %、1 倍;启动回报丢弃。行情经 `hft_sim::glue::feed_record`。订单类指令 → `SendReport{Written}`(sent_tsc = 决策时刻)+ `on_command`;`SimSettle`/`SimReset`/`SimTransfer` → `on_command`;`Deliver`(Live 账户的结算)→ 与 hft-venue gw 相同形态的 `ExternalFill{Delivery}`(卖出、按兑付价、无费)并 `external_fill` 平掉模拟仓位。交付的回报只保留订单证据(`OrderEvent`、`ExternalFill`、`SendReport`、`FundingSettle`);余额、仓位、保证金与连接回报丢弃(账户真值由引擎账本按成交维护)。
+
+#### Polymarket 场所行为、校准表与条件延迟
+
+`SimParams.venue` 原样交给 `SimExchange::set_venue_model`(规则归 [hft-sim 场所行为选项](../hft-sim/README.md#场所行为选项venuemodel):`QueueCap`、撤单竞速与墓碑、吃单延迟、二元吃单费、GTD、成交回报延迟、条件延迟池、自有挂单叠加层);缺省全部关闭,结果与 M1 的模拟相同(RPL-305.3)。来源:命令行选项,或 `--calib <file>` 的校准表(下表;选项按出现顺序生效,后者覆盖前者;文件的 SHA-256 写入 `run.json` 的 `calib_file_sha`,全部模拟参数的哈希仍是 `calib_sha`)。
+
+| 校准表字段 | 含义 |
+|---|---|
+| `maker_fill` | `queue_cap` \| `queue` \| `through` |
+| `tombstone`、`cancel_us: [entry, resp]`、`fill_resp_us`、`gtd_ms` | 同名 `VenueModel` 字段 |
+| `taker: {base_us, slow_us, slow_ppm, resp_us}` | `TakerDelay` |
+| `fee_k` | `FeeModel::BinaryTaker`(0.07 = 7 %) |
+| `pools: {"leg\|load\|move\|phase": [秒, …], "leg\|load": …, "leg": …}`、`split_us`(缺省 5 000)、`min_n`(缺省 20) | 条件延迟池;leg `ack`/`place`、`cxl`/`cancel`、`take`/`taker`,其他 leg 忽略(研究侧 `latc.json` 可直接读) |
+| `thr: [ms, …]`、`window_s`(缺省 300)、`phase_s`(缺省 5) | 条件的阈值 |
+
+**条件**(只在设了 `pools` 时计算,由 `ResearchVenue` 从 journal 得出,每条订单类指令之前 `set_condition`):`load` = 上一个完整 UTC 分钟(按 `sw_rx_ns` 分秒)里被模拟账户所在 venue 的 L2 批、整簿与成交的 `sw_rx_ns − ex_ts_ns` 每秒 90 分位的中位数超过的 `thr` 个数(还没有完整分钟时为 1);`move` = 参考行情(不在这些 venue 上、第一个出现的 Bbo inst)的买一加卖一在最近 1 s(按记录 tsc)内的变化 ≤ 0.25 bp → 0、≤ 1 bp → 1、否则 2;`phase` = 决策时引擎 UTC 在 `window_s` 内的秒数 < `phase_s` → 0,否则 1。与研究侧 `bm_sim.py` 的差别:`load` 只用已结束的分钟(无前视)。
+
+**`--own`**:被模拟账户在日志里的 `OrderDecision{New}`(未拒)与被屏蔽的 `OrderEvent` 维护日志自有挂单:`Ack` 后隐藏未成交量,成交减少,终态(`Fill`、`CancelAck`、`Reject`、`Expired`)取消隐藏;同一数量在互补代币的对手侧 `1 − px` 上一并隐藏(Polymarket 的互补流动性)。只作用于模拟场所的簿;引擎自己的簿视图(策略看到的)仍含日志里的自有挂单。
+
+#### 校准表的生成(`replayer calib`)
+
+`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+
+每次交出 Input 前驱动记下它的引擎 UTC,`emit` 时交给 `ResearchVenue::on_utc`:重播种区间与 `phase` 都按决策所在 Input 的引擎 UTC。
 
 ### 参数变体
 
@@ -132,7 +163,9 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 | `src/run.rs` | `run_one`:启动、变体注入、步进循环、决策/订单/成交/区间表 |
 | `src/driver.rs` | `ResearchDriver`、`ResearchSink`(新 seq、截获 `OrderDecision`/`CmdResult`)、前缀读取 |
 | `src/source.rs` | 流式读取(逻辑记录、段校准、预读) |
-| `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver` |
+| `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver`、条件跟踪、`--own` |
+| `src/calib.rs` | 校准表 |
+| `src/calib_build.rs` | 从实盘 journal 生成校准表的延迟池 |
 | `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
 | `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
 | `src/parity.rs` | 重算决策与日志决策的匹配 |
@@ -163,10 +196,10 @@ pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64,
 ## 已知限制与后续工作
 
 - 只读未压缩的 `.jrn` 段(`.jrn.zst` 先 `zstd -d`);一次运行一个 journal 运行(多个运行的目录请分开调用)。
-- 撮合模型是现有 hft-sim(定长或经验分布延迟、队列/打穿成交);条件延迟池、撤单竞速与墓碑、吃单延迟与到达时簿、非线性吃单费与返利、GTD 到期属于重构 M2。
-- `--latency` 只给定长模型;经验分布与条件延迟池随 M2 的校准表(`replayer calib`)接入。
+- 返利只在研究报告里另算(不进成交与 `windows.parquet`);`replayer calib` 只生成下单与撤单的延迟池,不含成交回报延迟与吃单延迟。
+- `--own` 不改引擎的簿视图:策略在回放里仍看到日志中自己的挂单(与实盘相同,与 `bm_port.py` 的剔除不同)。
 - N 个变体各自读 journal、各自重建簿;共享解析与参数无关特征是后续优化(先按 M1 实测决定)。
-- `--own`(从公开簿扣掉日志中自己的挂单)随 M2 的模拟场所叠加层接入;`features` 子命令随特征导出接入。
+- `features` 子命令随特征导出接入。
 - 从非创建处起步的模拟账户没有起点时的模拟挂单(实盘 journal 每次启动从空订单开始,不受影响)。
 
 ### 开发备忘

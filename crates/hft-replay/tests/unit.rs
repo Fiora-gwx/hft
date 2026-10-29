@@ -122,3 +122,55 @@ fn rsr_003_report_accounts() {
         assert_eq!(report_account(kind, &[0; 64]), None, "RSR-003.2 {kind:?}");
     }
 }
+
+#[test]
+fn rsr_004_calibration_table() {
+    use hft_replay::SimParams;
+    use hft_sim::{FeeModel, MakerFill, PoolLeg};
+    // .1 the native fields and research latc.json pools (seconds), with the file hash.
+    let text = br#"{"maker_fill":"queue_cap","tombstone":true,"cancel_us":[35000,5000],
+        "taker":{"base_us":195000,"slow_us":1250000,"slow_ppm":125000,"resp_us":15000},
+        "fee_k":0.07,"gtd_ms":300000,"fill_resp_us":12000,"split_us":5000,"min_n":20,
+        "thr":[30.0,60.0],"window_s":300,"phase_s":5,
+        "pools":{"ack|1|0|0":[0.04,0.05],"cxl|2":[0.06],"take":[0.2],"other":[1.0]}}"#;
+    let mut p = SimParams::default();
+    let sha = hft_replay::calib::apply(text, &mut p).unwrap();
+    assert_eq!(sha.len(), 64, "RSR-004.1");
+    assert_eq!(p.maker_fill, MakerFill::QueueCap, "RSR-004.1");
+    let v = &p.venue;
+    assert!(v.tombstone, "RSR-004.1");
+    assert_eq!(v.cancel_us, Some((35_000, 5_000)), "RSR-004.1");
+    assert_eq!(
+        v.taker.map(|t| (t.base_us, t.slow_ppm, t.resp_us)),
+        Some((195_000, 125_000, 15_000)),
+        "RSR-004.1"
+    );
+    assert_eq!(v.fee, FeeModel::BinaryTaker { k_e9: 70_000_000 }, "RSR-004.1");
+    assert_eq!((v.gtd_ms, v.fill_resp_us), (300_000, Some(12_000)), "RSR-004.1");
+    assert_eq!(p.cond.load_thr_ns, vec![30_000_000, 60_000_000], "RSR-004.1");
+    let pools = v.pools.as_ref().unwrap();
+    assert_eq!(
+        (pools.split_us, pools.min_n, pools.pools.len()),
+        (5_000, 20, 3),
+        "RSR-004.1 unknown leg skipped"
+    );
+    let ack = pools.pools.iter().find(|x| x.leg == PoolLeg::Place).unwrap();
+    assert_eq!(
+        (ack.load, ack.mv, ack.phase, ack.us.clone()),
+        (Some(1), Some(0), Some(0), vec![40_000, 50_000]),
+        "RSR-004.1"
+    );
+    let cxl = pools.pools.iter().find(|x| x.leg == PoolLeg::Cancel).unwrap();
+    assert_eq!((cxl.load, cxl.mv), (Some(2), None), "RSR-004.1");
+    // .2 an unknown field, maker model or a fee outside 0..=1 is refused.
+    for bad in [
+        &br#"{"bogus":1}"#[..],
+        br#"{"maker_fill":"x"}"#,
+        br#"{"fee_k":2.0}"#,
+    ] {
+        assert!(
+            hft_replay::calib::apply(bad, &mut SimParams::default()).is_err(),
+            "RSR-004.2"
+        );
+    }
+}

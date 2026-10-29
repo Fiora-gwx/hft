@@ -21,8 +21,9 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
 | verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
-| research | RPL-300–RPL-303 |
+| research | RPL-300–RPL-303、RPL-305、RPL-306 |
 | parity | RPL-304 |
+| calib | RPL-307 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
 | bench(可选扩展) | RPL-256 |
@@ -2455,3 +2456,42 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | RPL-304.1 | 基线 | 日志决策 > 0;`both` = 日志条数,`logged_only` = `regen_only` = 0,`first_diff_trigger` = 0,`rate` = 1 |
 | RPL-304.2 | 变体 `thr = 1 000 000` | 日志条数不变;`both + logged_only` = 日志条数,`both + regen_only` = 回放条数;`parity` 表行数 = 三类之和 |
 
+### RPL-305 带场所行为选项的研究回放确定
+
+- 规则:[research](README.md#research)、[hft-replay Polymarket 场所行为](../../crates/hft-replay/README.md#polymarket-场所行为校准表与条件延迟)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300;`SimParams` 取一张含 `QueueCap`、墓碑、撤单与吃单延迟、二元吃单费、GTD、成交回报延迟、`ack`/`cxl` 各 20 个样本的池的校准表,`--own`
+- 实现:`apps/replayer/tests/research.rs::rpl_305_venue_model_runs_are_deterministic`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-305.1 | 运行两次 | 模拟 Input > 0;决策、成交、订单表与 `sim_state_hash` 相同 |
+| RPL-305.2 | 种子 2 | 订单表不同(池抽样随种子与区间重播种) |
+| RPL-305.3 | 缺省 `SimParams` 与显式 `VenueModel::default()` | `sim_state_hash` 与成交表相同 |
+
+### RPL-306 `research --calib` 与场所行为选项
+
+- 规则:[research](README.md#research)、[hft-replay 命令行](../../crates/hft-replay/README.md#命令行)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-303
+- 实现:`apps/replayer/tests/research.rs::rpl_306_research_calib_option`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| RPL-306.1 | `research … --calib calib.json --own --fee-binary 0.07 --taker-delay 195000:1250000:125000` | 退出 0;`run.json` 的 `calib_file_sha` = 文件的 SHA-256,`own` = true,`sim` 含 `QueueCap`、`BinaryTaker` 与 195 000 |
+| RPL-306.2 | 校准表含未知字段 | 退出 2 |
+
+### RPL-307 `replayer calib` 生成研究回放可读的延迟池
+
+- 规则:[calib](README.md#calib)、[hft-replay 校准表的生成](../../crates/hft-replay/README.md#校准表的生成replayer-calib)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300(2 000 步);`replay_probe` 示例程序(`--fixture-dst`)
+- 实现:`apps/replayer/tests/research.rs::rpl_307_calib_builds_pools_that_research_reads`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| RPL-307.1 | `calib --journal <段目录> --account 1 --out calib.json` | 退出 0;`meta.samples.ack` > 0,`pools.ack` 有同样多的正值样本;`calib::apply` 读入后 `venue.pools` 有值 |
+| RPL-307.2 | 缺 `--account` | 退出 2 |

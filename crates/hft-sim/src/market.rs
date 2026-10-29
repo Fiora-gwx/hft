@@ -27,11 +27,14 @@ impl SimExchange {
             let cmd_at = self.cmds.peek().map(|r| r.0.arrive).filter(|a| *a < t);
             let tr_at = self.transfers.iter().map(|x| x.at).filter(|a| *a <= t).min();
             let lf_at = self.late_fees.iter().map(|x| x.at).filter(|a| *a <= t).min();
-            let next = [cmd_at, tr_at, lf_at].into_iter().flatten().min();
+            let gtd_at = self.next_expiry().filter(|a| *a < t);
+            let next = [cmd_at, tr_at, lf_at, gtd_at].into_iter().flatten().min();
             let Some(at) = next else {
                 break;
             };
-            if cmd_at == Some(at) {
+            if gtd_at == Some(at) && cmd_at != Some(at) {
+                self.expire_at(at);
+            } else if cmd_at == Some(at) {
                 if let Some(core::cmp::Reverse(pc)) = self.cmds.pop() {
                     self.exec_cmd(&pc);
                 }
@@ -42,6 +45,62 @@ impl SimExchange {
             }
         }
         self.periodic(t);
+    }
+
+    /// Earliest GTD expiry of a resting order (`VenueModel::gtd_ms`).
+    fn next_expiry(&self) -> Option<u64> {
+        if self.vm.gtd_ms == 0 {
+            return None;
+        }
+        self.accts
+            .iter()
+            .filter(|a| a.n_resting > 0)
+            .flat_map(|a| a.orders.iter())
+            .filter(|o| o.used && o.resting && o.exp_at > 0)
+            .map(|o| o.exp_at)
+            .min()
+    }
+
+    /// Resting orders whose GTD expiry is `at`: finished, `Expired` reported.
+    fn expire_at(&mut self, at: u64) {
+        for ai in 0..self.accts.len() {
+            let n = self.accts.get(ai).map_or(0, |a| a.orders.len());
+            for k in 0..n {
+                let o = self.order_at(ai, k);
+                if !(o.used && o.resting && o.exp_at > 0 && o.exp_at <= at) {
+                    continue;
+                }
+                let due = self.resp_due(ai, at);
+                let ex = self.inst_ex_ts(usize::from(o.inst));
+                self.finish(ai, k, crate::exec::st::EXPIRED);
+                let o = self.order_at(ai, k);
+                let ev = self.order_event(
+                    ai,
+                    &o,
+                    hft_event::OrderEventKind::Expired,
+                    o.px,
+                    o.remaining(),
+                    0,
+                    hft_types::AssetId(0),
+                    0,
+                    0,
+                    ex,
+                    due,
+                );
+                self.emit(ai, ev, due);
+                if let Some(a) = self.accts.get_mut(ai) {
+                    a.counters.gtd_expired += 1;
+                }
+            }
+        }
+    }
+
+    /// A queue-position maker model is configured.
+    pub(crate) fn queue_model(&self) -> bool {
+        matches!(
+            self.tune.maker_fill,
+            crate::types::MakerFill::Queue | crate::types::MakerFill::QueueCap
+        )
     }
 
     /// Truth reports every `report_interval_s` and the time-based margin reports.
@@ -214,6 +273,21 @@ impl SimExchange {
     /// than `limit` (README "2. 簿副本": top = the newer of Bbo and book top; deeper levels from the
     /// book, worse than that top).
     pub(crate) fn view_levels(&mut self, ii: usize, side: Side, limit: i64) -> ViewInfo {
+        let info = self.view_levels_raw(ii, side, limit);
+        if !self.own.is_empty() {
+            // The own-order overlay is not other participants' liquidity.
+            let book_side = if side == Side::Buy { Side::Sell } else { Side::Buy };
+            let mut levels = core::mem::take(&mut self.levels);
+            for l in levels.iter_mut() {
+                l.1 = l.1.saturating_sub(self.own_at(ii, book_side, l.0)).max(0);
+            }
+            levels.retain(|l| l.1 > 0);
+            self.levels = levels;
+        }
+        info
+    }
+
+    fn view_levels_raw(&mut self, ii: usize, side: Side, limit: i64) -> ViewInfo {
         self.levels.clear();
         let Some(r) = self.insts.get(ii) else {
             return ViewInfo { top_only: false };
@@ -299,6 +373,11 @@ impl SimExchange {
 
     /// Trade-through of the public trade `(px, qty)` on resting orders of inst `ii`.
     fn trade_through(&mut self, ii: usize, px: i64, qty: i64, t: u64, ex_ts: i64) {
+        let qty = if self.tune.maker_fill == crate::types::MakerFill::QueueCap {
+            i64::MAX
+        } else {
+            qty
+        };
         for ai in 0..self.accts.len() {
             if self.accts.get(ai).is_none_or(|a| a.n_resting == 0) {
                 continue;
@@ -314,6 +393,11 @@ impl SimExchange {
     /// Displayed quantity of inst `ii`'s `side` (bids for `Buy`) at `px`: the book when live, else
     /// the Bbo when it quotes `px`; 0 when the level is absent.
     pub(crate) fn level_qty(&self, ii: usize, side: Side, px: i64) -> i64 {
+        let shown = self.level_qty_raw(ii, side, px);
+        shown.saturating_sub(self.own_at(ii, side, px)).max(0)
+    }
+
+    fn level_qty_raw(&self, ii: usize, side: Side, px: i64) -> i64 {
         let Some(r) = self.insts.get(ii) else {
             return 0;
         };
@@ -352,9 +436,10 @@ impl SimExchange {
     /// a cancellation behind the order. The quantity ahead never exceeds the level plus the
     /// unexplained decrease.
     fn queue_levels(&mut self, ii: usize, ex_ts: i64) {
-        if self.tune.maker_fill != crate::types::MakerFill::Queue {
+        if !self.queue_model() {
             return;
         }
+        let cap = self.tune.maker_fill == crate::types::MakerFill::QueueCap;
         for ai in 0..self.accts.len() {
             let n = self
                 .accts
@@ -369,6 +454,11 @@ impl SimExchange {
                 let Some(x) = self.accts.get_mut(ai).and_then(|a| a.orders.get_mut(k)) else {
                     continue;
                 };
+                if cap {
+                    x.lvl = shown;
+                    x.ahead = x.ahead.min(shown);
+                    continue;
+                }
                 if x.unexp > 0 && ex_ts.saturating_sub(x.unexp_ts) > QUEUE_MATCH_NS {
                     x.unexp = 0;
                 }
@@ -388,7 +478,7 @@ impl SimExchange {
     /// on the other side consumes the quantity ahead of the orders at that price first (priority
     /// order); the rest fills them.
     fn queue_trade(&mut self, ii: usize, px: i64, qty: i64, taker: Side, t: u64, ex_ts: i64) {
-        if self.tune.maker_fill != crate::types::MakerFill::Queue {
+        if !self.queue_model() {
             return;
         }
         let side = if taker == Side::Buy { Side::Sell } else { Side::Buy };
@@ -425,7 +515,7 @@ impl SimExchange {
                 let d = match due {
                     Some(d) => d,
                     None => {
-                        let d = self.resp_due(ai, t);
+                        let d = self.fill_due(ai, t);
                         due = Some(d);
                         d
                     }
@@ -504,14 +594,18 @@ impl SimExchange {
                         .iter()
                         .filter(|(lp, _)| if side == Side::Buy { *lp < o.px } else { *lp > o.px })
                         .fold(0i64, |s, (_, q)| s.saturating_add(*q));
-                    let q = o.remaining().min(total.saturating_sub(used));
+                    let q = if self.tune.maker_fill == crate::types::MakerFill::QueueCap {
+                        o.remaining()
+                    } else {
+                        o.remaining().min(total.saturating_sub(used))
+                    };
                     if q <= 0 {
                         continue;
                     }
                     let d = match due {
                         Some(d) => d,
                         None => {
-                            let d = self.resp_due(ai, t);
+                            let d = self.fill_due(ai, t);
                             due = Some(d);
                             d
                         }
@@ -571,7 +665,7 @@ impl SimExchange {
             let d = match due {
                 Some(d) => d,
                 None => {
-                    let d = self.resp_due(ai, t);
+                    let d = self.fill_due(ai, t);
                     due = Some(d);
                     d
                 }

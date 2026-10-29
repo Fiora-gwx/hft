@@ -19,3 +19,4 @@ mod settlement;
 mod spot;
 mod taker;
 mod time;
+mod venue_model;

@@ -155,6 +155,8 @@ pub(crate) struct Order {
     /// exchange time it was first seen.
     pub unexp: i64,
     pub unexp_ts: i64,
+    /// `VenueModel::gtd_ms`: event time at which the resting order expires (0 = never).
+    pub exp_at: u64,
 }
 
 impl Order {
@@ -184,6 +186,7 @@ impl Order {
         lvl: 0,
         unexp: 0,
         unexp_ts: 0,
+        exp_at: 0,
     };
 
     pub fn remaining(&self) -> i64 {
@@ -242,6 +245,8 @@ pub(crate) struct PendCmd {
     pub arrive: u64,
     pub seq: u64,
     pub acct: u8,
+    /// 0 = arrival; 1 = the delayed match of a marketable order (`VenueModel::taker`).
+    pub phase: u8,
     pub cmd: GwCmd,
 }
 
