@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-445 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4616,3 +4616,17 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-439.1 | 模拟:`pair_margin = −20 000 000`、`fv_limit = 1` | 生成的 `StrategyParams` 这两个字段为该值,`enabled = 1` |
 | CORE-439.2 | 实盘:`clip_shares = 7` | `clip_shares = 7`(在 `PM_LIVE_PARAMS` 的 5 之后),`inv_max_shares = 10` 不变 |
 | CORE-439.3 | `clip_shares`(无 `=`)、`clip_shares=0.5`;未知字段;`clip_shares = 0`、`pair_margin = −100 000 001` | 各被拒绝;` clip_shares = 7 ` 解析为 (`clip_shares`, 7);`pair_margin = −100 000 000` 通过 |
+
+### CORE-445 预签名按 venue 配置(`venues.<v>.presign`)
+
+- 规则:[配置文件字段](README.md#配置文件字段);语义归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置;`write_polymarket_maker_live`(Cargo feature `polymarket`);表 = `{below, above, step, max_age_ms}`
+- 实现:`apps/hft-core/tests/config.rs::core_445_venue_presign`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-445.1 | `step` 文本 `0.01`、`1`、`.5`、`0`、`0.0000001`、`-1`、空、`0.0a` | 10 000、1 000 000、500 000(1e-6 USDC),其余无效 |
+| CORE-445.2 | 离线配置的 `venues.public.presign`(3, 1, `0.01`, 30 000) | 含 `BadValue` |
+| CORE-445.3 | Polymarket 实盘配置加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |

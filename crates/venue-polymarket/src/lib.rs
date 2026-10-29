@@ -24,12 +24,14 @@ mod caps;
 mod dedup;
 mod md;
 mod orders;
+mod presign;
 mod reports;
 mod session;
 pub mod sign;
 
 pub use bind::{BindErr, FeedCtx, TOKEN_MAX};
 pub use orders::{GTD_S, Templates};
+pub use presign::{PRESIGN_PRICES, Presign};
 pub use reports::GwCtx;
 
 use hft_event::{GwCmd, GwOp};
@@ -266,6 +268,9 @@ impl VenueProtocol for PolymarketClob {
     ) -> Result<(), EncodeErr> {
         // Token ids and order hashes live in `GwCtx`: only `encode_rest_ctx` can encode.
         Err(EncodeErr::Unsupported(c.op))
+    }
+    fn gw_idle(rd: &RefData, t: &Templates, ctx: &mut GwCtx, cred: &Credential, clk: &WallClock) -> bool {
+        presign::step(rd, t, ctx, cred, clk)
     }
     fn decode_rest(
         rd: &RefData,

@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::bind::FeedCtx;
+use crate::presign::{Presign, Presigned};
 use crate::{ReportClass, VENUE};
 
 /// `QueryResult` order-status codes (`ReconcileReport.order_status`, contract 28).
@@ -69,6 +70,8 @@ pub struct GwCtx {
     tokens: FeedCtx,
     rows: Box<[Row]>,
     next: usize,
+    /// Pre-signed orders and the account's last order `timestamp` (README "预签名").
+    pub(crate) pre: Presigned,
 }
 
 impl Default for GwCtx {
@@ -77,6 +80,7 @@ impl Default for GwCtx {
             tokens: FeedCtx::with_capacity(TOKENS),
             rows: vec![Row::default(); ORDERS].into_boxed_slice(),
             next: 0,
+            pre: Presigned::default(),
         }
     }
 }
@@ -95,7 +99,16 @@ fn key_text(key: u64, buf: &mut [u8; 20]) -> &[u8] {
 
 impl GwCtx {
     pub(crate) fn bind(&mut self, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        self.pre.unbind(inst);
         self.tokens.bind_wire(inst, id).map_err(|_| ProtoErr::Cfg)
+    }
+    /// Startup only: pre-sign orders in the gw's idle time (README "预签名"; default off).
+    pub fn set_presign(&mut self, p: Presign) {
+        self.pre.enable(p);
+    }
+    /// Pre-signed orders held now.
+    pub fn presigned(&self) -> usize {
+        self.pre.held()
     }
     /// Decimal token id bound to `inst`.
     pub fn token_of(&self, inst: InstId) -> Option<&[u8]> {

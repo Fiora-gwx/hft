@@ -3819,3 +3819,18 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-403.3 | `Cancel{target_slot: 64}` | 恰一条 `SendReport{op: Cancel, target_slot: 64, target_gen: 1, Written}`;撤单帧带槽 64 的 client id 与 `EX-64` 的值 |
 | VEN-403.4 | `Query{target_slot: 64}` | 同 .3,`op: Query`,查单帧带槽 64 的 client id 与 `EX-64` 的值 |
 | VEN-403.5 | `MirrorRestore{slot: 65, …}` | `ConnState{Degraded, reason: 13}`;无镜像 65 |
+
+### VEN-410 空闲圈调用 venue 的空闲工作,按账户轮转
+
+- 规则:[4. `GwRuntime::poll_once` 的循环结构](README.md#4-gwruntimepoll_once-的循环结构)(第 8 步)
+- 级别:table
+- 里程碑:M3
+- 前置:`G0` + stub(`gw_idle` 记录调用;`GwCtx.idle_left` 为剩余工作量,每次有工作的调用减一并返回 `true`),账户 A1、A2 全部连接已开,先轮询到一圈无工作
+- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_410_idle_rounds_run_the_venue_idle_work`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-410.1 | 一圈空闲 | 恰一次 `gw_idle`;`did_work = false`;`idle_work` 不变 |
+| VEN-410.2 | 再一圈空闲 | 这次调用的是另一个账户 |
+| VEN-410.3 | A1、A2 的 `idle_left` 各 1,连续三圈 | `did_work` 依次 true、true、false;`idle_work` + 2 |
+| VEN-410.4 | 出环一条 `Place` 后一圈 | `did_work = true`;本圈不调用 `gw_idle` |

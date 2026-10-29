@@ -217,6 +217,39 @@ pub struct Venue {
     /// hft-net `NetConfig` keys of this venue's connections (`venues.<v>.net.*`).
     #[serde(default)]
     pub net: NetOpts,
+    /// `venues.<v>.presign` (`polymarket-clob` only): pre-sign orders in the gw's idle time;
+    /// absent = off.
+    #[serde(default)]
+    pub presign: Option<PresignOpts>,
+}
+/// `venues.<v>.presign` (venue-polymarket "预签名"): prices `below`/`above` the last place's in
+/// `step`s (decimal USDC text), each order used within `max_age_ms` of its signing.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PresignOpts {
+    pub below: u8,
+    pub above: u8,
+    pub step: String,
+    pub max_age_ms: u32,
+}
+impl PresignOpts {
+    /// `step` in 1e-6 USDC: positive, at most six decimals.
+    pub fn step_e6(&self) -> Option<u32> {
+        let (int, frac) = self.step.split_once('.').unwrap_or((self.step.as_str(), ""));
+        if int.is_empty() && frac.is_empty()
+            || frac.len() > 6
+            || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        let int: u32 = if int.is_empty() { 0 } else { int.parse().ok()? };
+        let frac: u32 = if frac.is_empty() {
+            0
+        } else {
+            format!("{frac:0<6}").parse().ok()?
+        };
+        int.checked_mul(1_000_000)?.checked_add(frac).filter(|v| *v > 0)
+    }
 }
 /// `venues.<v>.net.{rest_timeout_ms,rest_max_idle_ms}` (hft-net "配置项"): absent = the
 /// `NetConfig` default; applies to every REST pool of the venue (gw, snap-fetch).
@@ -552,6 +585,9 @@ pub fn load_timed(
         }
         if v.max_sub_insts == 0 || v.stale_guard_ms == 0 {
             errors.push(Error::config("SubCapacity", name));
+        }
+        if let Some(e) = crate::venues::presign_error(name, v) {
+            errors.push(e);
         }
         if v.net.rest_timeout_ms == Some(0) {
             errors.push(Error::config(

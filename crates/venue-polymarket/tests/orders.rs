@@ -1276,3 +1276,147 @@ fn pmk_034_cancel_before_the_place_answer() {
     rest(&mut c9, &mut s, GwOp::Place, 400, crosses);
     assert_eq!(kinds(&s), vec![(OrderEventKind::Reject, 0)], "PMK-034.9");
 }
+
+fn encode_at(ctx: &mut GwCtx, c: &GwCmd, t: &TargetRef, ms: i64) -> RestReqBuf {
+    let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
+    let mut out = RestReqBuf::default();
+    let clk = WallClock {
+        unix_ms: ms,
+        unix_us: ms * 1000,
+    };
+    Pm::encode_rest_ctx(rd(), &tpl, ctx, &cred(), c, t, &clk, &mut out).unwrap();
+    out
+}
+
+fn idle_at(ctx: &mut GwCtx, ms: i64) -> bool {
+    let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
+    let clk = WallClock {
+        unix_ms: ms,
+        unix_us: ms * 1000,
+    };
+    Pm::gw_idle(rd(), &tpl, ctx, &cred(), &clk)
+}
+
+/// Idle steps until there is nothing left to do; returns how many signed an order.
+fn idle_all(ctx: &mut GwCtx, ms: i64) -> usize {
+    (0..64).take_while(|_| idle_at(ctx, ms)).count()
+}
+
+/// (timestamp, salt, signature) of a `POST /order` body, and whether the signature is the
+/// wallet's over the body's own fields.
+fn body_order(r: &RestReqBuf) -> (u64, u64, bool) {
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let o = &b["order"];
+    let n = |k: &str| o[k].as_str().unwrap().parse::<u64>().unwrap();
+    let order = OrderV2 {
+        salt: o["salt"].as_u64().unwrap(),
+        maker: venue_wallet(),
+        signer: venue_wallet(),
+        token_id: parse_u256(o["tokenId"].as_str().unwrap()).unwrap(),
+        maker_amount: n("makerAmount"),
+        taker_amount: n("takerAmount"),
+        side: if o["side"] == "BUY" { 0 } else { 1 },
+        signature_type: 3,
+        timestamp_ms: n("timestamp"),
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let mut sig = [0u8; 512];
+    let len = sign_order_1271(
+        &Wallet::from_hex(KEY).unwrap(),
+        &exchange_domain("2", CHAIN_ID, &EXCHANGE_V2),
+        CHAIN_ID,
+        &order,
+        &mut sig,
+    );
+    let mut hex = [0u8; 1026];
+    let want = hex_bytes(&sig[..len], &mut hex).unwrap();
+    (
+        order.timestamp_ms,
+        order.salt,
+        o["signature"].as_str().unwrap() == want,
+    )
+}
+
+#[test]
+fn pmk_035_presigned_orders() {
+    use venue_polymarket::Presign;
+    let on = Presign::new(1, 1, 10_000, 30_000).unwrap();
+    let buy = |px| cmd(GwOp::Place, UP, Side::Buy, px, 5_000_000, Tif::PostOnly);
+    // .1 configuration bounds.
+    assert!(Presign::new(3, 4, 10_000, 30_000).is_some(), "PMK-035.1");
+    assert!(Presign::new(4, 4, 10_000, 30_000).is_none(), "PMK-035.1");
+    assert!(Presign::new(1, 1, 0, 30_000).is_none(), "PMK-035.1");
+    assert!(Presign::new(1, 1, 10_000, 999).is_none(), "PMK-035.1");
+    assert!(Presign::new(1, 1, 10_000, 240_001).is_none(), "PMK-035.1");
+    // .2 off (default): no idle work, every place signed at the decision.
+    let mut c = ctx();
+    encode_at(&mut c, &buy(420), &tgt(0), NOW_MS);
+    assert!(!idle_at(&mut c, NOW_MS), "PMK-035.2");
+    assert_eq!(c.presigned(), 0, "PMK-035.2");
+    // .3 on: the place at 0.42 anchors 0.41, 0.42, 0.43 (side, size of the place); three idle
+    // steps sign them, then there is nothing to do.
+    let mut c = ctx();
+    c.set_presign(on);
+    let mut t6 = tgt(0);
+    t6.id.slot = 6;
+    let mut p6 = buy(420);
+    p6.slot = SlotId(6);
+    let r = encode_at(&mut c, &p6, &t6, NOW_MS);
+    let (ts0, _, ok) = body_order(&r);
+    assert!(ok && ts0 == NOW_MS as u64, "PMK-035.3");
+    assert_eq!(idle_all(&mut c, NOW_MS + 10), 3, "PMK-035.3");
+    assert_eq!(c.presigned(), 3, "PMK-035.3");
+    // .4 a place at 0.43 uses its pre-signed order (signed at NOW + 10 ms, unique timestamps
+    // after the first place's); a second one at the same clock is signed afresh.
+    let pre = encode_at(&mut c, &buy(430), &tgt(0), NOW_MS + 20);
+    let (ts1, salt1, ok) = body_order(&pre);
+    assert!(ok, "PMK-035.4");
+    assert!(ts1 > ts0 && ts1 <= NOW_MS as u64 + 13, "PMK-035.4 {ts1}");
+    assert_eq!(salt1 & 0xF_FFFF, 0, "PMK-035.4: no slot in a pre-signed salt");
+    assert_eq!(c.presigned(), 2, "PMK-035.4: used once");
+    let mut t8 = tgt(0);
+    t8.id.slot = 8;
+    let mut p8 = buy(430);
+    p8.slot = SlotId(8);
+    let r = encode_at(&mut c, &p8, &t8, NOW_MS + 20);
+    let (ts2, salt2, ok) = body_order(&r);
+    assert!(ok && ts2 == NOW_MS as u64 + 20, "PMK-035.4");
+    assert_eq!(salt2 & 0xF_FFFF, 8, "PMK-035.4");
+    // The order hash kept for the slot is the pre-signed one: its cancel names it.
+    let r = encode_mut(&mut c, &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(0)).unwrap();
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"orderID\":\"{}\"}}", signed_hash(&pre)),
+        "PMK-035.4"
+    );
+    // .5 timestamps stay unique when the clock repeats: two places at one millisecond.
+    let mut c2 = ctx();
+    let a = body_order(&encode_at(&mut c2, &buy(420), &tgt(0), NOW_MS)).0;
+    let b2 = body_order(&encode_at(&mut c2, &p8, &t8, NOW_MS)).0;
+    assert_eq!((a, b2), (NOW_MS as u64, NOW_MS as u64 + 1), "PMK-035.5");
+    // .6 ageing: from 3/4 of `max_age_ms` the step re-signs; past `max_age_ms` an order is not
+    // used (the place signs afresh).
+    let mut c = ctx();
+    c.set_presign(on);
+    encode_at(&mut c, &buy(420), &tgt(0), NOW_MS);
+    assert_eq!(idle_all(&mut c, NOW_MS), 3, "PMK-035.6");
+    assert_eq!(idle_all(&mut c, NOW_MS + 22_499), 0, "PMK-035.6");
+    assert_eq!(idle_all(&mut c, NOW_MS + 22_504), 3, "PMK-035.6");
+    let late = NOW_MS + 22_504 + 30_001;
+    let (ts, _, ok) = body_order(&encode_at(&mut c, &buy(410), &tgt(0), late));
+    assert!(ok && ts == late as u64, "PMK-035.6");
+    // .7 rebinding the inst to another token drops its orders and anchor.
+    let mut c = ctx();
+    c.set_presign(on);
+    encode_at(&mut c, &buy(420), &tgt(0), NOW_MS);
+    idle_all(&mut c, NOW_MS);
+    Pm::bind_order_wire(&mut c, UP, &parse_u256("12345678901234567890").unwrap()).unwrap();
+    assert_eq!(c.presigned(), 0, "PMK-035.7");
+    assert!(!idle_at(&mut c, NOW_MS + 1), "PMK-035.7");
+    // .8 prices stay inside (0, 1): an anchor at 0.99 signs 0.98 and 0.99 only.
+    let mut c = ctx();
+    c.set_presign(on);
+    encode_at(&mut c, &buy(990), &tgt(0), NOW_MS);
+    assert_eq!(idle_all(&mut c, NOW_MS), 2, "PMK-035.8");
+}

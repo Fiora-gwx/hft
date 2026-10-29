@@ -1,0 +1,23 @@
+# Reference-machine budgets of venue-polymarket's benchmarks (source constants read by `cargo xtask
+# bench-gate`). One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in
+# ns, equal to the README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Report only.
+
+["pm/encode_place_signed"]
+p50_ns = 150000
+p99_ns = 300000
+gate = "report"
+
+["pm/encode_cancel"]
+p50_ns = 3000
+p99_ns = 10000
+gate = "report"
+
+["pm/encode_place_presigned"]
+p50_ns = 10000
+p99_ns = 30000
+gate = "report"
+
+["pm/presign_step"]
+p50_ns = 150000
+p99_ns = 300000
+gate = "report"

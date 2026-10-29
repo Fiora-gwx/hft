@@ -30,14 +30,15 @@ spec: README.md
 | 心跳 | PMK-001 |
 | 签名 | PMK-018–PMK-022 |
 | 凭证 | PMK-023, PMK-024 |
-| 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032, PMK-034 |
+| 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032, PMK-034, PMK-035 |
+| 预签名 | PMK-035, PMK-036 |
 | 用户流事件表 | PMK-027, PMK-029, PMK-032, PMK-034 |
 | 累计量与费用来源 | PMK-027, PMK-031 |
 | 结果未知码表 | PMK-026, PMK-034 |
 | 账户配置核验 | PMK-030 |
 | VenueCaps 默认值 | PMK-011, PMK-033, PMK-034 |
 | 实现说明 | PMK-006, PMK-007 |
-| 延迟与资源契约 | PMK-011 |
+| 延迟与资源契约 | PMK-011, PMK-036 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:由 `cargo xtask deps` 机检 |
 | 延伸阅读 | 不适用:非规范 |
@@ -528,3 +529,32 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-034.7 | 撤单应答"不存在";下单应答 500;查单 200 `LIVE` | 下单应答无事件、`outcome_unknown`;查单产出 `CancelReject{EARLY}`、`Ack`、`QueryResult{New}`(均为 slot 7) |
 | PMK-034.8 | 撤单应答"不存在";下单应答 200 `matched` | 只有 `Ack` |
 | PMK-034.9 | 撤单应答"不存在";下单应答 400 `invalid post-only order: order crosses book` | `Reject` |
+
+### PMK-035 预签名:空闲时签好锚价附近的订单,下单用一次即删,时间戳全账户唯一
+
+- 规则:[预签名](README.md#预签名)、[下单](README.md#下单)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-023;`on` = `Presign::new(1, 1, 10 000, 30 000)`(锚价 ±0.01,寿命 30 s);`Place{UP, Buy, 价, 5 份, PostOnly}`;签名正确 = 请求体的 `signature` 等于测试私钥对体内各字段的存款钱包签名;"空闲到底" = 反复 `gw_idle` 到返回 `false`
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_035_presigned_orders`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-035.1 | `Presign::new`:(3, 4, 10 000, 30 000);(4, 4, …);`step_e6` 0;`max_age_ms` 999、240 001 | 前者 `Some`,其余 `None` |
+| PMK-035.2 | 未开启:下单 0.42 后 `gw_idle` | `false`;`presigned() = 0` |
+| PMK-035.3 | `on`:槽 6 下单 0.42(时钟 T),T + 10 ms 空闲到底 | 下单当场签名、`timestamp` = T、签名正确;空闲签 3 张(0.41、0.42、0.43);`presigned() = 3` |
+| PMK-035.4 | 接 .3,T + 20 ms 槽 7 下单 0.43;同一时钟槽 8 再下 0.43;再编码槽 7 的 `Cancel` | 前者用预签名单:签名正确,T < `timestamp` ≤ T + 13,`salt` 低 20 位为 0,`presigned() = 2`;后者当场签名,`timestamp` = T + 20,`salt` 低 20 位 = 8;撤单体的 `orderID` = 预签名单的哈希 |
+| PMK-035.5 | 未开启,同一毫秒两次下单 | `timestamp` 依次 T、T + 1 |
+| PMK-035.6 | `on`:下单 0.42、空闲到底(时钟 T);T + 22 499、T + 22 504 空闲到底;再 30 001 ms 后下单 0.41 | 3;0(未到 3/4 寿命);3(重签);下单当场签名、`timestamp` = 当时时钟 |
+| PMK-035.7 | `on`:下单 0.42、空闲到底;`UP` 改绑另一代币 | `presigned() = 0`;`gw_idle` 返回 `false` |
+| PMK-035.8 | `on`:下单 0.99、空闲到底 | 签 2 张(0.98、0.99;1.00 不在 (0, 1) 内) |
+
+### PMK-036 签名与编码基准
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)、[预签名](README.md#预签名)
+- 级别:bench
+- 里程碑:M3
+- 前置:同 PMK-023 的私钥与代币;每次迭代时钟前进 1 ms
+- 基准名:`pm/encode_place_signed`、`pm/encode_cancel`、`pm/encode_place_presigned`、`pm/presign_step`
+- 实现:`crates/venue-polymarket/benches/sign.rs::pmk_036_signing`
+- 期望:预算见 README;`gate = "report"`(只报告)

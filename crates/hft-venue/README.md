@@ -508,6 +508,7 @@ struct GwAccount<P: VenueProtocol> {
 5. **计划切换**:primary `rotate_due`(计划轮换时刻按 `conn.rotate_margin_s` 规则)、收到 `ServerShutdown` 提示或 `GwCmd{Rotate}`,standby `Open`,且 `inflight[primary] == 0` → 先按 §4b 把私有频道迁到 standby(先建后断),再 `swap_primary`,推 `ConnState{Rotated, conn = 新 primary, account, role=Order, reason}`(`reason` = 触发它的 `ROTATE_DUE` 或 `SERVER_HINT` 位,`GwCmd{Rotate}` 为 0);旧 primary 再等 1 s 收尾回报后 `retire`。满 `rotate_wait_max_ms` 仍有在途 → 放弃本次,再过 `rotate_wait_max_ms` 重新开始等待；该圈响应清空在途时仍可切换。错峰到期的 standby 只退役并补建，不触发 primary 切换。
 6. 心跳(§5);`inflight` 超时检查;`hold` 超时检查(第 2 步);账户查询调度(§4a)。
 7. **预热(可选,默认关)**:`gw.warm_interval_ns > 0` 时,空闲超过该间隔用一条固定的假 `GwCmd{op: Place}` 走 `encode → seal`(写 `warm_frame`)→ `primary.warm(&warm_frame)`。不发送、不推任何事件。启用条件:统一升级主机上 `egress` 的冷热差测量证明值得。
+8. **venue 空闲工作**:本圈没有任何工作(无帧、无命令、无维护、无 REST 与 acct 记录)时,按账户轮转为一个账户调用一次 `P::gw_idle(rd, tpl, ctx, rest_credential, wall_clock)`([hft-venue-proto 契约 32](../hft-venue-proto/README.md#实现方必须遵守的契约);Polymarket 的预签名,[venue-polymarket](../venue-polymarket/README.md#预签名))。返回 `true` 计数 `GwCounters.idle_work`,本圈算作有工作(调用方不进入空闲等待);有工作的圈不调用。一次调用的时长由 venue 限定(预签名一张约 0.1 ms),出环命令最多等它一次。
 
 **死手**:刷新由 sequencer 的 `DeadMan` 定时器发出 `GwCmd{op: DeadManRefresh, arg: timeout_ms}`([05 §5](../../design/05-CEX执行层.md)),gw **不自行刷新**——sequencer 卡死时刷新自然停止,交易所侧撤单生效。按 inst 计时的所只刷新槽镜像中有活动订单的 inst,所以 Admin 冒烟单(`OrderFlags::SMOKE`,占用槽镜像)所在的 inst 同样被刷新,停掉 hft-core 后由交易所撤单。`DeadManSpec::None` 的所由 [kill-switch](../../apps/kill-switch/README.md) 兜底。
 

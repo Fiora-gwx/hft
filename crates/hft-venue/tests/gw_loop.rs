@@ -308,3 +308,48 @@ fn ven_245_has_pending() {
     assert!(!PollTask::has_pending(&h.rt), "VEN-245.5");
     let _ = (GwOp::Place, AccountId(0));
 }
+
+#[test]
+fn ven_410_idle_rounds_run_the_venue_idle_work() {
+    let mut h = gw_full::<StubProto>(g0(), &[A1, A2], GhOpts::default());
+    let mut t = 3_000_000;
+    for _ in 0..100 {
+        t += 1;
+        if !h.poll(t).did_work {
+            break;
+        }
+    }
+    let calls = || stub::calls("gw_idle");
+    let who = |c: &stub::Call| c.arg.contains("AccountId(1)");
+    // .1 an idle round: one call, nothing done, the round stays idle.
+    let (c0, n0) = (calls().len(), h.rt.counters().idle_work);
+    t += 1;
+    let ls = h.poll(t);
+    assert_eq!(calls().len(), c0 + 1, "VEN-410.1");
+    assert!(!ls.did_work, "VEN-410.1");
+    assert_eq!(h.rt.counters().idle_work, n0, "VEN-410.1");
+    // .2 the next idle round serves the other account.
+    t += 1;
+    h.poll(t);
+    let v = calls();
+    assert_eq!(v.len(), c0 + 2, "VEN-410.2");
+    assert_ne!(who(&v[c0]), who(&v[c0 + 1]), "VEN-410.2");
+    // .3 one unit of work per account: two working rounds, then idle again.
+    h.rt.ctx(A1).unwrap().idle_left = 1;
+    h.rt.ctx(A2).unwrap().idle_left = 1;
+    let worked: Vec<bool> = (0..3)
+        .map(|_| {
+            t += 1;
+            h.poll(t).did_work
+        })
+        .collect();
+    assert_eq!(worked, vec![true, true, false], "VEN-410.3");
+    assert_eq!(h.rt.counters().idle_work, n0 + 2, "VEN-410.3");
+    // .4 a round with a command does not call it.
+    let c1 = calls().len();
+    let p = h.place(A1, 7, 1, S1, false);
+    h.cmd(p);
+    t += 1;
+    assert!(h.poll(t).did_work, "VEN-410.4");
+    assert_eq!(calls().len(), c1, "VEN-410.4");
+}

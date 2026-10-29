@@ -151,7 +151,16 @@ pub fn assemble(
             bulk,
             commands,
             venue_polymarket::FeedCtx::with_capacity(rd.insts_of_venue(VenueId::POLYMARKET_CLOB).len()),
-            venue_polymarket::GwCtx::default,
+            {
+                let presign = pm_presign(v)?;
+                move || {
+                    let mut g = venue_polymarket::GwCtx::default();
+                    if let Some(p) = presign {
+                        g.set_presign(p);
+                    }
+                    g
+                }
+            },
             SignAlg::HmacSha256,
             secrets,
         ),
@@ -331,7 +340,7 @@ fn build<P: AccountProtocol + Send>(
     bulk: ByteProducer,
     commands: Consumer<FeedCmd>,
     mut ctx: P::FeedCtx,
-    gw_ctx: fn() -> P::GwCtx,
+    gw_ctx: impl Fn() -> P::GwCtx,
     session_alg: SignAlg,
     secrets: &crate::secrets::SecretFiles,
 ) -> Result<BuiltVenue, Error>
@@ -994,6 +1003,40 @@ fn publish_account(tx: &mut ByteProducer, state: &State) -> Result<(), Error> {
     }
     Ok(())
 }
+/// The venue's `presign` table as venue-polymarket's `Presign` (`None` = off).
+#[cfg(feature = "polymarket")]
+fn pm_presign(v: &Venue) -> Result<Option<venue_polymarket::Presign>, Error> {
+    let Some(p) = &v.presign else {
+        return Ok(None);
+    };
+    p.step_e6()
+        .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
+        .map(Some)
+        .ok_or_else(|| Error::config("BadValue", "venues.<v>.presign"))
+}
+
+/// Load-time check of `venues.<name>.presign` (README "配置文件字段"): only `polymarket-clob`
+/// pre-signs; the values must be in range.
+pub fn presign_error(name: &str, v: &Venue) -> Option<Error> {
+    let p = v.presign.as_ref()?;
+    let bad = |why: &str| Some(Error::config("BadValue", format!("venues.{name}.presign: {why}")));
+    if v.protocol != "polymarket-clob" {
+        return bad("only polymarket-clob pre-signs orders");
+    }
+    #[cfg(feature = "polymarket")]
+    {
+        if p.step_e6()
+            .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
+            .is_none()
+        {
+            return bad("below + above < 8, step > 0 with at most 6 decimals, max_age_ms 1000-240000");
+        }
+    }
+    #[cfg(not(feature = "polymarket"))]
+    let _ = p;
+    None
+}
+
 pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     let expected = match protocol {
         "binance-usdm" => VenueId::BINANCE_USDM,
