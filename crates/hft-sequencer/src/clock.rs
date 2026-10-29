@@ -57,12 +57,11 @@ const _: () = assert!(core::mem::offset_of!(UtcLineRow, utc_ns) == 8);
 const _: () = assert!(core::mem::offset_of!(UtcLineRow, hz_milli) == 16);
 const _: () = assert!(core::mem::offset_of!(UtcLineRow, lead_ns) == 24);
 
-/// Rate at which an engine UTC that is ahead of CLOCK_REALTIME is slowed down (never stepped
-/// back): 500 ppm, the kernel's `adjtime` slew limit. Protocol constant (replay recomputes it).
-pub const UTC_SLEW_PPM: u64 = 500;
-/// A `UtcAnchor.hz_milli` further than this from `EngineClock.tsc_hz_milli` is not used (the line
-/// keeps `EngineClock.tsc_hz_milli`). Protocol constant.
-pub const UTC_RATE_TOL_PPM: u64 = 1_000;
+/// `UTC_SLEW_PPM`: rate at which an engine UTC that is ahead of CLOCK_REALTIME is slowed down
+/// (never stepped back), 500 ppm. `UTC_RATE_TOL_PPM`: a `UtcAnchor.hz_milli` further than this
+/// from `EngineClock.tsc_hz_milli` is not used. Protocol constants (replay recomputes them),
+/// defined once in hft-rt with the published warm-reader line.
+pub use hft_rt::{UTC_RATE_TOL_PPM, UTC_SLEW_PPM};
 
 /// `base + ⌊(t − t0) × 10^12 / hz_milli⌋` (floor, i128 intermediate, saturating; `hz_milli = 0` →
 /// `base`): the SDK `EngineClockAnchor::utc_of` formula.

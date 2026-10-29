@@ -862,7 +862,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 | `src/driver/{mod,live,recover,verify,mirror}.rs` | 四种驱动;`live/sched.rs` 取环顺序、让位、定时器中途检查与每轮上限,`live/env.rs` 环境决定器(含关键帧的时间与事件数触发、最大推迟),`live/feedctl.rs` `FeedCmd` 环满时的暂存续推,`live/kill.rs` 写 KillWord,`live/quarantine.rs` 毒丸隔离 |
 | `src/conflate.rs` | BBO 合并 |
 | `src/dispatch.rs` | kind 分派表、CSR 索引与 `sub_ix`(含按 `EvMask` 与引擎持仓驱动订阅的并集下发 `FeedCmd::Subscribe`)、`L2Batch` 整批应用、OMS 输出的排空顺序、`NotifyQueue` 与 `NotifyBacklog`(续推、背压) |
-| `src/clock.rs` | 引擎时钟基准、`engine_ns` 换算(乘数与移位、±1 校正、`ClockRange`)、`stop_engine_ns`、`EngineClock` 处理;引擎 UTC 线(`UtcLineRow`、`UTC_SLEW_PPM`、`UTC_RATE_TOL_PPM`) |
+| `src/clock.rs` | 引擎时钟基准、`engine_ns` 换算(乘数与移位、±1 校正、`ClockRange`)、`stop_engine_ns`、`EngineClock` 处理;引擎 UTC 线(`UtcLineRow`;`UTC_SLEW_PPM`、`UTC_RATE_TOL_PPM` 是 hft-rt 的同一组常数) |
 | `src/liveness.rs` | 按 (venue, 槽) 的连接活性、成员位图、`BboView` 按值投影 |
 | `src/strategies.rs` | 实例表、`StrategySet` 调用、Ctx 应用、`IntentHandle` 回填、`spec_seq` |
 | `src/views.rs` | `SeqViews`(SDK `Views`/`ModelViews` 实现)、`RiskView` 适配器、`LegSummary` 投影 |

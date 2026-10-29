@@ -32,7 +32,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244、SEQ-442 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
-| 引擎 UTC | SEQ-443–SEQ-446 |
+| 引擎 UTC | SEQ-443–SEQ-446、SEQ-450 |
 | 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434、SEQ-440 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
@@ -1744,6 +1744,19 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
   - 新运行的 `EngineClock` 之后线未设置,UTC 回到新段校准对
 - 实现:`crates/hft-sequencer/tests/utc.rs::seq_446_anchor_input_replay`
 
+
+### SEQ-450 引擎 UTC 线与 hft-rt 发布线在同一组校准对下一致
+
+- 规则:[引擎 UTC](README.md#引擎-utc)(常数与 hft-rt 同一组);发布线归 [hft-rt 时间](../hft-rt/README.md#时间)
+- 级别:table
+- 里程碑:M3
+- 前置:1 GHz 计数器,启动校准对 (0, 10^12 ns);`UtcClock::shared(clock, horizon 1 000 ms)` 与 `UtcLineRow`
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_450_engine_line_and_published_line_agree`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-450.1 | 10 ms 处落后 2 ms 的校准对同时交给 `UtcPublisher::update` 与 `UtcLineRow::anchored` | 之后 0、1 ms、1 s、10 s 两线之差 ≤ 2 ns(发布线乘数的取整) |
+| SEQ-450.2 | 20.01 s 处超前 1 ms 的校准对;4 s 后再给一个在目标线上的校准对 | 两线都不回退;4 s 时引擎线已在目标线上;发布线在下一校准对后 1 s 处与目标线之差 ≤ 2 ns |
 ### SEQ-113 BBO 连接上各 Input 对连接活性的作用
 
 补充验证就绪缓存:连续报价期间断开全部成员,再重连并重建成员,Feeds 闸门随状态正确开闭,从关键帧回放一致。实现 `crates/hft-sequencer/tests/liveness.rs::seq_113_feed_gate_cache_rechecks_after_connection_and_membership_changes`。
