@@ -91,7 +91,7 @@ pub fn feed_record(
 }
 
 /// A fixed body from a logical body written by an older schema version (appended fields read 0).
-fn body_of<B: hft_event::Body>(body: &[u8]) -> Option<B> {
+pub(crate) fn body_of<B: hft_event::Body>(body: &[u8]) -> Option<B> {
     let size = size_of::<B>();
     if let Some(b) = body.get(..size) {
         return B::try_read_from_bytes(b).ok();

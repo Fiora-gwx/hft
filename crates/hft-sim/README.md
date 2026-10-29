@@ -201,8 +201,26 @@ impl SimExchange {
 - **吃单延迟**:`taker` 开时,非 PostOnly、非 Gtc 的订单在到达时只做拒单检查,撮合排在到达 + `base_us`(以 `slow_ppm`/10⁶ 的概率为 `slow_us`;有 `Taker` 池时取池中样本)之后,用那一刻的簿(含叠加层)撮合,Ack、成交与剩余的 Expired 在撮合 + `resp_us` 回报。
 - **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。
 - **GTD**:挂单自到达起 `gtd_ms` 到期,与指令按事件时间排序,到期回 `Expired`(计数 `gtd_expired`);OMS 把交易所的 Expired 当作终态(hft-oms 自己的 `ExpireAt` 只处理 Unknown 槽,不重复终结)。
-- **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出(hft-sim 不计算条件)。
+- **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出;撮合本身不看条件,条件由下面的 `CondTracker` 从喂给它的行情算出。
 - **自有挂单叠加层**:`hide_own` 登记的量从显示簿中扣除:挂单的 `ahead`/档位量、吃单与越价撮合看到的对手档位都不含它。
+
+#### 条件跟踪与校准表
+
+```rust
+pub struct CondCfg { pub load_thr_ns: Vec<i64>, pub window_s: u32 /* 缺省 300 */, pub phase_s: u32 /* 缺省 5 */ }
+impl CondTracker {
+    pub fn new(cfg: CondCfg, venues: u64 /* 每个 VenueId 一位 */, tsc_hz_milli: u64) -> CondTracker;
+    pub fn on_market(&mut self, kind: EventKind, body: &[u8], tsc: u64);   // 行情记录,按记录顺序
+    pub fn condition(&self, t: Tsc, utc_ns: i64) -> Cond;                   // 决策时刻 t、引擎 UTC 的条件
+}
+#[cfg(feature = "calib")]
+pub mod calib { pub fn apply(text: &[u8], maker_fill: &mut MakerFill, venue: &mut VenueModel, cond: &mut CondCfg) -> Result<(), String>; }
+```
+
+- `load`:`venues` 中各 venue 的 `L2Batch`/`L2Snapshot`/`Trade` 以 `sw_rx_ns − ex_ts_ns` 为一个延迟样本(两个戳都 > 0),按接收秒归组取 90 分位(第 ⌊0.9 n⌋ 个),每个 UTC 分钟的各秒值取中位数;上一个结束的分钟的中位数大于几个 `load_thr_ns` 阈值,`load` 就是几;第一个分钟结束前为 1。
+- `mv`:不在 `venues` 中的第一个出现的 inst 的 `Bbo` 是参考报价,保留最近 2 s 的 (记录 tsc, bid + ask);决策时取 1 s 内最早的一条与最新一条比较:变动 ≤ 0.25 bp → 0,≤ 1 bp → 1,否则 2;没有报价 → 0。
+- `phase`:`utc_ns` 所在秒在 `window_s` 窗口内的位置 < `phase_s` → 0,否则 1。
+- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
 
 ### 重启恢复
 
@@ -545,6 +563,7 @@ pub struct StressVerdict {
 | `src/account.rs` | 现货结算与锁定、手续费资产、永续仓位、全仓保证金与强平价、强平、资金费、划转、重置、seed、真值报告 |
 | `src/models.rs` | `LatencyModel`/`Dist` 校验、延迟抽样、账户子流 |
 | `src/glue.rs` | journal 衔接:`feed_record`、`written`、`reply_parts` |
+| `src/cond.rs`、`src/calib.rs`(`calib` feature) | 条件跟踪 `CondTracker`;校准表解析 |
 | `src/view.rs`、`src/hash.rs`、`src/fx.rs` | `SimAccountView`、`state_hash`、i128 定点辅助 |
 | `src/stress.rs`(M4) | `StressSpec`、`StressCase`、`PricePath`、`StressFault`、`StressTransform`、`StressVerdict` |
 | `src/task.rs`(`task` feature,M4) | `SimGwTask`、`DecisionTable` |
@@ -578,6 +597,7 @@ pub struct StressVerdict {
 | [`hft-types`](../hft-types/README.md)、[`hft-refdata`](../hft-refdata/README.md)、[`hft-event`](../hft-event/README.md) | 定点类型、`InstMeta`/`VenueCaps`/`FeeSchedule`/`SimAccountCfg`、事件体与 `GwCmd`/`RepMsg` | 默认 |
 | [`hft-book`](../hft-book/README.md) | 簿副本 | 默认 |
 | `rand_chacha` | 确定性随机 | 默认 |
+| `serde`、`serde_json` | 校准表 JSON | `calib` |
 | [`hft-rt`](../hft-rt/README.md)(环、`PollTask`)、[`hft-journal`](../hft-journal/README.md)(只用 `JournalReader`) | sim-gw 任务 | `task` |
 | `libm`、vendored hftbacktest 模型层(MIT) | 排队模型 | `queue-hftbacktest`(可选) |
 

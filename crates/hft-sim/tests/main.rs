@@ -4,6 +4,7 @@
 mod book;
 mod commands;
 mod common;
+mod cond;
 mod config;
 mod events;
 mod fees;

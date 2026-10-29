@@ -16,7 +16,7 @@ hft-refdata.workspace = true
 hft-event.workspace = true
 hft-journal.workspace = true
 hft-rt.workspace = true
-hft-sim.workspace = true
+hft-sim = { workspace = true, features = ["calib"] }
 hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
 hft-sequencer = { workspace = true, features = ["replay-io"] }
 zerocopy.workspace = true

@@ -8,7 +8,7 @@ use hft_event::{
 use hft_refdata::{AccountKind, RefData, SimAccountCfg, SimBalance};
 use hft_sim::glue::{Fed, feed_record, reply_parts, written};
 use hft_sim::{
-    Cond, LatencyModel, MakerFill, MarginModel, MmrSource, SimExchange, SimSetup, SimTuning, VenueModel,
+    LatencyModel, MakerFill, MarginModel, MmrSource, SimExchange, SimSetup, SimTuning, VenueModel,
 };
 use hft_types::{AccountId, AssetId, InstId, Px, Qty, Rate, Side, Tsc, VenueId};
 
@@ -35,26 +35,8 @@ pub struct SimParams {
     pub calib_file_sha: String,
 }
 
-/// Latency-condition buckets (README "条件延迟"): venue load of the previous UTC minute
-/// (the minute median of per-second md-lag p90 of the masked accounts' venues, against
-/// `load_thr_ns`), the reference mid move over the last 1 s (≤ 0.25 / ≤ 1 / > 1 bp) and the
-/// window phase (within the first `phase_s` of each `window_s`).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct CondCfg {
-    pub load_thr_ns: Vec<i64>,
-    pub window_s: u32,
-    pub phase_s: u32,
-}
-
-impl Default for CondCfg {
-    fn default() -> Self {
-        CondCfg {
-            load_thr_ns: Vec::new(),
-            window_s: 300,
-            phase_s: 5,
-        }
-    }
-}
+/// Latency-condition buckets (README "条件延迟"), hft-sim's (shared with the sim-gw).
+pub use hft_sim::CondCfg;
 
 impl Default for SimParams {
     fn default() -> Self {
@@ -74,22 +56,6 @@ impl Default for SimParams {
             calib_file_sha: String::new(),
         }
     }
-}
-
-/// The condition tracker of `CondCfg`.
-#[derive(Debug, Default)]
-struct CondTrack {
-    /// Venues of the masked accounts (bit per `VenueId`).
-    venues: u64,
-    sec: i64,
-    lags: Vec<i64>,
-    minute: i64,
-    p90s: Vec<i64>,
-    /// Load bucket of the previous complete minute (1 until one is known).
-    load: u8,
-    ref_inst: Option<InstId>,
-    /// `(record tsc, bid + ask)` of the reference over the last 2 s.
-    ref_hist: std::collections::VecDeque<(u64, i128)>,
 }
 
 /// One logged own order of a masked account (`--own`).
@@ -123,8 +89,7 @@ pub struct ResearchVenue {
     /// Inputs produced but not yet handed (SendReport Written, deliveries), in order.
     immediate: Vec<SimInput>,
     pub fed: u64,
-    hz: u64,
-    track: CondTrack,
+    track: hft_sim::CondTracker,
     /// `(account, slot, gen)` → logged own order (`--own`).
     own: std::collections::BTreeMap<(u8, u32, u32), OwnOrder>,
     /// Engine UTC of the Input being processed (`on_utc`).
@@ -264,12 +229,7 @@ impl ResearchVenue {
             interval: -1,
             immediate: Vec::new(),
             fed: 0,
-            hz: tsc_hz_milli,
-            track: CondTrack {
-                venues,
-                load: 1,
-                ..CondTrack::default()
-            },
+            track: hft_sim::CondTracker::new(p.cond.clone(), venues, tsc_hz_milli),
             own: Default::default(),
             utc_ns: 0,
         })
@@ -314,96 +274,8 @@ impl ResearchVenue {
         if feed_record(&mut self.ex, &hdr, r.kind, &r.body, &mut self.levels) == Fed::Market {
             self.fed += 1;
             if self.params.venue.pools.is_some() {
-                self.track_market(r);
+                self.track.on_market(r.kind, &r.body, r.tsc);
             }
-        }
-    }
-
-    /// Condition inputs of one market record: md lag of the masked venues, the reference mid.
-    fn track_market(&mut self, r: &hft_sequencer::MemRecord) {
-        let Some(h) = hft_sequencer::types::read_body_plain::<hft_event::MarketHdr>(&r.body) else {
-            return;
-        };
-        let t = &mut self.track;
-        let on_venue = t.venues & (1u64 << (h.venue.0 & 63)) != 0;
-        if on_venue
-            && matches!(
-                r.kind,
-                EventKind::L2_BATCH | EventKind::L2_SNAPSHOT | EventKind::TRADE
-            )
-        {
-            if h.sw_rx_ns > 0 && h.ex_ts_ns > 0 {
-                let sec = h.sw_rx_ns.div_euclid(1_000_000_000);
-                if sec != t.sec {
-                    if !t.lags.is_empty() {
-                        t.lags.sort_unstable();
-                        let k = (t.lags.len() * 9 / 10).min(t.lags.len() - 1);
-                        t.p90s.push(t.lags[k]);
-                        t.lags.clear();
-                    }
-                    let minute = sec.div_euclid(60);
-                    if minute != t.minute {
-                        if !t.p90s.is_empty() {
-                            t.p90s.sort_unstable();
-                            let med = t.p90s[t.p90s.len() / 2];
-                            t.load = self.params.cond.load_thr_ns.iter().filter(|x| med > **x).count() as u8;
-                            t.p90s.clear();
-                        }
-                        t.minute = minute;
-                    }
-                    t.sec = sec;
-                }
-                t.lags.push(h.sw_rx_ns - h.ex_ts_ns);
-            }
-        } else if !on_venue && r.kind == EventKind::BBO {
-            let Some(b) = hft_sequencer::types::read_body_plain::<hft_event::Bbo>(&r.body) else {
-                return;
-            };
-            if t.ref_inst.is_none() {
-                t.ref_inst = Some(b.h.inst);
-            }
-            if t.ref_inst == Some(b.h.inst) && b.bid_px.0 > 0 && b.ask_px.0 > 0 {
-                t.ref_hist
-                    .push_back((r.tsc, i128::from(b.bid_px.0) + i128::from(b.ask_px.0)));
-                let keep = self.hz.saturating_mul(2) / 1_000;
-                while t
-                    .ref_hist
-                    .front()
-                    .is_some_and(|x| r.tsc.saturating_sub(x.0) > keep)
-                {
-                    t.ref_hist.pop_front();
-                }
-            }
-        }
-    }
-
-    /// The latency condition at decision time `t` (README "条件延迟").
-    fn condition(&self, t: Tsc) -> Cond {
-        let tr = &self.track;
-        let one_s = self.hz / 1_000;
-        let mv = match (
-            tr.ref_hist.iter().find(|x| t.0.saturating_sub(x.0) <= one_s),
-            tr.ref_hist.back(),
-        ) {
-            (Some(a), Some(b)) if a.1 > 0 => {
-                let d = (b.1 - a.1).abs();
-                if d * 40_000 <= a.1 {
-                    0
-                } else if d * 10_000 <= a.1 {
-                    1
-                } else {
-                    2
-                }
-            }
-            _ => 0,
-        };
-        let c = &self.params.cond;
-        let s = self.utc_ns.div_euclid(1_000_000_000);
-        let phase = u8::from(s.rem_euclid(i64::from(c.window_s.max(1))) >= i64::from(c.phase_s));
-        Cond {
-            load: tr.load,
-            mv,
-            phase,
         }
     }
 
@@ -488,7 +360,7 @@ impl ResearchVenue {
                     self.push_immediate(EventKind::SEND_REPORT, decided, &RepMsg::SendReport(w));
                 }
                 if self.params.venue.pools.is_some() {
-                    let c = self.condition(decided);
+                    let c = self.track.condition(decided, self.utc_ns);
                     self.ex.set_condition(c);
                 }
                 self.ex.on_command(cmd, decided);

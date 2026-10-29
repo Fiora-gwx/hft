@@ -15,6 +15,9 @@
 )]
 
 mod account;
+#[cfg(feature = "calib")]
+pub mod calib;
+pub mod cond;
 mod exec;
 mod fx;
 pub mod glue;
@@ -40,6 +43,7 @@ use hft_refdata::{
 use hft_types::{AccountId, AssetId, InstId, Px, Qty, Rate, Side, Tsc, VenueId};
 use zerocopy::IntoBytes;
 
+pub use cond::{CondCfg, CondTracker};
 pub use types::{
     CMDS_PER_POLL, Dist, LatencyModel, MAX_LATENCY_MODELS, MAX_MARGIN_ITEMS, MAX_MARGIN_MODELS,
     MAX_SIM_ACCOUNTS, MAX_VENUES_PER_ACCOUNT, MEMORY_RING, MakerFill, MarginModel, MarketEventRef, MmrSource,

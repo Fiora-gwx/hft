@@ -1819,6 +1819,7 @@ dependencies = [
  "hft-types",
  "proptest",
  "rand_chacha",
+ "serde",
  "serde_json",
  "static_assertions",
  "toml 0.8.23",

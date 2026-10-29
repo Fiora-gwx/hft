@@ -105,7 +105,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 
 #### Polymarket 场所行为、校准表与条件延迟
 
-`SimParams.venue` 原样交给 `SimExchange::set_venue_model`(规则归 [hft-sim 场所行为选项](../hft-sim/README.md#场所行为选项venuemodel):`QueueCap`、撤单竞速与墓碑、吃单延迟、二元吃单费、GTD、成交回报延迟、条件延迟池、自有挂单叠加层);缺省全部关闭,结果与 M1 的模拟相同(RPL-305.3)。来源:命令行选项,或 `--calib <file>` 的校准表(下表;选项按出现顺序生效,后者覆盖前者;文件的 SHA-256 写入 `run.json` 的 `calib_file_sha`,全部模拟参数的哈希仍是 `calib_sha`)。
+`SimParams.venue` 原样交给 `SimExchange::set_venue_model`(规则归 [hft-sim 场所行为选项](../hft-sim/README.md#场所行为选项venuemodel):`QueueCap`、撤单竞速与墓碑、吃单延迟、二元吃单费、GTD、成交回报延迟、条件延迟池、自有挂单叠加层);缺省全部关闭,结果与 M1 的模拟相同(RPL-305.3)。来源:命令行选项,或 `--calib <file>` 的校准表(下表,解析与条件跟踪是 [hft-sim 的共用实现](../hft-sim/README.md#条件跟踪与校准表);选项按出现顺序生效,后者覆盖前者;文件的 SHA-256 写入 `run.json` 的 `calib_file_sha`,全部模拟参数的哈希仍是 `calib_sha`)。
 
 | 校准表字段 | 含义 |
 |---|---|
@@ -183,7 +183,7 @@ pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, 
 | `src/driver.rs` | `ResearchDriver`、`ResearchSink`(新 seq、截获 `OrderDecision`/`CmdResult`)、前缀读取 |
 | `src/source.rs` | 流式读取(逻辑记录、段校准、预读) |
 | `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver`、条件跟踪、`--own` |
-| `src/calib.rs` | 校准表 |
+| `src/calib.rs` | 校准表(解析在 hft-sim `calib`,这里加文件哈希) |
 | `src/calib_build.rs` | 从实盘 journal 生成校准表的延迟池 |
 | `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
 | `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
@@ -205,7 +205,7 @@ pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, 
 
 ## 依赖
 
-内部:`hft-types`、`hft-refdata`、`hft-event`、`hft-journal`、`hft-rt`、`hft-sim`、`hft-strategy-sdk`(`schema-json`)、`hft-sequencer`(`replay-io`)。外部:`arrow-array`/`arrow-schema`/`parquet` 59(Parquet 写出,zstd)、`serde`/`serde_json`/`toml`(变体文件与 `run.json`)、`sha2`、`zerocopy`。不被任何引擎 crate 或 hft-core 依赖。
+内部:`hft-types`、`hft-refdata`、`hft-event`、`hft-journal`、`hft-rt`、`hft-sim`(`calib`)、`hft-strategy-sdk`(`schema-json`)、`hft-sequencer`(`replay-io`)。外部:`arrow-array`/`arrow-schema`/`parquet` 59(Parquet 写出,zstd)、`serde`/`serde_json`/`toml`(变体文件与 `run.json`)、`sha2`、`zerocopy`。不被任何引擎 crate 或 hft-core 依赖。
 
 ## 延伸阅读
 
