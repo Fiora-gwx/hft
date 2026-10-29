@@ -423,3 +423,82 @@ fn oms_486_cancel_held_until_ack() {
     assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-486.7");
     assert!(!held(&h, s), "OMS-486.7");
 }
+
+#[test]
+fn oms_489_early_cancel_reject_cancels_again() {
+    let held = |h: &H, s: OrderRef| h.flags(s) & SlotFlags::CANCEL_HELD != 0;
+    let anomalies = |h: &H| {
+        h.notes(hft_oms::notes::ANOMALY)
+            .iter()
+            .filter(|n| n.v[0] == 1)
+            .count()
+    };
+    let early = |h: &mut H, s: OrderRef, cum: Qty, t: u64| {
+        let mut e = h.oe(s, OrderEventKind::CancelReject);
+        e.detail = 2;
+        e.cum_filled = cum;
+        if cum.0 > 0 {
+            e.avg_px = p("60000.00");
+            e.fee_asset = USDT;
+        }
+        h.ev(&e, t);
+    };
+    let start = || {
+        let mut h = H::new();
+        let s = h.place_ok(&buy_x(), 0);
+        h.cancel(s, 1).unwrap();
+        assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-489 setup");
+        assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-489 setup");
+        (h, s)
+    };
+    // .1 the cancel overtook the order, which then went live: one more cancel, still
+    // PendingCancel; the late Ack only records the exchange id.
+    let (mut h, s) = start();
+    early(&mut h, s, q("0"), 2);
+    let d = h.decisions(OrderAction::Cancel);
+    assert_eq!((d.len(), d[0].target_slot.0), (1, s.slot), "OMS-489.1");
+    assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-489.1");
+    assert!(h.flags(s) & SlotFlags::CANCEL_SENT != 0, "OMS-489.1");
+    assert_eq!(transitions(&h), vec![(3, 3, 2)], "OMS-489.1");
+    h.ack(s, 777, 2);
+    assert!(h.decisions(OrderAction::Cancel).is_empty(), "OMS-489.1");
+    assert_eq!(
+        (h.state(s), h.slot(s).exch_order_id),
+        (OrderState::PendingCancel, 777),
+        "OMS-489.1"
+    );
+    // .2 fully filled in the meantime: Filled, no cancel.
+    let (mut h, s) = start();
+    early(&mut h, s, q("0.01"), 2);
+    assert_eq!(h.state(s), OrderState::Filled, "OMS-489.2");
+    assert!(h.decisions(OrderAction::Cancel).is_empty(), "OMS-489.2");
+    // .3 Unknown (cancel timeout): held, sent when the Ack converges the slot to Live.
+    let (mut h, s) = start();
+    h.sweep(2_500);
+    assert_eq!(h.state(s), OrderState::Unknown, "OMS-489.3");
+    early(&mut h, s, q("0"), 3_000);
+    assert_eq!(h.state(s), OrderState::Unknown, "OMS-489.3");
+    assert!(held(&h, s), "OMS-489.3");
+    assert!(h.decisions(OrderAction::Cancel).is_empty(), "OMS-489.3");
+    h.ack(s, 777, 3_100);
+    assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-489.3");
+    assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-489.3");
+    assert!(!held(&h, s), "OMS-489.3");
+    // .4 the held cancel is dropped when the slot ends Cancelled.
+    let (mut h, s) = start();
+    h.sweep(2_500);
+    early(&mut h, s, q("0"), 3_000);
+    h.what(s, OrderEventKind::CancelAck, 3_100);
+    assert_eq!(h.state(s), OrderState::Cancelled, "OMS-489.4");
+    assert!(
+        h.decisions(OrderAction::Cancel).is_empty() && !held(&h, s),
+        "OMS-489.4"
+    );
+    // .5 on a Live slot (no cancel in flight) it is a table anomaly.
+    let mut h = H::new();
+    let s = live(&mut h, &buy_x(), 777);
+    early(&mut h, s, q("0"), 2);
+    assert_eq!(h.state(s), OrderState::Live, "OMS-489.5");
+    assert_eq!(anomalies(&h), 1, "OMS-489.5");
+    assert!(h.decisions(OrderAction::Cancel).is_empty(), "OMS-489.5");
+}

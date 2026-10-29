@@ -24,7 +24,7 @@ spec: README.md
 | 数据布局(草案,实现时以代码与编译期断言为准) | OMS-003, OMS-005, OMS-010–OMS-017, OMS-021, OMS-022, OMS-034, OMS-051, OMS-381, OMS-421 |
 | ClientOrderId | OMS-030–OMS-035 |
 | 状态机 | OMS-456, OMS-018, OMS-019, OMS-023, OMS-040, OMS-045–OMS-052, OMS-380, OMS-486 |
-| 回报处理表 | OMS-051, OMS-055–OMS-069, OMS-143, OMS-380 |
+| 回报处理表 | OMS-051, OMS-055–OMS-069, OMS-143, OMS-380, OMS-489 |
 | SendReport 处理 | OMS-070–OMS-077, OMS-380 |
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
@@ -4504,3 +4504,20 @@ POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜�
   - 步骤 2:无 `OrderDecision{Query}`;`OmsNeedsRestQuery` 一条
   - 步骤 3:h 保持 `Unknown`,置 `HIST_WAIT`;`OmsNeedsRestQuery{trades = 1}`;无 `NotFoundExpire` 迁移
 - 实现:`crates/hft-oms/tests/unknown.rs::oms_488_expire_at_linked_long_grace_waits_for_history`
+
+### OMS-489 撤单早到(`CancelReject{EARLY}`):再撤一次,Unknown 中挂起到 Live
+
+- 规则:[回报处理表](README.md#回报处理表)、[状态机](README.md#状态机)
+- 级别:table
+- 里程碑:M2
+- 前置:P0(`VS` 不含 `CANCEL_NEEDS_ACK`);a1@VS 在 t = 0 下单 `buy_x`(槽 s),t = 1 `cancel(s)`(s `PendingCancel`,一条撤单);`EARLY` = `CancelReject{detail = 2}`
+- 步骤:依次执行下表各行(每行从前置重新开始)
+- 实现:`crates/hft-oms/tests/fsm.rs::oms_489_early_cancel_reject_cancels_again`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| OMS-489.1 | t = 2 `EARLY`;再 t = 2 `Ack`(`exch_order_id` 777) | `EARLY` 的同一调用一条 `OrderDecision{Cancel, target_slot s}`,s 仍 `PendingCancel`、置 `CANCEL_SENT`,迁移 `PendingCancel → PendingCancel`(原因 `CancelReq`);`Ack` 后 s `PendingCancel`、`exch_order_id = 777`、无新撤单 |
+| OMS-489.2 | t = 2 `EARLY`,`cum_filled` = 0.01(全部) | s `Filled`;无撤单 |
+| OMS-489.3 | t = 2 500 sweep(超 `cancel_timeout`,s `Unknown`);t = 3 000 `EARLY`;t = 3 100 `Ack` | `EARLY` 后 s 仍 `Unknown`、置 `CANCEL_HELD`、无撤单;`Ack` 的同一调用 s → `Live` → `PendingCancel`,一条撤单,清 `CANCEL_HELD` |
+| OMS-489.4 | 同 .3,但 t = 3 100 `CancelAck` | s `Cancelled`;无撤单;清 `CANCEL_HELD` |
+| OMS-489.5 | s 已 Ack(`Live`,未撤)时 `EARLY` | 异常 Note(`OmsAnomaly{Table}`),s 保持 `Live`,无撤单 |

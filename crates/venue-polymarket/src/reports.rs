@@ -24,6 +24,9 @@ mod status {
 }
 /// `CancelReject.detail` class `GONE` (contract 28).
 const REJECT_GONE: u8 = 1;
+/// `CancelReject.detail` class `EARLY` (contract 28): the cancel overtook the order, which then went
+/// live; the OMS cancels again.
+const REJECT_EARLY: u8 = 2;
 
 /// Orders remembered per account (hash, cumulative fill, terminal); oldest overwritten first.
 const ORDERS: usize = 512;
@@ -50,6 +53,13 @@ struct Row {
     /// Completed below its size while its slot was unknown: the completing `QueryResult` is
     /// still owed (README "累计量与费用来源").
     owed: bool,
+    /// The last cancel was sent by the signed hash before the order's `Ack` (README "下单").
+    cancel_early: bool,
+    /// That cancel was answered "not found" while the place was still unanswered: whether the
+    /// cancel overtook the order is decided by the place answer (or a query).
+    cancel_nf: bool,
+    /// The place answer said the order rests (`live` / `delayed`).
+    live: bool,
 }
 
 /// gw state of one account: token ids bound by `BindWire`, the hashes of this process's orders
@@ -140,6 +150,25 @@ impl GwCtx {
             r.owner = Some(owner);
         }
     }
+    /// Hash a `Cancel` addresses: the acked order's (`exch_order_id`), else the one signed for the
+    /// target's client id, acked or not (README "下单"); marks a cancel sent before the `Ack`.
+    pub(crate) fn cancel_hash(&mut self, exch_order_id: u64, id: &ClientOrderId) -> Option<[u8; 32]> {
+        let key = match self.row(exch_order_id) {
+            Some(r) => r.key,
+            None => key_of(&self.placed_hash(id)?),
+        };
+        let r = self.row_mut(key)?;
+        r.cancel_early = !r.acked && !r.terminal;
+        r.cancel_nf = false;
+        Some(r.hash)
+    }
+    /// The newest-signed row of the order this process signed for `(slot, gen)`.
+    fn placed_row(&self, slot: u32, r#gen: u32) -> Option<u64> {
+        self.rows
+            .iter()
+            .find(|r| r.key != 0 && r.owner.is_some_and(|o| o.slot == slot && o.r#gen == r#gen))
+            .map(|r| r.key)
+    }
 }
 
 /// Same order slot and generation of the same account and engine epoch.
@@ -227,6 +256,8 @@ struct PlaceResp<'a> {
     order_id: &'a str,
     #[serde(rename = "errorMsg", default, borrow)]
     error_msg: &'a str,
+    #[serde(default, borrow)]
+    status: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -356,6 +387,23 @@ fn err_code(status: u16, body: &[u8]) -> u32 {
     }
 }
 
+/// The place was refused because this process cancelled its hash first (README "下单": a cancel
+/// that overtook its order; the exchange remembers cancelled hashes).
+fn already_cancelled(msg: &str) -> bool {
+    msg.contains("Already canceled")
+}
+
+/// The order hash an error message names (`order 0x… is invalid. …`).
+fn hash_in(msg: &str) -> Option<[u8; 32]> {
+    let at = msg.find("0x")?;
+    parse_hash(msg.get(at..at + 66)?)
+}
+
+/// Error text of a refused place: `error` (HTTP 4xx) or `errorMsg` (200, `success: false`).
+fn err_text(body: &[u8]) -> &str {
+    from::<ErrResp>(body).map(|e| e.error).unwrap_or("")
+}
+
 pub(crate) fn decode_rest(
     rd: &RefData,
     ctx: &mut GwCtx,
@@ -390,11 +438,29 @@ pub(crate) fn decode_rest(
                     && let Some(h) = parse_hash(p.order_id)
                 {
                     let key = ctx.remember(&h);
+                    let live = matches!(p.status, "live" | "delayed");
+                    // A cancel sent before this answer found nothing, yet the order rests: the
+                    // cancel overtook it (README "下单"). `EARLY` precedes the Ack, so an Unknown
+                    // slot holds the OMS's second cancel until the Ack makes it Live.
+                    let early = ctx.row_mut(key).is_some_and(|w| {
+                        let early = w.cancel_nf && live && !w.terminal;
+                        w.cancel_nf = false;
+                        w.live = live;
+                        early
+                    });
+                    if early {
+                        let mut c = e;
+                        c.what = OrderEventKind::CancelReject;
+                        c.detail = REJECT_EARLY;
+                        c.exch_order_id = key;
+                        out.order(&c);
+                        o.events += 1;
+                    }
                     let mut buf = [0u8; 20];
                     let _ = out.exch_id(key_text(key, &mut buf), None);
                     e.exch_order_id = key;
                     out.order(&e);
-                    o.events = 1;
+                    o.events += 1;
                     // Fills that completed the order below its size before this answer were held
                     // unresolved (the runtime releases them after this Ack): owe the completion.
                     if let Some(w) = ctx.row_mut(key) {
@@ -413,22 +479,16 @@ pub(crate) fn decode_rest(
                 }
                 // `success: false` with a message: refused by the exchange.
                 if !p.error_msg.is_empty() {
-                    e.what = OrderEventKind::Reject;
-                    e.reject_code = raw_code_str(p.error_msg.as_bytes());
-                    o.raw_code = e.reject_code;
-                    out.order(&e);
-                    o.events = 1;
+                    let code = raw_code_str(p.error_msg.as_bytes());
+                    place_refused(ctx, r, p.error_msg, code, e, out, &mut o);
                     return Ok(o);
                 }
                 o.outcome_unknown = Some(r);
                 return Ok(o);
             }
             if refused(status) {
-                e.what = OrderEventKind::Reject;
-                e.reject_code = err_code(status, body);
-                o.raw_code = e.reject_code;
-                out.order(&e);
-                o.events = 1;
+                let msg = err_text(body);
+                place_refused(ctx, r, msg, err_code(status, body), e, out, &mut o);
                 return Ok(o);
             }
             o.outcome_unknown = Some(r);
@@ -450,18 +510,36 @@ pub(crate) fn decode_rest(
             }
             // A single cancel the exchange refused (already filled, cancelled or unknown).
             if r.op == GwOp::Cancel
-                && let Some((_, why)) = c.not_canceled.0
+                && let Some((id, why)) = c.not_canceled.0
             {
-                let mut e = blank(rx.account, rx);
-                e.what = OrderEventKind::CancelReject;
-                e.slot = SlotId(r.slot);
-                e.r#gen = r.r#gen;
-                e.inst = req.inst;
-                e.detail = REJECT_GONE;
-                e.reject_code = raw_code_str(why.as_bytes());
-                o.raw_code = e.reject_code;
-                out.order(&e);
-                o.events += 1;
+                o.raw_code = raw_code_str(why.as_bytes());
+                let row = parse_hash(id).and_then(|h| ctx.row_mut(key_of(&h)));
+                let detail = match row {
+                    // Sent before the place answer and the order is not known yet: the cancel may
+                    // have overtaken it. The place answer decides (README "下单"): refused as
+                    // already cancelled → CancelAck; resting → `EARLY`.
+                    Some(w) if w.cancel_early && !w.terminal && !w.acked => {
+                        w.cancel_nf = true;
+                        None
+                    }
+                    // The place answer came first and the order rests: the cancel overtook it.
+                    Some(w) if w.cancel_early && !w.terminal && w.live => {
+                        w.cancel_early = false;
+                        Some(REJECT_EARLY)
+                    }
+                    _ => Some(REJECT_GONE),
+                };
+                if let Some(detail) = detail {
+                    let mut e = blank(rx.account, rx);
+                    e.what = OrderEventKind::CancelReject;
+                    e.slot = SlotId(r.slot);
+                    e.r#gen = r.r#gen;
+                    e.inst = req.inst;
+                    e.detail = detail;
+                    e.reject_code = o.raw_code;
+                    out.order(&e);
+                    o.events += 1;
+                }
             }
             Ok(o)
         }
@@ -510,6 +588,24 @@ pub(crate) fn decode_rest(
                 return Err(DecodeErr::Shape);
             }
             let key = key_of(&h);
+            // A cancel that found nothing while the place was unanswered, and the order rests:
+            // `EARLY` before the Ack (README "下单").
+            let resting = matches!(q.status, "LIVE" | "DELAYED") && e.detail != status::FILLED;
+            if let Some(w) = ctx.row_mut(key) {
+                if resting {
+                    w.live = true;
+                }
+                if w.cancel_nf && resting && !w.terminal {
+                    w.cancel_nf = false;
+                    w.cancel_early = false;
+                    let mut c = e;
+                    c.what = OrderEventKind::CancelReject;
+                    c.detail = REJECT_EARLY;
+                    c.exch_order_id = key;
+                    out.order(&c);
+                    o.events += 1;
+                }
+            }
             // An order queried before its REST answer (README "下单"): bind it to the queried
             // slot and ack it, so the slot learns its exchange id.
             let owner = ctx
@@ -541,6 +637,37 @@ pub(crate) fn decode_rest(
     }
 }
 
+/// A refused place: `Reject`, except the refusal of an order whose hash this process cancelled
+/// before the exchange saw it (`… is invalid. Already canceled.`): `CancelAck` (README "下单").
+fn place_refused(
+    ctx: &mut GwCtx,
+    r: hft_venue_proto::ReqRef,
+    msg: &str,
+    code: u32,
+    mut e: OrderEvent,
+    out: &mut impl ReportSink,
+    o: &mut ReportOutcome,
+) {
+    let key = hash_in(msg)
+        .map(|h| key_of(&h))
+        .filter(|k| ctx.row(*k).is_some())
+        .or_else(|| ctx.placed_row(r.slot, r.r#gen));
+    if let Some(w) = key.and_then(|k| ctx.row_mut(k)) {
+        w.terminal = true;
+        w.cancel_nf = false;
+    }
+    if already_cancelled(msg) {
+        e.what = OrderEventKind::CancelAck;
+        e.exch_order_id = key.unwrap_or(0);
+    } else {
+        e.what = OrderEventKind::Reject;
+        e.reject_code = code;
+    }
+    o.raw_code = code;
+    out.order(&e);
+    o.events += 1;
+}
+
 /// `CancelAck` for a cancelled order hash, once per order; only for orders the runtime can map.
 fn cancelled(
     ctx: &mut GwCtx,
@@ -552,11 +679,13 @@ fn cancelled(
     o: &mut ReportOutcome,
 ) {
     let key = key_of(h);
-    if ctx.row(key).is_some_and(|r| r.terminal) {
+    let (terminal, owner) = ctx.row(key).map_or((false, None), |r| (r.terminal, r.owner));
+    if terminal {
         return;
     }
-    let mut buf = [0u8; 20];
-    let ExchIdHint::Resolved { epoch, slot, r#gen } = out.exch_id(key_text(key, &mut buf), None) else {
+    // Before the place answer the runtime does not know the hash: bind it to the client id this
+    // process signed it for (a cancel sent by the signed hash, README "下单").
+    let Some((epoch, slot, r#gen)) = resolve(out, key, owner) else {
         return;
     };
     if let Some(r) = ctx.row_mut(key) {

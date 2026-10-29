@@ -1085,3 +1085,194 @@ fn pmk_033_stale_guard_is_the_gtd_lifetime() {
     let exp: i64 = b["order"]["expiration"].as_str().unwrap().parse().unwrap();
     assert_eq!(exp - NOW_MS / 1000, i64::from(default_ms / 1000), "PMK-033.2");
 }
+
+/// A `GwCtx` that signed `Place{UP, Buy, 0.42, 5 shares, PostOnly}` for slot 7 / gen 3 / epoch 5
+/// and, before any answer, encoded the cancel of that slot; returns both requests too.
+fn cancel_first() -> (GwCtx, RestReqBuf, RestReqBuf) {
+    let mut c = ctx();
+    let place = cmd(GwOp::Place, UP, Side::Buy, 420, 5_000_000, Tif::PostOnly);
+    let p = encode_mut(&mut c, &place, &tgt(0)).unwrap();
+    let r = encode_mut(&mut c, &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(0)).unwrap();
+    (c, p, r)
+}
+
+/// The order hash a `POST /order` body signs (the exchange's `orderID`).
+fn signed_hash(place: &RestReqBuf) -> String {
+    let b: serde_json::Value = serde_json::from_slice(place.body.as_slice()).unwrap();
+    let o = &b["order"];
+    let n = |k: &str| o[k].as_str().unwrap().parse::<u64>().unwrap();
+    let order = OrderV2 {
+        salt: o["salt"].as_u64().unwrap(),
+        maker: venue_wallet(),
+        signer: venue_wallet(),
+        token_id: parse_u256(o["tokenId"].as_str().unwrap()).unwrap(),
+        maker_amount: n("makerAmount"),
+        taker_amount: n("takerAmount"),
+        side: 0,
+        signature_type: 3,
+        timestamp_ms: n("timestamp"),
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let hash = order_digest(&exchange_domain("2", CHAIN_ID, &EXCHANGE_V2), &order);
+    let mut hex = [0u8; 66];
+    hex_bytes(&hash, &mut hex).unwrap().to_string()
+}
+
+fn rest(c: &mut GwCtx, s: &mut VecSink, op: GwOp, status: u16, body: &str) -> hft_venue_proto::ReportOutcome {
+    Pm::decode_rest(rd(), c, &origin(op, UP), status, body.as_bytes(), &RX, s).unwrap()
+}
+
+/// Answers measured 2026-10-28 (a cancel sent before its order was posted).
+fn not_found(h: &str) -> String {
+    format!(
+        "{{\"not_canceled\":{{\"{h}\":\"order can't be found - already canceled or matched\"}},\"canceled\":[]}}"
+    )
+}
+fn already_cancelled(h: &str) -> String {
+    format!("{{\"error\":\"order {h} is invalid. Already canceled.\"}}")
+}
+fn placed_answer(h: &str, status: &str) -> String {
+    format!(
+        "{{\"errorMsg\":\"\",\"orderID\":\"{h}\",\"takingAmount\":\"\",\"makingAmount\":\"\",\"status\":\"{status}\",\"success\":true}}"
+    )
+}
+
+#[test]
+fn pmk_034_cancel_before_the_place_answer() {
+    const CACK: OrderEventKind = OrderEventKind::CancelAck;
+    const CREJ: OrderEventKind = OrderEventKind::CancelReject;
+    const GONE: u8 = 1;
+    const EARLY: u8 = 2;
+    let s7 = SlotId(7);
+    let kinds = |s: &VecSink| orders(s).iter().map(|e| (e.what, e.detail)).collect::<Vec<_>>();
+    // .1 the cancel names the hash signed for the target's client id, before any answer; the
+    // venue does not declare CANCEL_NEEDS_ACK.
+    let (c, p, r) = cancel_first();
+    let h = signed_hash(&p);
+    let k = key_of(&h);
+    assert_eq!(
+        (r.method, text(r.path_query.as_slice()), text(r.body.as_slice())),
+        (
+            Method::Delete,
+            "/order",
+            format!("{{\"orderID\":\"{h}\"}}").as_str()
+        ),
+        "PMK-034.1"
+    );
+    assert!(header(&r, "POLY_SIGNATURE").is_some(), "PMK-034.1");
+    assert!(
+        !Pm::default_caps(|_| None)
+            .flags
+            .contains(hft_refdata::CapFlags::CANCEL_NEEDS_ACK),
+        "PMK-034.1"
+    );
+    // .2 the cancel overtook the order: its "not found" is held back, the place's "Already
+    // canceled" refusal ends the slot as cancelled.
+    let mut c2 = c.clone();
+    let mut s = VecSink::default();
+    let o = rest(&mut c2, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    assert_eq!((o.events, orders(&s).len()), (0, 0), "PMK-034.2");
+    assert_eq!(
+        o.raw_code,
+        raw_code_str(b"order can't be found - already canceled or matched"),
+        "PMK-034.2"
+    );
+    let o = rest(&mut c2, &mut s, GwOp::Place, 400, &already_cancelled(&h));
+    assert_eq!(o.events, 1, "PMK-034.2");
+    assert!(o.outcome_unknown.is_none(), "PMK-034.2");
+    assert_eq!(rows(&s), vec![(CACK, s7, 3, 0, 0, 0, 0, 0, k)], "PMK-034.2");
+    // .3 the refusal first, then "not found": CancelAck, then CancelReject{GONE} (a duplicate
+    // for the OMS, whose slot is already Cancelled).
+    let mut c3 = c.clone();
+    let mut s = VecSink::default();
+    rest(&mut c3, &mut s, GwOp::Place, 400, &already_cancelled(&h));
+    rest(&mut c3, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    assert_eq!(kinds(&s), vec![(CACK, 0), (CREJ, GONE)], "PMK-034.3");
+    // .4 the order rested and the cancel removed it before the place answer: CancelAck of the
+    // signed client id (bound now); the late place answer is an Ack; the user channel's
+    // CANCELLATION adds nothing.
+    let mut c4 = c.clone();
+    let mut s = VecSink::default();
+    let body = format!("{{\"not_canceled\":{{}},\"canceled\":[\"{h}\"]}}");
+    let o = rest(&mut c4, &mut s, GwOp::Cancel, 200, &body);
+    assert_eq!(o.events, 1, "PMK-034.4");
+    assert_eq!(rows(&s), vec![(CACK, s7, 3, 5, 0, 0, 0, 0, k)], "PMK-034.4");
+    assert!(
+        s.id_calls
+            .contains(&(k.to_string().into_bytes(), Some(tgt(0).id))),
+        "PMK-034.4"
+    );
+    let mut s = VecSink::default();
+    rest(&mut c4, &mut s, GwOp::Place, 200, &placed_answer(&h, "live"));
+    assert_eq!(kinds(&s), vec![(ACK, 0)], "PMK-034.4");
+    let mut s = VecSink::default();
+    bind(&mut s, &h);
+    let o = report(&mut c4, &mut s, &order_frame(&h, "CANCELLATION", "CANCELED", "0"));
+    assert_eq!((o.events, orders(&s).len()), (0, 0), "PMK-034.4");
+    // .5 "not found", yet the place answer says live: CancelReject{EARLY} before the Ack; the
+    // second cancel names the hash again and its "not found" is a plain GONE.
+    let mut c5 = c.clone();
+    let mut s = VecSink::default();
+    rest(&mut c5, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    let o = rest(&mut c5, &mut s, GwOp::Place, 200, &placed_answer(&h, "live"));
+    assert_eq!(o.events, 2, "PMK-034.5");
+    assert_eq!(
+        rows(&s),
+        vec![
+            (CREJ, s7, 3, 0, 0, 0, 0, EARLY, k),
+            (ACK, s7, 3, 0, 0, 0, 0, 0, k)
+        ],
+        "PMK-034.5"
+    );
+    let r = encode_mut(
+        &mut c5,
+        &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc),
+        &tgt(k),
+    )
+    .unwrap();
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"orderID\":\"{h}\"}}"),
+        "PMK-034.5"
+    );
+    let mut s = VecSink::default();
+    rest(&mut c5, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    assert_eq!(kinds(&s), vec![(CREJ, GONE)], "PMK-034.5");
+    // .6 the place answer (live) first, then "not found" for the cancel sent before it: EARLY.
+    let mut c6 = c.clone();
+    let mut s = VecSink::default();
+    rest(&mut c6, &mut s, GwOp::Place, 200, &placed_answer(&h, "live"));
+    rest(&mut c6, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    assert_eq!(kinds(&s), vec![(ACK, 0), (CREJ, EARLY)], "PMK-034.6");
+    // .7 "not found" and the place answer is lost (500): a query that finds the order LIVE gives
+    // EARLY, then the Ack and QueryResult{New}.
+    let mut c7 = c.clone();
+    let mut s = VecSink::default();
+    rest(&mut c7, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    let o = rest(&mut c7, &mut s, GwOp::Place, 500, "");
+    assert!(o.outcome_unknown.is_some() && orders(&s).is_empty(), "PMK-034.7");
+    query(&mut c7, &mut s, UP, &query_body(&h, T_UP, "LIVE", "0"));
+    assert_eq!(
+        orders(&s)
+            .iter()
+            .map(|e| (e.what, e.detail, e.slot))
+            .collect::<Vec<_>>(),
+        vec![(CREJ, EARLY, s7), (ACK, 0, s7), (QUERY, 1, s7)],
+        "PMK-034.7"
+    );
+    // .8 "not found" and the place answer says matched: the Ack only (fills come from the user
+    // channel).
+    let mut c8 = c.clone();
+    let mut s = VecSink::default();
+    rest(&mut c8, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    rest(&mut c8, &mut s, GwOp::Place, 200, &placed_answer(&h, "matched"));
+    assert_eq!(kinds(&s), vec![(ACK, 0)], "PMK-034.8");
+    // .9 a refusal of another kind stays a Reject.
+    let mut c9 = c;
+    let mut s = VecSink::default();
+    rest(&mut c9, &mut s, GwOp::Cancel, 200, &not_found(&h));
+    let crosses = "{\"error\":\"invalid post-only order: order crosses book\"}";
+    rest(&mut c9, &mut s, GwOp::Place, 400, crosses);
+    assert_eq!(kinds(&s), vec![(OrderEventKind::Reject, 0)], "PMK-034.9");
+}

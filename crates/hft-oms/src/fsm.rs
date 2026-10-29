@@ -6,6 +6,9 @@ use hft_types::{AssetId, GROUP_NONE, GroupId, InstId, Px, Qty, Side, StrategyId,
 
 /// `OrderEvent.detail` of Cancel/AmendReject: the order is already filled or gone (hft-event `RejectClass`).
 pub(crate) const REJECT_GONE: u8 = 1;
+/// `OrderEvent.detail` of CancelReject: the cancel reached the venue before the order, which then
+/// went live (hft-event `RejectClass` EARLY); the cancel is sent again.
+pub(crate) const REJECT_EARLY: u8 = 2;
 use crate::Oms;
 use crate::notes;
 use crate::types::{
@@ -529,7 +532,26 @@ impl Oms {
             }
             OrderEventKind::CancelReject => {
                 let gone = ev.detail == REJECT_GONE;
+                let early = ev.detail == REJECT_EARLY;
                 match st {
+                    // The cancel overtook the order, which went live after it: cancel again.
+                    S::PendingCancel if early => {
+                        self.pre_fill(ti, s, ev, now, seq, out);
+                        let full = self
+                            .t(ti)
+                            .and_then(|t| t.slot(s))
+                            .is_some_and(|x| x.filled.0 >= x.qty.0);
+                        if full {
+                            self.transition(ti, s, S::Filled, TransitionCause::Fill, now, seq, out);
+                        } else {
+                            self.cancel_slot(ti, s, TransitionCause::CancelReq, None, now, seq, out);
+                        }
+                    }
+                    // Same while the slot is Unknown: held until it converges to Live.
+                    S::Unknown if early && ev.cum_filled.0 < sl.qty.0 => {
+                        self.pre_fill(ti, s, ev, now, seq, out);
+                        self.or_flag(ti, s, SlotFlags::CANCEL_HELD);
+                    }
                     S::PendingCancel | S::PendingAmend if gone => {
                         self.pre_fill(ti, s, ev, now, seq, out);
                         self.gone(ti, s, TransitionCause::CancelReject, now, seq, out);

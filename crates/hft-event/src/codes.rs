@@ -88,7 +88,7 @@ desc!(
 ]);
 desc!(
     /// `OrderEvent.detail` for `what ∈ {CancelReject, AmendReject}`.
-    REJECT_CLASS, "RejectClass", 1, [OTHER = 0, GONE = 1]);
+    REJECT_CLASS, "RejectClass", 1, [OTHER = 0, GONE = 1, EARLY = 2]);
 desc!(MARGIN_SOURCE, "MarginSource", 1, [Push = 1, Poll = 2]);
 desc!(
     MARGIN_MFLAGS,

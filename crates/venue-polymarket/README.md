@@ -138,7 +138,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | 字段 | 值 |
 |---|---|
 | `market` | `Spot` |
-| `flags` | `POST_ONLY`、`IOC`、`FOK`(交易所支持;本实现只编码 `PostOnly` 与 `Gtc`,IOC/FOK → `Unsupported`);`CANCEL_NEEDS_ACK`(撤单按订单哈希,下单回执之前没有哈希;没有哈希的撤单只能按代币撤本账户全部挂单,可能早于订单到达交易所而撤空) |
+| `flags` | `POST_ONLY`、`IOC`、`FOK`(交易所支持;本实现只编码 `PostOnly` 与 `Gtc`,IOC/FOK → `Unsupported`);不声明 `CANCEL_NEEDS_ACK`:撤单按订单哈希,哈希在签名时已知,下单回执未到也立即按哈希撤([下单](#下单)) |
 | `fee_asset_rule` | `Quote` |
 | `required_spot_borrow` | `Some(false)` |
 | `own_liquidation_marker` | `NotIdentifiable` |
@@ -173,7 +173,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | op | 请求 | 说明 |
 |---|---|---|
 | `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`salt` = (毫秒时间戳低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字),`timestamp` = 毫秒时间戳。签名 = 存款钱包签名(类型 3)。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
-| `Cancel` | 订单哈希已知:`DELETE /order {"orderID":"0x…"}`;未知(REST 回执未到、或重启前的订单):`DELETE /cancel-market-orders {"asset_id":<token>}` | 后者撤该账户在该代币上的全部挂单;本 venue 的策略每个代币至多一张挂单 |
+| `Cancel` | `DELETE /order {"orderID":"0x…"}`:哈希按 `exch_order_id` 取,没有(REST 回执未到)时取编码 `Place` 时为目标 client id 记下的哈希,不等回执;都没有(重启前的订单):`DELETE /cancel-market-orders {"asset_id":<token>}` | 后者撤该账户在该代币上的全部挂单;本 venue 的策略每个代币至多一张挂单。回执未到时按哈希发出的撤单记在 `GwCtx`(先撤后到的处理见下方"先撤后到") |
 | `CancelAll` | `inst ≠ 0`:`DELETE /cancel-market-orders {"asset_id"}`;`inst = 0`:`DELETE /cancel-all` | |
 | `Query` | `GET /data/order/<哈希>` | 哈希按 `exch_order_id` 取;没有(REST 回执未到,槽在 `Unknown`)时取编码 `Place` 时为目标 client id(epoch、账户、槽、代都相同)记下的哈希;都没有 → `UnknownTarget` |
 
@@ -184,12 +184,26 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | 请求 | 应答 | 产出 |
 |---|---|---|
 | `POST /order` | 200 `{"success":true,"orderID":"0x…","status":"live"|"matched"|…}` | `Ack`(成交由用户频道报);该单此前已在定槽之前低于原始量完成([累计量与费用来源](#累计量与费用来源))时,其后再一条 `QueryResult{Filled}`(`cum_filled` = 已知累计量,`avg_px` = 订单价) |
+| | 400 `{"error":"order 0x… is invalid. Already canceled."}`(本进程先撤了这个哈希,见"先撤后到") | `CancelAck{slot, gen, exch_order_id = 该哈希的键}`(不是 `Reject`);`raw_code` = 消息的码 |
 | | 200 `{"success":false,"errorMsg":…}`;400/401/403/404 `{"error":…}`;425、429 | `Reject`,`reject_code` = 消息文本的码(无消息时为 HTTP 码);425/429 另置 `ctl = RateLimited` |
 | | 5xx、其他、无应答 | `outcome_unknown` |
-| `DELETE /order`、`/cancel-market-orders`、`/cancel-all` | 200 `{"canceled":[哈希…],"not_canceled":{哈希: 原因}}` | `canceled` 里每个能定槽的订单一条 `CancelAck`(每单至多一次,与用户频道的 `CANCELLATION` 去重);单笔 `Cancel` 的 `not_canceled` 非空 → `CancelReject{detail = GONE}` |
+| `DELETE /order`、`/cancel-market-orders`、`/cancel-all` | 200 `{"canceled":[哈希…],"not_canceled":{哈希: 原因}}` | `canceled` 里每个能定槽的订单一条 `CancelAck`(每单至多一次,与用户频道的 `CANCELLATION` 去重;回执未到的本进程订单以签出时的 client id 调 `exch_id(键, Some(id))` 定槽);单笔 `Cancel` 的 `not_canceled` 非空 → `CancelReject{detail = GONE}`,"先撤后到"的两种情形除外(见下) |
 | | 非 2xx | 单笔 `Cancel`:`outcome_unknown`(拒绝类 HTTP 码除外);`CancelAll`:只记 `raw_code` |
-| `GET /data/order/<哈希>` | 200 订单对象 | `QueryResult`:`LIVE`/`DELAYED` → New(`size_matched = 0`)或 PartiallyFilled(剩余量不足一个 lot 时 Filled),`MATCHED` → Filled,`CANCELED`、`CANCELED_MARKET_RESOLVED`、`UNMATCHED`、`INVALID` → Cancelled;`cum_filled` = `size_matched`,`avg_px` = 订单价。该单是本进程为所查的槽与代签出、尚无 `Ack` 的订单时,先以签出时的 client id 调 `exch_id(键, Some(id))` 绑定,再在 `QueryResult` 之前产出一条 `Ack{exch_order_id}`(槽由此得到交易所 id,之前以外来成交入账的部分按 OMS `ext_held` 去重) |
+| `GET /data/order/<哈希>` | 200 订单对象 | 该单的先撤"不存在"仍待判定(见"先撤后到")且状态为 `LIVE`/`DELAYED`(未完成)时先一条 `CancelReject{detail = EARLY}`;`QueryResult`:`LIVE`/`DELAYED` → New(`size_matched = 0`)或 PartiallyFilled(剩余量不足一个 lot 时 Filled),`MATCHED` → Filled,`CANCELED`、`CANCELED_MARKET_RESOLVED`、`UNMATCHED`、`INVALID` → Cancelled;`cum_filled` = `size_matched`,`avg_px` = 订单价。该单是本进程为所查的槽与代签出、尚无 `Ack` 的订单时,先以签出时的 client id 调 `exch_id(键, Some(id))` 绑定,再在 `QueryResult` 之前产出一条 `Ack{exch_order_id}`(槽由此得到交易所 id,之前以外来成交入账的部分按 OMS `ext_held` 去重) |
 | | 200 `null`/空体、404 | `QueryResult{NotFound}`(`stale_guard = ExpireAt`,契约 10:非链接槽在过期窗口 + grace 之后由 OMS 定终态) |
+
+**先撤后到**:撤单不等下单回执(回执未到时按签出的哈希撤)。交易所记得被撤过的哈希:撤单先到时答 `not_canceled {哈希: "order can't be found - already canceled or matched"}`,随后到达的该单被 400 `order 0x… is invalid. Already canceled.` 拒绝(2026-10-28 实测 6/6,间隔 0.05、0.5、2 s;两条连接上下单后 0–30 ms 撤单,11/20 撤单先到、9/20 订单先挂上后被撤,20/20 最终不挂单)。按哈希撤一张回执未到的本进程订单时(`GwCtx` 记下"回执前撤单"),应答按下表处理:
+
+| 撤单应答 | 下单回执 / 查单 | 产出 |
+|---|---|---|
+| `canceled` 含该哈希 | 之后任何 | `CancelAck`(按签出的 client id 定槽);迟到的下单回执照常 `Ack`(OMS 终态下 dup),用户频道的 `CANCELLATION` 去重 |
+| `not_canceled`,回执尚未到 | — | 不产出事件(`raw_code` = 原因的码),等下单回执判定 |
+| 同上 | 400 `… Already canceled.` | `CancelAck` |
+| 同上 | 200 `status` = `live`/`delayed` | 先 `CancelReject{detail = EARLY}` 再 `Ack`:OMS 再撤一次(Unknown 中挂起到 Live,[hft-oms 回报处理表](../hft-oms/README.md#回报处理表));防御性,实测未出现 |
+| 同上 | 200 `matched`;其他拒绝 | `Ack`(成交由用户频道报);`Reject` |
+| 同上 | 无应答或 5xx(结果未知) | 无;之后查单得 `LIVE`/`DELAYED` 时先 `CancelReject{EARLY}` |
+| `not_canceled`,回执已到且为 `live`/`delayed` | — | `CancelReject{EARLY}` |
+| `not_canceled`,其余(回执后发出的撤单、已终态) | — | `CancelReject{GONE}` |
 
 ### 用户流事件表
 
@@ -225,7 +239,9 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 |---|---|
 | 确定拒绝(订单没有进入撮合) | HTTP 400(含 `invalid post-only order: order crosses book`、`not enough balance / allowance`、订单格式错误)、401、403、404;HTTP 425(撮合引擎重启中)、429(限速),二者另置 `ctl = RateLimited`;200 且 `success: false` |
 | 结果未知 | 5xx、其他未登记状态、无应答 |
-| `GONE`(撤单) | 单笔撤单 `not_canceled` 里的任何原因(已成交、已撤或不存在) |
+| `GONE`(撤单) | 单笔撤单 `not_canceled` 里的任何原因(已成交、已撤或不存在),[先撤后到](#下单)的情形除外 |
+| `EARLY`(撤单) | 回执前按哈希撤单得 `not_canceled`,而该单随后挂上(下单回执或查单为 `live`/`delayed`),见[先撤后到](#下单) |
+| 撤单已生效(下单) | 400 `order 0x… is invalid. Already canceled.` → `CancelAck`,见[先撤后到](#下单) |
 
 不产出 `ClockSkew`(请求时间戳不做窗口校验)、`UserStreamEnded`、`ServerShutdown`。
 
@@ -288,8 +304,6 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 - 订单心跳(死手):`POST /v1/heartbeats` 是链式的(每次带上一次返回的 `heartbeat_id`),而 `dead_man_refresh` 拿不到 `GwCtx`;接入前靠 GTD(300 s)、窗口结束前策略撤单与进程退出时的全撤兜底。
 - 吃单手续费 `FeeModel`(0.07·p·(1 − p)):post-only 下单不产生;以后做吃单再补。
 - 重启后的订单哈希:`GwCtx` 不进快照,重启前的挂单只能按代币撤(`/cancel-market-orders`),查单 → `UnknownTarget`(交 reconciler)。
-- 回执未到的撤单仍按代币撤(`/cancel-market-orders`),不用签出时记下的哈希。
-- 本地算出的订单哈希即交易所 `orderID`(交易所域下的 EIP-712 摘要)尚未与实盘回执逐字节核对;不一致时回执未到的查单得 `NotFound`、成交仍按回执补绑(与此前相同)。核实:实盘下一单,比较 `POST /order` 应答的 `orderID` 与 `order_digest`。
 - `tick_size_change` 不解码:每个 5 分钟市场在价格接近 0 或 1 时(约开盘 4 分钟后)把 tick 从 0.01 改为 0.001,之后出现三位小数价格。解码按 px_exp −3 照常解析;hft-core 的 Polymarket 槽位 inst 以 tick 0.001 建 refdata(`pm_sim_config`),所以三位小数的档位照常应用。
 - 吃单扫过时公开簿会在 1–3 条消息内锁住或交叉(新挂单档位先于撮合后的删除推送);hft-core 的 Polymarket 槽位 inst 以 `crossed_tolerance = 3` 建 refdata,簿在其内保持 Live(此前 0:每次扫单都 `Stale(Crossed)` 到下一个整簿,做市策略随之撤单)。
 - 服务端 1013 断开见[多连接去重](#多连接去重)。两条连接在同一秒都被断开时仍有约 1–2 s 的缺口(该组连接都断开后推 `Resync{CONN_LOST}`,重连后的整簿恢复)。另外,市场结算后约 147 s 交易所以 1000 关闭订阅了该市场代币的连接;hft-net 把它与 1013 记为同一个 `WS_CLOSE` 位,早先"探针每 13 分钟断 3–4 次"的统计把这类正常关闭也算了进去(2026-10-20 重新比对:同机同期同 6 个 BTC 市场,探针异常断开 1 次,Python 录制器 3 次)。
@@ -298,6 +312,6 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 <details><summary>给实现者</summary>
 
-已实测(2026-10-19,eu-west-1):订阅帧无应答;同一连接可追加订阅与退订;`PING` → `PONG`;每次成交后推一次整簿。2026-10-22 实测(不可成交的 0.02 post-only 买单):`POST /order` 回 `orderID` 与 `status: live`;用户频道不带市场过滤订阅即收到全账户的 `PLACEMENT`/`CANCELLATION`,与 REST 回执相差 ±50 ms,先后不定;`DELETE /order`、`/cancel-market-orders`、`/cancel-all` 的应答格式同[下单](#下单)。成交(`UPDATE`、`trade`)样本按官方 asyncapi 文档,首个实盘成交后补实采样本。
+已实测(2026-10-19,eu-west-1):订阅帧无应答;同一连接可追加订阅与退订;`PING` → `PONG`;每次成交后推一次整簿。2026-10-22 实测(不可成交的 0.02 post-only 买单):`POST /order` 回 `orderID` 与 `status: live`;用户频道不带市场过滤订阅即收到全账户的 `PLACEMENT`/`CANCELLATION`,与 REST 回执相差 ±50 ms,先后不定;`DELETE /order`、`/cancel-market-orders`、`/cancel-all` 的应答格式同[下单](#下单)。2026-10-28 实测(同上):本地算出的订单哈希(`order_digest`)与 `POST /order` 应答的 `orderID` 逐字节一致;先撤后到的应答见[下单](#下单);同一 HTTP/1.1 连接上背靠背写出下单与撤单(管线化)按序应答、撤单生效(4/4)。成交(`UPDATE`、`trade`)样本按官方 asyncapi 文档,首个实盘成交后补实采样本。
 
 </details>

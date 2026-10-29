@@ -179,7 +179,8 @@ pub(crate) fn encode(
         }
         GwOp::Cancel => {
             out.method = Method::Delete;
-            match ctx.order_hash(tgt.exch_order_id) {
+            // By hash also before the place answer: the hash is known from signing (README "下单").
+            match ctx.cancel_hash(tgt.exch_order_id, &tgt.id) {
                 Some(h) => {
                     let mut hex = [0u8; 66];
                     let h = sign::hex_bytes(&h, &mut hex).ok_or(EncodeErr::FieldOverflow)?;
@@ -188,7 +189,7 @@ pub(crate) fn encode(
                     out.body.push(h.as_bytes()).map_err(of)?;
                     out.body.push(b"\"}").map_err(of)?;
                 }
-                // Not acked yet (or before a restart): every order of the account on the token.
+                // An order of an earlier process: every order of the account on the token.
                 None => cancel_token(ctx, c, out)?,
             }
         }

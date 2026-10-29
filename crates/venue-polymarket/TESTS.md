@@ -30,12 +30,12 @@ spec: README.md
 | 心跳 | PMK-001 |
 | 签名 | PMK-018–PMK-022 |
 | 凭证 | PMK-023, PMK-024 |
-| 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032 |
-| 用户流事件表 | PMK-027, PMK-029, PMK-032 |
+| 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032, PMK-034 |
+| 用户流事件表 | PMK-027, PMK-029, PMK-032, PMK-034 |
 | 累计量与费用来源 | PMK-027, PMK-031 |
-| 结果未知码表 | PMK-026 |
+| 结果未知码表 | PMK-026, PMK-034 |
 | 账户配置核验 | PMK-030 |
-| VenueCaps 默认值 | PMK-011, PMK-033 |
+| VenueCaps 默认值 | PMK-011, PMK-033, PMK-034 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011 |
 | 测试与验收 | 不适用:非规范 |
@@ -378,7 +378,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 |---|---|---|
 | PMK-025.1 | 实采 `POST /order` 应答(200,`orderID` H1) | 一条 `Ack{slot 7, gen 3, UP, exch_order_id = H1 前 8 字节, epoch 0}`;`exch_id(十进制键, None)` 一次 |
 | PMK-025.2 | `Cancel`,`exch_order_id` = H1 的键 | `DELETE /order`,体 `{"orderID":"H1"}`,带 L2 头 |
-| PMK-025.3 | `Cancel`,`exch_order_id` 0 | `DELETE /cancel-market-orders`,体 `{"asset_id":<UP token>}` |
+| PMK-025.3 | `Cancel`,`exch_order_id` 0,本进程没有为目标 client id 签出过订单(重启前的订单) | `DELETE /cancel-market-orders`,体 `{"asset_id":<UP token>}` |
 | PMK-025.4 | `CancelAll{DN}`;`CancelAll{inst 0}` | 前者按 DN 的 token;后者 `DELETE /cancel-all`、无体、无 `Content-Type` |
 | PMK-025.5 | `Query`,H1 的键;未知键 | `GET /data/order/H1`;`UnknownTarget` |
 
@@ -508,3 +508,23 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 |---|---|---|
 | PMK-033.1 | `PolymarketClob::stale_guard()` | `ExpireAt{default_ms: GTD_S × 1000}`,`GTD_S = 300` |
 | PMK-033.2 | 编码 `Place{UP, Buy, 0.45, 5 份, PostOnly}` | `expiration` − 时钟秒 = `default_ms / 1000`(声明的窗口就是签出订单的寿命) |
+
+### PMK-034 先撤后到:回执未到的撤单按签出的哈希发出,应答按先后定终态
+
+- 规则:[下单](README.md#下单)(先撤后到)、[结果未知码表](README.md#结果未知码表)、[VenueCaps 默认值](README.md#venuecaps-默认值)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-023;`GwCtx` 可写地编码 `Place{UP, Buy, 0.42, 5 份, PostOnly}`(slot 7、gen 3、`TargetRef.id` epoch 5),回执未到时再编码该槽的 `Cancel`(`exch_order_id` 0);H = 下单体各字段的 `order_digest`;应答文本按 2026-10-28 实测;.2 起每行从前置的 `GwCtx` 副本开始
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_034_cancel_before_the_place_answer`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-034.1 | 前置的撤单请求;`default_caps().flags` | `DELETE /order`,体 `{"orderID":"H"}`,带 L2 头;不含 `CANCEL_NEEDS_ACK` |
+| PMK-034.2 | 撤单应答 `not_canceled {H: "order can't be found - already canceled or matched"}`;再下单应答 400 `order H is invalid. Already canceled.` | 前者无事件,`raw_code` = 原因的码;后者一条 `CancelAck{slot 7, gen 3, H 键}`,非 `outcome_unknown` |
+| PMK-034.3 | 先下单应答 400 `Already canceled.`,再撤单应答"不存在" | `CancelAck`,再 `CancelReject{GONE}` |
+| PMK-034.4 | 撤单应答 `canceled: [H]`;再下单应答 200 `live`;再用户频道 H `CANCELLATION` | `CancelAck{slot 7, gen 3, epoch 5, H 键}`,`exch_id(H 键, Some(签出的 client id))`;`Ack`;无事件 |
+| PMK-034.5 | 撤单应答"不存在";再下单应答 200 `live`;再编码 `Cancel`(H 键);其应答"不存在" | 下单应答产出 `CancelReject{EARLY(2), slot 7, gen 3, H 键}` 与 `Ack`(依次,`events 2`);再撤单体 `{"orderID":"H"}`;`CancelReject{GONE}` |
+| PMK-034.6 | 先下单应答 200 `live`,再撤单应答"不存在" | `Ack`,再 `CancelReject{EARLY}` |
+| PMK-034.7 | 撤单应答"不存在";下单应答 500;查单 200 `LIVE` | 下单应答无事件、`outcome_unknown`;查单产出 `CancelReject{EARLY}`、`Ack`、`QueryResult{New}`(均为 slot 7) |
+| PMK-034.8 | 撤单应答"不存在";下单应答 200 `matched` | 只有 `Ack` |
+| PMK-034.9 | 撤单应答"不存在";下单应答 400 `invalid post-only order: order crosses book` | `Reject` |

@@ -574,6 +574,10 @@ fn evt_074_code_tables() {
     );
     assert_table("EVT-074.35", &codes::ORDER_STATUS, &os);
     assert!(!codes::ORDER_STATUS.contains(0), "EVT-074.35");
-    assert_table("EVT-074.35", &codes::REJECT_CLASS, &[("OTHER", 0), ("GONE", 1)]);
+    assert_table(
+        "EVT-074.35",
+        &codes::REJECT_CLASS,
+        &[("OTHER", 0), ("GONE", 1), ("EARLY", 2)],
+    );
     assert!(!codes::RECON_SEVERITY.contains(3), "EVT-074.16 retired 3");
 }

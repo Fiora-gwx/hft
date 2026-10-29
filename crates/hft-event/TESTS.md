@@ -847,7 +847,7 @@ spec: README.md
 | EVT-074.32 | `StrategyParamsHdr.source`(`ParamSource`);`LegDef.kind` | `Pipeline=1 Manual=2`;`Cex=1 Chain=2` |
 | EVT-074.33 | `CmdHdr.role`;`CmdHdr.hflags` | `0` 进程主体、`Viewer=1 Trader=2 Admin=4`(3 退役);`PREVIEW=1` |
 | EVT-074.34 | `Annotate.kind`;`VenueNotice.kind`;`AdoptExchange.item` | `OpsNote=1 LocalWrite=2 Incident=3`;`Delisting=1 FundingInterval=2 Maintenance=3`;`Position=0 Balance=1` |
-| EVT-074.35 | `OrderEvent.detail`(按 `what`) | `QueryResult`:`New=1 PartiallyFilled=2 Filled=3 Cancelled=4 Rejected=5 Expired=6 NotFound=7`(与 EVT-074.17 逐值相同,0 不在表中);`CancelReject`/`AmendReject`:`OTHER=0 GONE=1`;其余 `what` 只有 0 |
+| EVT-074.35 | `OrderEvent.detail`(按 `what`) | `QueryResult`:`New=1 PartiallyFilled=2 Filled=3 Cancelled=4 Rejected=5 Expired=6 NotFound=7`(与 EVT-074.17 逐值相同,0 不在表中);`CancelReject`/`AmendReject`:`OTHER=0 GONE=1 EARLY=2`;其余 `what` 只有 0 |
 
 ### EVT-075 Note 码名登记表的代码形式逐行与 README 一致
 

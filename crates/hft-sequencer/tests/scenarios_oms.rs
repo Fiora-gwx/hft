@@ -313,7 +313,7 @@ fn cancels(h: &H, m: usize, d: &OrderDecision) -> usize {
 
 fn cancel_reject(h: &mut H, d: &OrderDecision, gone: bool) {
     let mut ev = order_event(d, OrderEventKind::CancelReject, h.epoch());
-    ev.detail = if gone { 1 } else { 2 };
+    ev.detail = if gone { 1 } else { 0 };
     h.push(RingId::Rep(0), &ev);
     h.run();
 }
