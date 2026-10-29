@@ -4662,4 +4662,5 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 |---|---|---|
 | CORE-445.1 | `step` 文本 `0.01`、`1`、`.5`、`0`、`0.0000001`、`-1`、空、`0.0a` | 10 000、1 000 000、500 000(1e-6 USDC),其余无效 |
 | CORE-445.2 | 离线配置的 `venues.public.presign`(3, 1, `0.01`, 30 000) | 含 `BadValue` |
-| CORE-445.3 | Polymarket 实盘配置加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
+| CORE-445.3 | 不带默认表的 Polymarket 实盘配置(`presign: false`)加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
+| CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000);后者的配置文本不含 `presign` |

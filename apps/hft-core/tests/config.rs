@@ -689,6 +689,7 @@ fn core_430_production_orders_polymarket_only() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        presign: true,
     };
     let hot = d.path().join("hot");
     let path = support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
@@ -761,6 +762,7 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        presign: true,
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -947,6 +949,7 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        presign: true,
     };
     let hot = d.path().join("hot");
     let live_path =
@@ -1039,6 +1042,7 @@ fn core_441_shared_account_ip() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            presign: true,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1105,6 +1109,7 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            presign: true,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1181,6 +1186,7 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            presign: true,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1222,6 +1228,7 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         day_loss_carry: Some((day, -28_510_000)),
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        presign: true,
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -1341,6 +1348,7 @@ fn core_435_live_polymarket_daily_loss_option() {
             day_loss_carry: carry.map(|p| (day, p)),
             daily_loss_abs: abs,
             daily_loss_max_resumes: resumes,
+            presign: true,
         };
         let path = support::write_polymarket_maker_live(
             d.path(),
@@ -1505,6 +1513,7 @@ fn core_439_polymarket_maker_param_values() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        presign: true,
     };
     let path = support::write_polymarket_maker_live_with(
         d.path(),
@@ -1596,7 +1605,8 @@ fn core_445_venue_presign() {
     .unwrap();
     let e = hft_core::config::load(&path, true).unwrap_err();
     assert!(e.iter().any(|e| e.code == "BadValue"), "CORE-445.2 {e:?}");
-    // .3 the live Polymarket configuration: in range loads, out of range is refused.
+    // .3 the live Polymarket configuration without its default table: in range loads, out of
+    // range is refused.
     #[cfg(feature = "polymarket")]
     {
         let live = support::PmLive {
@@ -1605,6 +1615,7 @@ fn core_445_venue_presign() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            presign: false,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1641,5 +1652,31 @@ fn core_445_venue_presign() {
                 "CORE-445.3 {below} {above} {step} {age}: {e:?}"
             );
         }
+        // .4 the live configuration pre-signs by default (2, 2, 0.01, 60 000); `presign: false`
+        // (`pm_sim_config --live --no-presign`) writes no table.
+        assert!(!base.contains("presign"), "CORE-445.4");
+        let on = support::PmLive {
+            presign: true,
+            ..live
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot3"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &on,
+        );
+        let l = match hft_core::config::load(&pm, false) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-445.4 {e:?}"),
+        };
+        let p = l.cfg.venues["pm"].presign.clone().unwrap();
+        assert_eq!(
+            (p.below, p.above, p.step_e6(), p.max_age_ms),
+            (2, 2, Some(10_000), 60_000),
+            "CORE-445.4"
+        );
     }
 }

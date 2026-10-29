@@ -8,6 +8,8 @@
 //! `--daily-loss USDC` (live only, > 0, default 15): the account's `daily_loss_abs`.
 //! `--daily-loss-resumes N` (live only, 0..=20, default the hft-risk default 1): the account's
 //! `daily_loss_max_resumes` (`Resume{DailyLoss}` per UTC day).
+//! `--no-presign` (live only): no `venues.pm.presign` table (the live default pre-signs, see
+//! `PM_LIVE_PRESIGN`).
 //! `--param NAME=RAW` (repeatable; `--maker` or `--live`): sets the binary-maker parameter `NAME` to
 //! the raw schema value `RAW` after the defaults (and the live parameters); an unknown name or a
 //! value outside the schema's range is refused.
@@ -58,7 +60,7 @@ fn take(all: &mut Vec<String>, flag: &str, usage: &str) -> Option<String> {
 }
 
 fn main() {
-    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N]] [--param NAME=RAW ...] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
+    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign]] [--param NAME=RAW ...] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
     let mut all: Vec<String> = std::env::args().skip(1).collect();
     let mut params = Vec::new();
     while let Some(p) = take(&mut all, "--param", usage) {
@@ -91,6 +93,11 @@ fn main() {
             .expect("--day-loss-carry: USDC must be < 0");
         (day, pnl)
     });
+    let no_presign = all
+        .iter()
+        .position(|a| a == "--no-presign")
+        .map(|i| all.remove(i))
+        .is_some();
     let live = all.iter().position(|a| a == "--live").map(|i| {
         let mut v: Vec<String> = all.drain(i..i + 3).collect();
         let keys_dir = std::path::PathBuf::from(v.pop().expect(usage));
@@ -101,8 +108,10 @@ fn main() {
             day_loss_carry: carry,
             daily_loss_abs: daily_loss,
             daily_loss_max_resumes: resumes,
+            presign: !no_presign,
         }
     });
+    assert!(!no_presign || live.is_some(), "--no-presign needs --live");
     assert!(carry.is_none() || live.is_some(), "--day-loss-carry needs --live");
     assert!(
         daily_loss.is_none() || live.is_some(),

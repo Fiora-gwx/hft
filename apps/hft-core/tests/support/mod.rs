@@ -788,7 +788,17 @@ pub struct PmLive {
     pub daily_loss_abs: Option<i64>,
     /// `daily_loss_max_resumes` of `pm-live`; `None` = the hft-risk default (1).
     pub daily_loss_max_resumes: Option<u8>,
+    /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
+    pub presign: bool,
 }
+
+/// `venues.pm.presign` of the live configuration: two prices below and two above the last place
+/// in 0.01 USDC steps (the Polymarket tick), re-signed within one minute (venue-polymarket "预签名").
+#[allow(dead_code)]
+pub const PM_LIVE_PRESIGN: &str = "below=2
+above=2
+step=\"0.01\"
+max_age_ms=60000";
 
 /// Live `daily_loss_abs` without `PmLive.daily_loss_abs` (15 USDC).
 #[allow(dead_code)]
@@ -1515,6 +1525,9 @@ quote_interval_ms = 1000
             ))
             .unwrap(),
         );
+        if l.presign {
+            pm.insert("presign".into(), toml::from_str(PM_LIVE_PRESIGN).unwrap());
+        }
         let threads = config["threads"].as_array_mut().unwrap();
         threads.retain(|t| !matches!(t["task"].as_str(), Some("sim-gw" | "paper-feed")));
         threads.push(toml::from_str("name='gw-pm'\ntask='gw:pm'\npark_us=100\nnice=0").unwrap());
