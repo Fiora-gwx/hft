@@ -58,7 +58,7 @@
 |---|---|---|---|
 | `feat/hft-feature`:`Feature` 处理器 + 按需求值、定点导出列;节点库(波动环、参考中间价/失衡、秒级历史、大单流、剔除自有挂单的簿侧、lag 分位、z 分数、Φ/Φ⁻¹、isqrt、atanh/ln) | done | 3eb165ec | FEA-001–010;`feature_dag!` 宏未做(R-7:手写执行顺序) |
 | `strat/bm-features-dag`:binary-maker 用 `MakerFeatures`,删除内联实现 | 待验收 | ff8c6fa3(BMK-034 先录旧轨迹)、3887be3f、合并 41281161 | BMK-034/035;快照字节与 `DESC_VERSION` 不变;**待**:`replayer verify` 对最近 7 天实盘 journal |
-| `feat/replay-features` | todo | | |
+| `feat/replay-features`:SDK `Strategy::FEATURES`/`export_features`(冷,缺省无)与 `StrategySet` 分派;`ColumnDesc` 等移到 SDK、hft-feature 再导出;`replayer features`(parity 式运行,决策点 + UTC 网格,可空列带 `unit`/`exp` 元数据)与 `research --features` | 待验收 | 0862567f | SDK-215、RSR-005、RPL-308、BMK-035.3;**待**(研究机):`features.parquet` 与 `fac_panel.py` 同窗同特征差 ≤ 1 定点单位(binary-maker 目前只导出 7 列;面板其余特征要先固化成节点);`--dag` 选项未做(列来自策略自己的 `FEATURES`,无需另选) |
 
 ### M4 多账户 + Shadow 变体
 
@@ -107,6 +107,7 @@
 | RSR-001–RSR-003 | M1 | 变体规格、Parquet 写出、被替换回报的账户字段 |
 | RPL-300–RPL-303 | M1 | 研究回放确定性、不模拟时与日志一致、变体、CLI |
 | FEA-001–FEA-010 | M3 | 特征节点 |
+| SDK-215、RSR-005、RPL-308 | M3 | 策略特征导出钩子、可空特征列、`replayer features` |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
 
 ## 执行中的技术决定
