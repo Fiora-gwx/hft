@@ -22,6 +22,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | research | RPL-300–RPL-303 |
+| parity | RPL-304 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
 | bench(可选扩展) | RPL-256 |
@@ -2440,4 +2441,17 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | RPL-303.1 | `research --journal <段目录> --out <dir> --set thr=5 --seeds 1,2 --jobs 2` | 退出 0;`decisions/fills/orders/windows.parquet` 与 `run.json` 都存在 |
 | RPL-303.2 | 读 `run.json` | `runs` 依次为 (base, 1)、(base, 2)、(set1, 1)、(set1, 2);`calib_sha` 为 64 位十六进制 |
 | RPL-303.3 | `research --journal <段目录> --bogus 1` | 退出 2 |
+
+### RPL-304 parity:日志参数下全部一致,变体的差异被分类
+
+- 规则:[parity](README.md#parity)、[hft-replay parity](../../crates/hft-replay/README.md#parity)
+- 级别:table
+- 里程碑:M3
+- 前置:同 RPL-300;`accounts = Some(空)`,`engine_timers` 关
+- 实现:`apps/replayer/tests/research.rs::rpl_304_parity_matches_the_logged_decisions_and_reports_a_variant`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-304.1 | 基线 | 日志决策 > 0;`both` = 日志条数,`logged_only` = `regen_only` = 0,`first_diff_trigger` = 0,`rate` = 1 |
+| RPL-304.2 | 变体 `thr = 1 000 000` | 日志条数不变;`both + logged_only` = 日志条数,`both + regen_only` = 回放条数;`parity` 表行数 = 三类之和 |
 

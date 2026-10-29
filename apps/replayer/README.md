@@ -18,6 +18,7 @@ status: impl
   - [verify](#verify)
   - [sim](#sim)
   - [research](#research)
+  - [parity](#parity)
   - [compare](#compare)
   - [latency](#latency)
   - [bench(可选扩展)](#bench可选扩展)
@@ -43,6 +44,7 @@ replayer sim     --journal … [--from-seq N] [--to-seq M] [--accounts <a,b>] [-
                  [--ab <paramsA> <paramsB>] [--emit-journal] --out <dir>
 replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]]
                  [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|through] [--reseed-s N] [--log-timers] [--jobs N]
+replayer parity   --journal <file|dir> --out <dir> [--variants <file.toml>] [--set NAME=RAW[,…]] [--jobs N]
 replayer compare --a <journal> --b <journal> --map <a账户>=<b账户>[,…] [--from <utc>] [--to <utc>] [--window-ms 2000] --out <dir>
 replayer latency --journal … [--from <utc>] [--to <utc>] [--instance prod|sim] [--venue <v>[,<v>…]]
                  --cal-max-err-ns <ns> --burst-gap-ns <ns> --out <dir>
@@ -107,6 +109,10 @@ verify 是**离线**工具(夜跑与 CI);hft-core 冷启动用 `RecoverDriver`(�
 ### research
 
 研究回放:同一份 sequencer 与策略代码回放一个运行的 seq journal,被模拟账户的回报由进程内 `SimExchange` 重新生成,N 个参数变体 × M 个延迟种子各跑一次,写 `decisions/fills/orders/windows.parquet` 与 `run.json`。机制、选项缺省、屏蔽规则与输出列归 [hft-replay](../../crates/hft-replay/README.md)。它是研究与参数筛选工具([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md)):输出带参数与模拟参数的哈希,结论不替代模拟账户与上线门槛。退出码:0 成功;2 选项错误(未知选项、缺 `--journal`/`--out`、变体重名);3 输入或运行失败(读不到段、无启动快照、策略种类未注册、变体字段未知或越界、`SetParams` 被拒)。
+
+### parity
+
+决策一致性:不模拟、用日志里的真实回报驱动,重算决策并与日志决策逐条匹配(每个变体一次;匹配规则、输出与口径归 [hft-replay parity](../../crates/hft-replay/README.md#parity))。退出码:0 基线变体(日志自身参数)的决策与日志完全一致;1 基线有差异(参数变体的差异不影响退出码);2 选项错误;3 输入或运行失败。
 
 ### compare
 

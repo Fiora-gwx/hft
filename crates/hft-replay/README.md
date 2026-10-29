@@ -22,6 +22,7 @@ status: impl
   - [参数变体](#参数变体)
   - [确定性](#确定性)
   - [输出](#输出)
+  - [parity](#parity)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -111,6 +112,16 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `windows.parquet` | 每次交付(`ExternalFill{Delivery}`)结束的 (账户, inst) 区间;日志结束时未交付的区间 `end_s = −1` | `end_s`、`bought`、`cost`、`sold`、`proceeds`、`fees`(报价资产单位)、`delivered`、`payout_px`、`pnl` = 交付值 + 卖出 − 买入 − 费、`n_fills` |
 | `run.json` | 运行元数据(也作为每个 Parquet 文件的 `hft.run` 键值元数据) | `version`、`code_sha`(构建时 `HFT_GIT_SHA`)、`journal`、`sim`、`calib_sha`(`SimParams` 的 SHA-256)、`engine_timers`、`wall_s`、`runs[]`:`variant`、`seed`、`set`、`params_sha`(每个被模拟账户的实例当前参数 blob SHA-256)、`accounts`、`first_seq`、`start_snapshot`、`stats`(驱动计数)、`sim_state_hash` |
 
+### parity
+
+`parity<S>(&ParityOpts)`(`replayer parity`):每个变体一次运行,不模拟任何账户(`accounts = Some(空)`)、照读日志定时器(`engine_timers` 关),所以日志里的真实回报驱动状态;变体作用于全部策略实例。回放重算的 `OrderDecision` 与日志中启动快照之后的 `OrderDecision` 按触发 Input(回放侧经 `trigger_log_seq`)分组,组内按 (strategy、account、inst、action、side、tif、px、qty、reject、reason) 作多重集匹配:两侧都有 → `both`,只在日志 → `logged_only`,只在回放 → `regen_only`(slot、gen、intent_no 不参与:两侧一旦分歧它们就错位)。输出 `parity.parquet`(每条决策一行:`variant`、`seed` = 0、`class` 0/1/2、`trigger_log_seq` 与上列字段)与 `parity.json`(每个变体的计数、`rate` = both / max(日志条数, 回放条数)、`first_diff_trigger`)。基线变体(日志自身参数)与日志一致是代码改动"决策不变"的证据;参数变体的差异是它改变了哪些决策的清单——分歧之后的回报属于日志里的订单,只能当作近似。
+
+```rust
+pub struct ParityOpts { pub files: Vec<PathBuf>, pub variants: Vec<Variant>, pub reassembly: usize, pub jobs: usize, pub out: PathBuf }
+pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, String>;
+pub struct ParitySummary { pub logged: u64, pub regenerated: u64, pub both: u64, pub logged_only: u64, pub regen_only: u64, pub first_diff_trigger: u64 }
+```
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
@@ -124,6 +135,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `src/venue.rs` | `ResearchVenue`、屏蔽规则、`Deliver` |
 | `src/variants.rs` | 变体文件与 `--set` 解析、`variant_blob` |
 | `src/table.rs` | 列表与 Parquet 写出(zstd 3) |
+| `src/parity.rs` | 重算决策与日志决策的匹配 |
 
 - 截获的 Output 在下一次 `take` 时按引擎此刻的 `Now`(即触发它的 Input 处理之后)盖 `utc_ns`/`engine_ns`;模拟回报按其 tsc 用引擎当前的时钟锚换算。
 - 被模拟的 Live 账户在引擎里仍是 Live(出环、`Settle` → `Deliver`),只是指令去了模拟场所;Sim 账户的 `SimSettle` 由 `SimExchange` 处理。
@@ -154,7 +166,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 - 撮合模型是现有 hft-sim(定长或经验分布延迟、队列/打穿成交);条件延迟池、撤单竞速与墓碑、吃单延迟与到达时簿、非线性吃单费与返利、GTD 到期属于重构 M2。
 - `--latency` 只给定长模型;经验分布与条件延迟池随 M2 的校准表(`replayer calib`)接入。
 - N 个变体各自读 journal、各自重建簿;共享解析与参数无关特征是后续优化(先按 M1 实测决定)。
-- `--own`(从公开簿扣掉日志中自己的挂单)、`parity` 子命令与 `features` 子命令未接入。
+- `--own`(从公开簿扣掉日志中自己的挂单)随 M2 的模拟场所叠加层接入;`features` 子命令随特征导出接入。
 - 从非创建处起步的模拟账户没有起点时的模拟挂单(实盘 journal 每次启动从空订单开始,不受影响)。
 
 ### 开发备忘

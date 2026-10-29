@@ -122,3 +122,41 @@ pub(crate) fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) 
     writeln!(stdout, "{meta}").map_err(|e| (2, e.to_string()))?;
     Ok(0)
 }
+
+const PARITY_USAGE: &str = "usage: replayer parity --journal <file|dir> --out <dir> [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--jobs N] [--reassembly-bytes N]";
+
+/// `replayer parity`: the research options that apply without simulation.
+pub(crate) fn parse_parity(args: &[String]) -> Result<hft_replay::ParityOpts, String> {
+    for k in args.iter().skip(1).filter(|a| a.starts_with("--")) {
+        if !matches!(
+            k.as_str(),
+            "--journal" | "--out" | "--variants" | "--set" | "--jobs" | "--reassembly-bytes"
+        ) {
+            return Err(format!("unsupported option {k}; {PARITY_USAGE}"));
+        }
+    }
+    let o = parse(args).map_err(|e| e.replace(USAGE, PARITY_USAGE))?;
+    Ok(hft_replay::ParityOpts {
+        files: o.files,
+        variants: o.variants,
+        reassembly: o.reassembly,
+        jobs: o.jobs,
+        out: o.out,
+    })
+}
+
+/// Exit 1 when the baseline (the journal's own parameters) differs from the logged decisions.
+pub(crate) fn execute_parity<S: StrategySet>(
+    args: &[String],
+    stdout: &mut impl Write,
+) -> Result<i32, Failure> {
+    let opts = parse_parity(args).map_err(|e| (2, e))?;
+    if opts.files.is_empty() {
+        return Err((3, "no journal segment found".into()));
+    }
+    let meta = hft_replay::parity::<S>(&opts).map_err(|e| (3, e))?;
+    writeln!(stdout, "{meta}").map_err(|e| (2, e.to_string()))?;
+    let base = &meta["runs"][0]["summary"];
+    let differs = base["logged_only"].as_u64().unwrap_or(1) + base["regen_only"].as_u64().unwrap_or(1) > 0;
+    Ok(i32::from(differs))
+}

@@ -297,3 +297,36 @@ fn research_throughput_probe() {
         r.stats
     );
 }
+
+#[test]
+fn rpl_304_parity_matches_the_logged_decisions_and_reports_a_variant() {
+    // .1 the journal's own parameters: every decision on both sides.
+    let (_t, files) = dst_journal(0, 2_000);
+    let mut c = cfg(&files);
+    c.accounts = Some(Vec::new());
+    c.driver.engine_timers = false;
+    let r = run_one::<TestStrategies>(&c).unwrap();
+    let (_, s) = r.parity.unwrap();
+    assert!(s.logged > 0, "RPL-304.1 {s:?}");
+    assert_eq!(
+        (s.both, s.logged_only, s.regen_only, s.first_diff_trigger),
+        (s.logged, 0, 0, 0),
+        "RPL-304.1 {s:?}"
+    );
+    assert_eq!(s.rate(), 1.0, "RPL-304.1");
+    // .2 a variant that changes decisions is classified, not refused.
+    c.variant = Variant {
+        name: "thr".into(),
+        set: [("thr".to_string(), 1_000_000)].into_iter().collect(),
+    };
+    let v = run_one::<TestStrategies>(&c).unwrap();
+    let (t, s2) = v.parity.unwrap();
+    assert_eq!(s2.logged, s.logged, "RPL-304.2");
+    assert_eq!(s2.both + s2.logged_only, s2.logged, "RPL-304.2 {s2:?}");
+    assert_eq!(s2.both + s2.regen_only, s2.regenerated, "RPL-304.2 {s2:?}");
+    assert_eq!(
+        t.rows() as u64,
+        s2.both + s2.logged_only + s2.regen_only,
+        "RPL-304.2"
+    );
+}

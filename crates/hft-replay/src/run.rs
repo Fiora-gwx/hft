@@ -52,6 +52,8 @@ pub struct RunOut {
     pub fills: Table,
     pub orders: Table,
     pub windows: Table,
+    /// Nothing simulated: the regenerated decisions against the logged ones.
+    pub parity: Option<(Table, crate::parity::ParitySummary)>,
 }
 
 static HB: Heartbeat = Heartbeat::new();
@@ -114,7 +116,13 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
     };
     let venue = ResearchVenue::new(&rd, &mask, hz, &cfg.sim)?;
     seq.driver_mut().venue = Some(venue);
-    let cmd_ids = inject_variant::<S>(&mut seq, &mask, &cfg.variant)?;
+    // A variant changes the simulated accounts' instances; with nothing simulated (parity), all.
+    let targets: Vec<AccountId> = if mask.is_empty() {
+        seq.instances().slots.iter().map(|s| s.account).collect()
+    } else {
+        mask.clone()
+    };
+    let cmd_ids = inject_variant::<S>(&mut seq, &targets, &cfg.variant)?;
     loop {
         match seq.step() {
             StepOutcome::Busy => {}
@@ -156,6 +164,9 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         .collect();
     let drv = seq.driver();
     let (fills, orders, windows) = order_tables(&rd, &drv.sink.captured, &drv.obs);
+    let parity = mask
+        .is_empty()
+        .then(|| crate::parity::compare(&drv.sink, &drv.sink.captured, &drv.logged));
     Ok(RunOut {
         variant: cfg.variant.name.clone(),
         seed: cfg.sim.seed,
@@ -170,6 +181,7 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         fills,
         orders,
         windows,
+        parity,
     })
 }
 

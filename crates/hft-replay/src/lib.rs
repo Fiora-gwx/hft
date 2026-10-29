@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod driver;
+pub mod parity;
 pub mod run;
 pub mod source;
 pub mod table;
@@ -15,6 +16,7 @@ use hft_strategy_sdk::StrategySet;
 use serde_json::json;
 
 pub use driver::{DriverCfg, ResearchDriver};
+pub use parity::ParitySummary;
 pub use run::{RunCfg, RunOut, run_one};
 pub use variants::Variant;
 pub use venue::SimParams;
@@ -104,6 +106,65 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
         t.write(&opts.out.join(format!("{name}.parquet")), &kv)?;
     }
     write_json(&opts.out.join("run.json"), &meta)?;
+    Ok(meta)
+}
+
+/// A parity job (README "parity"): nothing simulated, the journal's own reports and timers.
+#[derive(Clone, Debug)]
+pub struct ParityOpts {
+    pub files: Vec<PathBuf>,
+    /// The baseline (no `set`) is always variant 0.
+    pub variants: Vec<Variant>,
+    pub reassembly: usize,
+    pub jobs: usize,
+    pub out: PathBuf,
+}
+
+/// Runs every variant without simulation and writes `parity.parquet` (one row per decision on
+/// either side, `class` 0 both / 1 logged only / 2 regenerated only) and `parity.json`.
+pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, String> {
+    let jobs: Vec<RunCfg> = opts
+        .variants
+        .iter()
+        .map(|v| RunCfg {
+            files: opts.files.clone(),
+            accounts: Some(Vec::new()),
+            variant: v.clone(),
+            sim: SimParams::default(),
+            driver: DriverCfg {
+                engine_timers: false,
+                ..DriverCfg::default()
+            },
+            reassembly: opts.reassembly,
+        })
+        .collect();
+    let results = run_all::<S>(&jobs, opts.jobs.max(1));
+    std::fs::create_dir_all(&opts.out).map_err(|e| format!("{}: {e}", opts.out.display()))?;
+    let mut table = table::Table::default();
+    let mut runs = Vec::new();
+    for (cfg, r) in jobs.iter().zip(results) {
+        let r = r.map_err(|e| format!("variant {}: {e}", cfg.variant.name))?;
+        let (mut t, s) = r.parity.ok_or("parity: nothing to compare")?;
+        run::tag(&mut t, &r.variant, 0);
+        table.extend(t)?;
+        runs.push(json!({
+            "variant": r.variant,
+            "set": cfg.variant.set,
+            "params_sha": r.params_sha.iter().map(|(a, s)| json!({"account": a.0, "sha256": s})).collect::<Vec<_>>(),
+            "start_snapshot": r.start_snapshot,
+            "summary": s,
+            "rate": s.rate(),
+        }));
+    }
+    let meta = json!({
+        "tool": "replayer parity",
+        "version": env!("CARGO_PKG_VERSION"),
+        "code_sha": option_env!("HFT_GIT_SHA").unwrap_or("unknown"),
+        "journal": opts.files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        "runs": runs,
+    });
+    table.write(&opts.out.join("parity.parquet"), &[("hft.run", meta.to_string())])?;
+    write_json(&opts.out.join("parity.json"), &meta)?;
     Ok(meta)
 }
 

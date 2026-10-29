@@ -207,6 +207,8 @@ pub struct ResearchDriver {
     eof: bool,
     /// The simulated venue's order events and deliveries, stamped like `sink.captured`.
     pub obs: Vec<Captured>,
+    /// The journal's own `OrderDecision` Outputs after the start snapshot (`parity`).
+    pub logged: Vec<Captured>,
     obs_stamped: usize,
     /// `(account, venue, asset)` whose first logged `BalanceReport` has been handed: it
     /// initialises the ledger's cash (hft-ledger `UNINIT`); later ones are account truth of the
@@ -286,6 +288,7 @@ impl ResearchDriver {
             err: None,
             eof: false,
             obs: Vec::new(),
+            logged: Vec::new(),
             obs_stamped: 0,
             balance_seen: Default::default(),
         }
@@ -400,6 +403,17 @@ impl ResearchDriver {
         let role = r.role();
         if role == Role::Output {
             self.stats.log_outputs_skipped += 1;
+            if r.kind == EventKind::ORDER_DECISION {
+                self.logged.push(Captured {
+                    seq: r.seq,
+                    kind: r.kind,
+                    flags: r.flags,
+                    tsc: r.tsc,
+                    body: r.body,
+                    utc_ns: 0,
+                    engine_ns: 0,
+                });
+            }
             return None;
         }
         if let Some(venue) = &mut self.venue {
