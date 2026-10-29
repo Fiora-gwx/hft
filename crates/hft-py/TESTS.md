@@ -21,7 +21,7 @@ spec: README.md
 | Arrow 映射 | PY-040–PY-053 |
 | 错误 | PY-006、PY-009、PY-010、PY-050、PY-060–PY-065、PY-092、PY-121、PY-128 |
 | 实现说明 | 不适用:见子节 |
-| 1. journal → Arrow | PY-001、PY-008、PY-034、PY-036、PY-055、PY-056、PY-063、PY-070–PY-080 |
+| 1. journal → Arrow | PY-001、PY-008、PY-034、PY-036、PY-055、PY-056、PY-063、PY-070–PY-080、PY-170 |
 | 2. ledger / pnl | PY-100–PY-114、LED-075–LED-081、LED-246 |
 | 3. 源文件 | PY-143 |
 | 4. 打包与发布 | PY-150–PY-153 |
@@ -1652,6 +1652,20 @@ spec: README.md
 |---|---|
 | PY-114.1 | ledger |
 | PY-114.2 | pnl |
+
+### PY-170 `events()` 处理时刻窗口的起点段
+
+- 规则:[1. journal → Arrow](README.md#1-journal--arrow) 第 2 条
+- 级别:table
+- 里程碑:M3
+- 前置:段 1–4,段头 `created_utc_ns` 依次 1 000、2 000、3 000、4 000,都有文件
+- 实现:`crates/hft-py/tests/start_segment.rs::py_170_start_segment_of_a_window`
+
+| 行 | `t0` | 期望 |
+|---|---|---|
+| PY-170.1 | 3 500;4 000;9 999 | 起点段 2;3;3 |
+| PY-170.2 | 1 500;500 | 不足两段:从头读(`None`) |
+| PY-170.3 | 3 500,段 2 没有文件 | 起点段 1 |
 
 ## 验收
 

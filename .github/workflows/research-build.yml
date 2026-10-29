@@ -1,0 +1,65 @@
+# Research tools for the x86_64 research machine (crates/hft-replay/README.md, crates/hft-py/README.md):
+# the `replayer` binary (research / parity / verify) and the hft_py wheel, built from a commit whose
+# ci.yml is green and kept as a short-lived workflow artifact. Not part of any production release
+# archive; never installed on trading servers. docs/development.md#研究工具构建research-buildyml.
+name: Research build
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to build (green ci.yml)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # glibc 2.35: the binary and the wheel (manylinux_2_35 or older) also run on older research hosts.
+    container:
+      image: ubuntu:22.04
+    timeout-minutes: 60
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl git pkg-config cmake zstd python3 python3-venv python3-pip
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: research-x86
+      - name: Build replayer and the hft_py wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # run.json / parity.json record the code SHA (hft-replay `code_sha`).
+          export HFT_GIT_SHA=$(git rev-parse HEAD)
+          cargo build --locked --release -p replayer
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -q maturin
+          "$RUNNER_TEMP/venv/bin/maturin" build --release --locked --manifest-path crates/hft-py/Cargo.toml --out out/wheels
+          mkdir -p out/bin
+          cp target/release/replayer out/bin/
+          echo "$HFT_GIT_SHA" > out/SHA
+          (cd out && sha256sum bin/* wheels/* > SHA256SUMS && tar --zstd -cf ../research-x86_64.tar.zst .)
+          sha256sum research-x86_64.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-x86_64
+          path: research-x86_64.tar.zst
+          retention-days: 7
