@@ -1,5 +1,8 @@
 //! Startup journal reservation; the same journal list feeds storage preparation.
-use crate::{Error, config::Config};
+use crate::{
+    Error,
+    config::{Assembly, Config},
+};
 
 pub fn hot_resident(segment_bytes: u64, hot_keep: u8) -> Result<u64, Error> {
     segment_bytes
@@ -7,7 +10,8 @@ pub fn hot_resident(segment_bytes: u64, hot_keep: u8) -> Result<u64, Error> {
         .ok_or_else(|| Error::runtime("MemBudget", "journal reservation overflow", 3))
 }
 
-pub fn journals(c: &Config, dry: bool) -> Vec<String> {
+pub fn journals(c: &Config, a: Assembly) -> Vec<String> {
+    let dry = a.is_sim();
     let mut names = vec!["seq".into()];
     for (name, venue) in &c.venues {
         if !dry || venue.live_feed {
@@ -31,8 +35,8 @@ pub fn check_space(available: u64, held_by_self: u64, required: u64) -> Result<(
     Ok(())
 }
 
-pub fn required(c: &Config, dry: bool) -> Result<u64, Error> {
-    journals(c, dry).into_iter().try_fold(4096u64, |total, name| {
+pub fn required(c: &Config, a: Assembly) -> Result<u64, Error> {
+    journals(c, a).into_iter().try_fold(4096u64, |total, name| {
         let layout = c.journal.layout(&name);
         total
             .checked_add(hot_resident(layout.segment_bytes, layout.hot_keep)?)
@@ -41,7 +45,7 @@ pub fn required(c: &Config, dry: bool) -> Result<u64, Error> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn preflight(c: &Config, dry: bool) -> Result<(), Error> {
+pub fn preflight(c: &Config, a: Assembly) -> Result<(), Error> {
     use std::os::unix::ffi::OsStrExt;
     let hot_mount = c.paths.journal_ram.join(crate::storage::instance(c).as_str());
     std::fs::create_dir_all(&hot_mount)
@@ -53,7 +57,7 @@ pub fn preflight(c: &Config, dry: bool) -> Result<(), Error> {
     if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
         return Err(Error::runtime("ShmSpace", "cannot inspect hot filesystem", 3));
     }
-    let required = required(c, dry)?;
+    let required = required(c, a)?;
     let held = hft_journal::held_by_instance(&[&c.paths.journal_ram], crate::storage::instance(c))
         .map_err(|_| Error::runtime("ShmSpace", "cannot inspect held segments", 3))?;
     let available = stat.f_bavail.saturating_mul(stat.f_frsize);

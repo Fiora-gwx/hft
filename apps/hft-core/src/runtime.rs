@@ -372,15 +372,10 @@ pub fn join_all_within(
     }
     first.map_or(Ok(()), Err)
 }
-pub fn run(
-    l: Loaded,
-    dry: bool,
-    duration_ms: Option<u64>,
-    secrets: crate::secrets::SecretFiles,
-) -> Result<u8, Error> {
+pub fn run(l: Loaded, duration_ms: Option<u64>, secrets: crate::secrets::SecretFiles) -> Result<u8, Error> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (l, dry, duration_ms, secrets);
+        let _ = (l, duration_ms, secrets);
         Err(Error::runtime(
             "HostCheck",
             "runtime requires Linux (tmpfs journal and Unix ctl); --check and schemas are portable",
@@ -389,17 +384,19 @@ pub fn run(
     }
     #[cfg(target_os = "linux")]
     {
-        run_linux(l, dry, duration_ms, secrets)
+        run_linux(l, duration_ms, secrets)
     }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn run_linux(
     mut l: Loaded,
-    dry: bool,
     duration_ms: Option<u64>,
     secrets: crate::secrets::SecretFiles,
 ) -> Result<u8, Error> {
+    // Every mode-dependent branch below reads the assembly resolved at load.
+    let assembly = l.assembly;
+    let dry = assembly.is_sim();
     let c = &l.cfg;
     l.startup_trace.mark(3, false);
     #[cfg(target_os = "linux")]
@@ -442,7 +439,7 @@ fn run_linux(
     // Recovery is deliberately rejected above; the fresh session has no snapshot epoch.
     let epoch = lease.reserve_epoch(&meta, None)?;
     #[cfg(target_os = "linux")]
-    crate::budget::preflight(c, dry)?;
+    crate::budget::preflight(c, assembly)?;
     l.setup = hft_sequencer::EngineSetup::decode_blob(
         &l.configs.engine_blob,
         &l.rd,

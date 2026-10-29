@@ -44,7 +44,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 使用本组件 | 不适用:见子节 |
 | 命令行与退出码 | CORE-001–CORE-017、CORE-299、CORE-412 |
 | 策略装配 | CORE-030–CORE-035 |
-| 实例角色(prod 与 sim) | CORE-040–CORE-050、CORE-432 |
+| 实例角色(prod 与 sim) | CORE-040–CORE-050、CORE-432、CORE-448 |
 | 线程计划 | CORE-060–CORE-090 |
 | 内存与 journal 段(按主机类唯一归属) | CORE-100–CORE-122、CORE-130–CORE-148、CORE-412 |
 | 主机资源隔离(slice、核与出口 IP) | CORE-160–CORE-177 |
@@ -4451,6 +4451,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-425.1 | 未配置 | `TradeThrough` |
 | CORE-425.2 | `maker_fill = "queue"` | `Queue` |
 | CORE-425.3 | `maker_fill = "prob"` | `ConfigParse` |
+
+### CORE-448 运行装配 `Assembly`
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)(运行装配)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置(`sim`);`support::write_live(…, false)` 的测试网配置(`prod`、`order_env = "testnet"`)及其 `order_env = "prod"` 副本
+- 实现:`apps/hft-core/tests/config.rs::core_448_run_assembly`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-448.1 | `Assembly::resolve`:(dry, sim)、(非 dry, sim)、(非 dry, 测试网 prod)、(dry, 测试网 prod)、(非 dry, 正式 prod) | `Sim`、`None`、`Live{prod_orders: false}`、`None`、`Live{prod_orders: true}`(`prod_orders()` 真、`is_sim()` 假) |
+| CORE-448.2 | `load(sim, true)`;`load(测试网, false)` | `Loaded.assembly` 分别为 `Sim`、`Live{false}`,且等于 `cfg.assembly()` |
+| CORE-448.3 | `load(sim, false)` | `EnvCombo` |
 
 ### CORE-447 `[sim] calib` 校准表
 

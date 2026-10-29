@@ -459,7 +459,7 @@ fn core_421_dry_run_live_feed_venue() {
     }
     let parsed = hft_core::config::parse(&path).unwrap();
     assert_eq!(
-        hft_core::budget::journals(&parsed, true),
+        hft_core::budget::journals(&parsed, hft_core::config::Assembly::Sim),
         ["seq", "raw-feed-public"],
         "CORE-421.3"
     );
@@ -634,6 +634,55 @@ maker_fill = 'prob'
     .unwrap();
     let e = hft_core::config::parse(&path).unwrap_err();
     assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-425.3: {e:?}");
+}
+
+#[test]
+fn core_448_run_assembly() {
+    use hft_core::config::Assembly;
+    let d = tempfile::tempdir().unwrap();
+    let sim = support::write(d.path(), &d.path().join("hot"), None);
+    let d2 = tempfile::tempdir().unwrap();
+    let live = support::write_live(d2.path(), &d2.path().join("hot"), false);
+    let live_text = std::fs::read_to_string(&live).unwrap();
+    let inst = |p: &std::path::Path| hft_core::config::parse(p).unwrap().instance;
+    // .1 the combinations of --dry-run, instance.name and order_env.
+    assert_eq!(
+        Assembly::resolve(true, &inst(&sim)),
+        Some(Assembly::Sim),
+        "CORE-448.1"
+    );
+    assert_eq!(Assembly::resolve(false, &inst(&sim)), None, "CORE-448.1");
+    assert_eq!(
+        Assembly::resolve(false, &inst(&live)),
+        Some(Assembly::Live { prod_orders: false }),
+        "CORE-448.1"
+    );
+    assert_eq!(Assembly::resolve(true, &inst(&live)), None, "CORE-448.1");
+    let prod = d2.path().join("prod.toml");
+    std::fs::write(
+        &prod,
+        live_text.replace("order_env = \"testnet\"", "order_env = \"prod\""),
+    )
+    .unwrap();
+    let a = Assembly::resolve(false, &inst(&prod));
+    assert_eq!(a, Some(Assembly::Live { prod_orders: true }), "CORE-448.1");
+    assert!(
+        a.is_some_and(Assembly::prod_orders) && !a.is_some_and(Assembly::is_sim),
+        "CORE-448.1"
+    );
+    // .2 a loaded configuration: the assembly of the flag, equal to the configuration's own.
+    let l = hft_core::config::load(&sim, true).unwrap();
+    assert_eq!(
+        (l.assembly, l.cfg.assembly()),
+        (Assembly::Sim, Assembly::Sim),
+        "CORE-448.2"
+    );
+    let l = hft_core::config::load(&live, false).unwrap();
+    assert_eq!(l.assembly, Assembly::Live { prod_orders: false }, "CORE-448.2");
+    assert_eq!(l.cfg.assembly(), l.assembly, "CORE-448.2");
+    // .3 a refused combination: EnvCombo, no assembly.
+    let e = hft_core::config::load(&sim, false).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "EnvCombo"), "CORE-448.3 {e:?}");
 }
 
 #[test]

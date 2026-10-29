@@ -29,6 +29,46 @@ pub struct Config {
     #[serde(default)]
     pub startup: crate::startup::Config,
 }
+/// The run assembly (README "实例角色(prod 与 sim)" 运行装配): resolved once at start-up from
+/// `--dry-run`, `instance.name` and `instance.order_env`; every mode-dependent branch of hft-core
+/// reads it. Replay assemblies are replayer's drivers (`verify`, `research`), not hft-core runs.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Assembly {
+    /// Network mode: instance `prod`, `order_env` testnet or prod; Live accounts, gw per venue.
+    Live { prod_orders: bool },
+    /// `--dry-run`: instance `sim` without `order_env`; Sim accounts, sim-gw, paper or
+    /// `live_feed` venues.
+    Sim,
+}
+impl Assembly {
+    /// The assembly of `--dry-run` and `[instance]`; any other combination → `None` (`EnvCombo`).
+    pub fn resolve(dry: bool, i: &Instance) -> Option<Assembly> {
+        match (dry, i.name.as_str(), i.order_env.as_deref()) {
+            (true, "sim", None) => Some(Assembly::Sim),
+            (false, "prod", Some("testnet")) => Some(Assembly::Live { prod_orders: false }),
+            (false, "prod", Some("prod")) => Some(Assembly::Live { prod_orders: true }),
+            _ => None,
+        }
+    }
+    pub const fn is_sim(self) -> bool {
+        matches!(self, Assembly::Sim)
+    }
+    pub const fn prod_orders(self) -> bool {
+        matches!(self, Assembly::Live { prod_orders: true })
+    }
+}
+impl Config {
+    /// The assembly of a loaded configuration (`[sim]` is present exactly in `Sim`, checked at load).
+    pub fn assembly(&self) -> Assembly {
+        if self.sim.is_some() {
+            Assembly::Sim
+        } else {
+            Assembly::Live {
+                prod_orders: self.instance.prod_orders(),
+            }
+        }
+    }
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Instance {
@@ -415,6 +455,7 @@ pub struct Quote {
 pub struct Loaded {
     pub startup_trace: crate::startup::Serial,
     pub cfg: Config,
+    pub assembly: Assembly,
     pub rd: RefData,
     pub setup: EngineSetup,
     pub configs: ConfigSet<Strategies>,
@@ -558,11 +599,10 @@ pub fn load_timed(
             "this assembly requires config_source=file and a fresh journal".into()
         );
     }
-    if (dry && (c.instance.name != "sim" || c.instance.order_env.is_some()))
-        || (!dry
-            && (c.instance.name != "prod"
-                || !matches!(c.instance.order_env.as_deref(), Some("testnet" | "prod"))))
-    {
+    let assembly = Assembly::resolve(dry, &c.instance);
+    // From here on the mode is the assembly's (the flag where the combination is refused).
+    let sim = assembly.map_or(dry, Assembly::is_sim);
+    if assembly.is_none() {
         bad!(
             "EnvCombo",
             "--dry-run requires sim without order_env; network mode requires prod with order_env testnet or prod"
@@ -582,7 +622,7 @@ pub fn load_timed(
             }
         }
     }
-    if dry != c.sim.is_some() {
+    if sim != c.sim.is_some() {
         bad!(
             "SimConfig",
             "sim section must be present exactly in --dry-run mode".into()
@@ -636,7 +676,7 @@ pub fn load_timed(
         "housekeeping".into(),
         "ctl-gateway".into(),
     ];
-    if dry {
+    if sim {
         tasks.push("sim-gw".into());
         tasks.push("paper-feed".into());
     }
@@ -664,13 +704,13 @@ pub fn load_timed(
         if let Some(why) = crate::venues::gw_rest_defaults(&v.protocol).and_then(|d| v.gw.check(name, d)) {
             errors.push(Error::config("BadValue", why));
         }
-        if dry && !v.accounts.is_empty() {
+        if sim && !v.accounts.is_empty() {
             errors.push(Error::config("SecretsInSim", name));
         }
-        if v.live_feed && !dry {
+        if v.live_feed && !sim {
             errors.push(Error::config("LiveFeed", "live_feed is a --dry-run venue option"));
         }
-        if dry && v.live_feed {
+        if sim && v.live_feed {
             tasks.push(format!("feed:{name}"));
             tasks.push(format!("conn-builder:{name}"));
             if v.src_ip.is_none() || v.bind_device.as_ref().is_none_or(|s| s.is_empty()) {
@@ -680,7 +720,7 @@ pub fn load_timed(
                 ));
             }
         }
-        if !dry {
+        if !sim {
             // One gw polls every Live account of the venue: its kill word has one bit per account.
             if v.accounts.len() > usize::from(hft_types::KillBits::MAX_ACCOUNTS_PER_GW) {
                 errors.push(Error::config(
@@ -891,13 +931,13 @@ pub fn load_timed(
             }
         }
     }
-    if setup.role_prod == dry || setup.drain_timeout_ms != c.shutdown.drain_timeout_ms {
+    if setup.role_prod == sim || setup.drain_timeout_ms != c.shutdown.drain_timeout_ms {
         errors.push(Error::config(
             "EngineMismatch",
             "role/drain timeout differs from ECF1",
         ));
     }
-    if dry && setup.seq.allow_missing_standby != 1 {
+    if sim && setup.seq.allow_missing_standby != 1 {
         errors.push(Error::config(
             "EngineMismatch",
             "paper mode has one virtual order connection; ECF1 must allow missing standby",
@@ -959,7 +999,7 @@ pub fn load_timed(
         if m.id.0 == 0 {
             continue;
         }
-        if matches!(m.kind, AccountKind::Sim(_)) != dry || m.is_prod != c.instance.prod_orders() {
+        if matches!(m.kind, AccountKind::Sim(_)) != sim || m.is_prod != c.instance.prod_orders() {
             errors.push(Error::config("EnvAccountMismatch", format!("account {a}")));
         }
         // One parameter blob per instance, under its primary account (the lowest id of its account
@@ -984,7 +1024,7 @@ pub fn load_timed(
             if m.venues & (1u64 << v) != 0 {
                 match c.venues.values().find(|x| x.id == v) {
                     None => errors.push(Error::config("UnknownVenue", format!("account {a}, venue {v}"))),
-                    Some(vc) if !dry && vc.accounts.iter().filter(|k| k.account == a).count() != 1 => errors
+                    Some(vc) if !sim && vc.accounts.iter().filter(|k| k.account == a).count() != 1 => errors
                         .push(Error::config(
                             "MissingCredential",
                             format!("account {a}, venue {v}"),
@@ -1078,7 +1118,7 @@ pub fn load_timed(
             "connection liveness requires two BBO ping intervals",
         ));
     }
-    if !dry {
+    if !sim {
         for v in c.venues.values() {
             for k in &v.accounts {
                 if rd.account(AccountId(k.account)).venues & (1u64 << v.id) == 0 {
@@ -1159,8 +1199,12 @@ pub fn load_timed(
         )
     })?;
     startup_trace.mark(2, true);
+    let Some(assembly) = assembly else {
+        return Err(vec![Error::config("EnvCombo", "no run assembly")]);
+    };
     Ok(Loaded {
         startup_trace,
+        assembly,
         cfg: c,
         rd,
         setup,

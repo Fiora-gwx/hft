@@ -137,6 +137,8 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | 冷进程 | kill-switch、reconciler(只管本实例的 Live 账户)、watchtower、journal-archiver、ops_bot、pipeline、treasury | 不需要 kill-switch 与 reconciler;watchtower、journal-archiver、ops_bot、pipeline 按 `instance` 区分两份 journal |
 | `RELEASE.json.channel = "dev"`(读本实例所属激活组的清单 `paths.release_manifest`) | 有 `is_prod = true` 账户时退出 2(`DevBuildWithProdAccount`);测试网账户允许 | 允许 |
 
+**运行装配**(`config::Assembly`):启动步 2 由 `--dry-run`、`instance.name` 与 `instance.order_env` 解析一次 —— `--dry-run` + `sim` + 无 `order_env` → `Sim`;无 `--dry-run` + `prod` + `order_env ∈ {testnet, prod}` → `Live{prod_orders}`;其他组合 → 退出 2(`EnvCombo`)。`Loaded.assembly` 是这次运行的装配,配置校验的其余分支、日志预算(`budget::journals/required/preflight`)、任务装配与行情原始日志缺省都读它;`Config::assembly()`(`[sim]` 存在 ⇔ `Sim`,加载时已校验)给只拿到配置的装配代码用,两者一致。回放的装配(`replayer verify` 的 `VerifyDriver`、`research` 的 `ResearchDriver`)属于 replayer,不是 hft-core 的运行。
+
 账户名前缀规则按 refdata `AccountMeta.label` 判定([hft-refdata](../../crates/hft-refdata/README.md)),使同一主机上两个实例的账户名必然不相交(ops_bot 按账户名路由,`/kill`、`/stop` 不带实例名);违反 → 退出 2(`AccountNamePrefix`)。`sim` 实例可以先于 `prod` 激活新版本,所以 `channel` 检查只读本组链接下的清单(`current-core` 或 `current-sim`,[deploy 单元组](../../deploy/README.md#单元组与分组激活))。
 
 **运行位置**(交付路径:M6 dev2 联调与模拟长跑 → M7 统一升级 + 延迟验收 → M8 正式实盘):
