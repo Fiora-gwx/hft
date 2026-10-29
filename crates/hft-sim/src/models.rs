@@ -71,6 +71,14 @@ fn sample_dist(d: &Dist, rng: &mut ChaCha8Rng) -> u32 {
     u32::try_from(v).unwrap_or(u32::MAX)
 }
 
+/// A uniform draw in `[0, n)` (0 for `n = 0`).
+pub(crate) fn below(rng: &mut ChaCha8Rng, n: u64) -> u64 {
+    if n == 0 {
+        return 0;
+    }
+    ((u128::from(rng.next_u64()) * u128::from(n)) >> 64) as u64
+}
+
 /// Which leg of the latency model.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub(crate) enum Leg {

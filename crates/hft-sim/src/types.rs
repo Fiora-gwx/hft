@@ -38,6 +38,11 @@ pub enum MakerFill {
     /// `TradeThrough`, plus FIFO queue position at the resting price: trades at that price
     /// consume the displayed quantity that was ahead of the order first.
     Queue,
+    /// The queue rule validated against live Polymarket orders: the quantity ahead is capped by
+    /// every later displayed size of the level (`ahead = min(ahead, level)`); a trade at the price
+    /// consumes `ahead` first and fills the rest; a trade through the price, or the opposite side
+    /// crossing the price, fills the whole remainder.
+    QueueCap,
 }
 
 /// `[sim]` of the hft-core configuration (README "配置"). `seed` has no default: the only
@@ -96,6 +101,101 @@ impl Dist {
             }
         }
         d
+    }
+}
+
+/// Latency condition of the next commands (README "条件延迟池"), set by the caller from its
+/// own observations: venue load bucket, reference-move bucket, window phase (each `< 4`).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+pub struct Cond {
+    pub load: u8,
+    pub mv: u8,
+    pub phase: u8,
+}
+
+/// Which latency a pool sample measures (decision → report, µs).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum PoolLeg {
+    /// Decision → Ack of a new order.
+    Place,
+    /// Decision → CancelAck.
+    Cancel,
+    /// Arrival → match of a marketable (Ioc/Fok) order.
+    Taker,
+}
+
+/// One pool: the samples of `leg` under a condition; `None` fields are wildcards (the fallbacks).
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct Pool {
+    pub leg: PoolLeg,
+    pub load: Option<u8>,
+    pub mv: Option<u8>,
+    pub phase: Option<u8>,
+    pub us: Vec<u32>,
+}
+
+/// Conditional latency pools (README "条件延迟池"): a draw takes a uniform sample of the pool of
+/// `(leg, load, move, phase)` when it has at least `min_n` samples, else of `(leg, load)`, else of
+/// `leg`; with none the account's `LatencyModel` applies. A Place/Cancel draw `T` arrives at
+/// `T − split_us` (at least 1 ms) after the decision.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct LatPools {
+    pub split_us: u32,
+    pub min_n: u16,
+    pub pools: Vec<Pool>,
+}
+
+/// Matching delay of marketable orders (README "吃单延迟"): `base_us` after arrival, or `slow_us`
+/// with probability `slow_ppm` / 10⁶ (a `PoolLeg::Taker` pool replaces `base_us`); the result is
+/// reported `resp_us` after the match.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct TakerDelay {
+    pub base_us: u32,
+    pub slow_us: u32,
+    pub slow_ppm: u32,
+    pub resp_us: u32,
+}
+
+/// Trading fee model (README "5. 手续费与扣费资产").
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum FeeModel {
+    /// The refdata fee rows (`FeePair` rates of notional).
+    Refdata,
+    /// Binary outcome tokens: taker fee = `k_e9` / 10⁹ × p × (1 − p) × qty with p the price as a
+    /// fraction of one; makers pay nothing.
+    BinaryTaker { k_e9: i64 },
+}
+
+/// Venue-behaviour options on top of `SimTuning` (README "场所行为选项"); `Default` = none of them,
+/// the behaviour and `state_hash` of a plain `SimExchange`.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct VenueModel {
+    /// `Some((entry_us, resp_us))`: cancels use this latency instead of the account model's.
+    pub cancel_us: Option<(u32, u32)>,
+    /// A cancel that reaches the venue before its order leaves a tombstone: the order is refused
+    /// on arrival with `CancelAck` (the Polymarket "Already canceled" answer) and never rests.
+    pub tombstone: bool,
+    pub taker: Option<TakerDelay>,
+    pub fee: FeeModel,
+    /// Good-till-date lifetime of resting orders from their arrival (ms; 0 = none): `Expired`.
+    pub gtd_ms: u32,
+    /// `Some(us)`: resting-order fills are reported this long after the match (else the account
+    /// model's response leg).
+    pub fill_resp_us: Option<u32>,
+    pub pools: Option<LatPools>,
+}
+
+impl Default for VenueModel {
+    fn default() -> Self {
+        VenueModel {
+            cancel_us: None,
+            tombstone: false,
+            taker: None,
+            fee: FeeModel::Refdata,
+            gtd_ms: 0,
+            fill_resp_us: None,
+            pools: None,
+        }
     }
 }
 
@@ -263,6 +363,10 @@ pub struct SimCounters {
     pub book_not_live_rejects: u64,
     pub order_table_full: u64,
     pub reply_overflow: u64,
+    /// `VenueModel::tombstone`: orders refused because their cancel arrived first.
+    pub tombstone_refusals: u64,
+    /// `VenueModel::gtd_ms`: resting orders expired.
+    pub gtd_expired: u64,
 }
 
 /// One balance of the simulated truth.

@@ -47,6 +47,7 @@ pub use types::{
     SimBalance, SimCfgErr, SimCounters, SimInput, SimMargin, SimOrderView, SimPosition, SimReply,
     SimSeedOrder, SimSeedState, SimSetup, SimTuning,
 };
+pub use types::{Cond, FeeModel, LatPools, Pool, PoolLeg, TakerDelay, VenueModel};
 pub use view::SimAccountView;
 
 use crate::models::{Leg, account_rng, check_latency, sample_us};
@@ -100,7 +101,19 @@ pub struct SimExchange {
     last_tsc: u64,
     next_truth: u64,
     counters: SimCounters,
+    /// Venue-behaviour options (`set_venue_model`; default = none).
+    vm: VenueModel,
+    /// Latency condition of the next commands (`set_condition`).
+    cond: Cond,
+    /// `VenueModel::tombstone`: `(account index, slot, gen)` of cancels that arrived before their
+    /// order (oldest dropped beyond `TOMB_CAP`).
+    tombs: std::collections::VecDeque<(u8, u32, u32)>,
+    /// `hide_own`: quantity to subtract from the displayed book, `(inst index, side, px, qty)`.
+    own: Vec<(u16, Side, i64, i64)>,
 }
+
+/// Tombstones kept (`VenueModel::tombstone`).
+const TOMB_CAP: usize = 4_096;
 
 impl core::fmt::Debug for SimExchange {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -459,6 +472,10 @@ impl SimExchange {
             last_tsc: 0,
             next_truth: 0,
             counters: SimCounters::default(),
+            vm: VenueModel::default(),
+            cond: Cond::default(),
+            tombs: std::collections::VecDeque::with_capacity(TOMB_CAP),
+            own: Vec::with_capacity(256),
         };
         for ai in 0..ex.accts.len() {
             ex.reset_balances(ai);
@@ -493,18 +510,9 @@ impl SimExchange {
         };
         match cmd.op {
             GwOp::Place | GwOp::Cancel | GwOp::Amend | GwOp::CancelAll | GwOp::Query => {
-                let entry = self.sample(ai, Leg::Entry);
+                let entry = self.entry_us(ai, cmd.op);
                 let arrive = decided_tsc.0.saturating_add(self.us_to_tsc(entry));
-                self.seq = self.seq.wrapping_add(1);
-                if self.cmds.len() >= PENDING_CMD_CAP {
-                    self.counters.reply_overflow = self.counters.reply_overflow.wrapping_add(1);
-                }
-                self.cmds.push(Reverse(PendCmd {
-                    arrive,
-                    seq: self.seq,
-                    acct: ai as u8,
-                    cmd: *cmd,
-                }));
+                self.push_cmd(ai, arrive, *cmd, 0);
             }
             GwOp::SimReset => {
                 let t = self.last_tsc;
@@ -595,6 +603,57 @@ impl SimExchange {
         }
     }
 
+    /// Venue-behaviour options (README "场所行为选项"); cold, before the first command. Pools with
+    /// no samples are dropped.
+    pub fn set_venue_model(&mut self, mut m: VenueModel) {
+        if let Some(p) = &mut m.pools {
+            p.pools.retain(|x| !x.us.is_empty());
+        }
+        self.vm = m;
+    }
+
+    /// Latency condition of the commands that follow (`LatPools`).
+    pub fn set_condition(&mut self, c: Cond) {
+        self.cond = c;
+    }
+
+    /// Own-order overlay (README "场所行为选项"): `dq` (may be negative) is added to the quantity of
+    /// inst `i`'s `side` at `px` that is subtracted from the displayed book (resting orders of the
+    /// recorded run that are in the recorded book but not in this simulation). Clamped at 0.
+    pub fn hide_own(&mut self, i: InstId, side: Side, px: Px, dq: Qty) {
+        let Some(ii) = self.inst_index(i) else {
+            return;
+        };
+        let ii = ii as u16;
+        match self
+            .own
+            .iter()
+            .position(|e| e.0 == ii && e.1 == side && e.2 == px.0)
+        {
+            Some(k) => {
+                let left = self.own.get(k).map_or(0, |e| e.3.saturating_add(dq.0).max(0));
+                if left == 0 {
+                    self.own.swap_remove(k);
+                } else if let Some(e) = self.own.get_mut(k) {
+                    e.3 = left;
+                }
+            }
+            None if dq.0 > 0 => self.own.push((ii, side, px.0, dq.0)),
+            None => {}
+        }
+    }
+
+    /// Hidden own quantity of inst index `ii`'s `side` at `px`.
+    pub(crate) fn own_at(&self, ii: usize, side: Side, px: i64) -> i64 {
+        if self.own.is_empty() {
+            return 0;
+        }
+        self.own
+            .iter()
+            .find(|e| usize::from(e.0) == ii && e.1 == side && e.2 == px)
+            .map_or(0, |e| e.3)
+    }
+
     /// Earliest pending `due_tsc`.
     pub fn next_due(&self) -> Option<Tsc> {
         self.replies.peek().map(|Reverse(r)| Tsc(r.due))
@@ -620,6 +679,8 @@ impl SimExchange {
             c.liquidations += a.counters.liquidations;
             c.book_not_live_rejects += a.counters.book_not_live_rejects;
             c.order_table_full += a.counters.order_table_full;
+            c.tombstone_refusals += a.counters.tombstone_refusals;
+            c.gtd_expired += a.counters.gtd_expired;
         }
         c
     }
@@ -732,6 +793,87 @@ impl SimExchange {
     fn resp_due(&mut self, ai: usize, t: u64) -> u64 {
         let r = self.sample(ai, Leg::Resp);
         t.saturating_add(self.us_to_tsc(r))
+    }
+
+    /// Due time of a resting-order fill report (`VenueModel::fill_resp_us`, else `resp_due`).
+    fn fill_due(&mut self, ai: usize, t: u64) -> u64 {
+        match self.vm.fill_resp_us {
+            Some(us) => t.saturating_add(self.us_to_tsc(us)),
+            None => self.resp_due(ai, t),
+        }
+    }
+
+    /// A conditional pool draw of `leg` under `self.cond` (µs), if a pool applies.
+    fn pool_draw(&mut self, ai: usize, leg: PoolLeg) -> Option<u32> {
+        let p = self.vm.pools.as_ref()?;
+        let c = self.cond;
+        let min = usize::from(p.min_n.max(1));
+        let pick = [
+            (Some(c.load), Some(c.mv), Some(c.phase)),
+            (Some(c.load), None, None),
+            (None, None, None),
+        ]
+        .into_iter()
+        .find_map(|(l, m, ph)| {
+            p.pools
+                .iter()
+                .position(|x| x.leg == leg && x.load == l && x.mv == m && x.phase == ph && x.us.len() >= min)
+        })?;
+        let n = p.pools.get(pick)?.us.len() as u64;
+        let a = self.accts.get_mut(ai)?;
+        let k = usize::try_from(crate::models::below(&mut a.rng, n)).ok()?;
+        self.vm.pools.as_ref()?.pools.get(pick)?.us.get(k).copied()
+    }
+
+    /// Entry latency (µs) of an order-class command of account `ai`: a pool draw minus the split,
+    /// `VenueModel::cancel_us` for cancels, else the account model.
+    fn entry_us(&mut self, ai: usize, op: GwOp) -> u32 {
+        let leg = match op {
+            GwOp::Place | GwOp::Amend => Some(PoolLeg::Place),
+            GwOp::Cancel | GwOp::CancelAll => Some(PoolLeg::Cancel),
+            _ => None,
+        };
+        if let Some(leg) = leg
+            && let Some(t) = self.pool_draw(ai, leg)
+        {
+            let split = self.vm.pools.as_ref().map_or(0, |p| p.split_us);
+            return t.saturating_sub(split).max(1_000);
+        }
+        if leg == Some(PoolLeg::Cancel)
+            && let Some((e, _)) = self.vm.cancel_us
+        {
+            return e;
+        }
+        self.sample(ai, Leg::Entry)
+    }
+
+    /// Due time of a cancel's report: the pools' split, `VenueModel::cancel_us`, else `resp_due`.
+    fn cancel_resp_due(&mut self, ai: usize, t: u64) -> u64 {
+        if let Some(p) = &self.vm.pools
+            && p.pools.iter().any(|x| x.leg == PoolLeg::Cancel)
+        {
+            let s = p.split_us;
+            return t.saturating_add(self.us_to_tsc(s));
+        }
+        match self.vm.cancel_us {
+            Some((_, r)) => t.saturating_add(self.us_to_tsc(r)),
+            None => self.resp_due(ai, t),
+        }
+    }
+
+    /// Queues a command at `arrive` (`phase` 1 = the delayed match of a marketable order).
+    fn push_cmd(&mut self, ai: usize, arrive: u64, cmd: GwCmd, phase: u8) {
+        self.seq = self.seq.wrapping_add(1);
+        if self.cmds.len() >= PENDING_CMD_CAP {
+            self.counters.reply_overflow = self.counters.reply_overflow.wrapping_add(1);
+        }
+        self.cmds.push(Reverse(PendCmd {
+            arrive,
+            seq: self.seq,
+            acct: ai as u8,
+            phase,
+            cmd,
+        }));
     }
 
     fn push_reply(&mut self, account: AccountId, due: u64, msg: RepMsg, bulk: Bulk) {
