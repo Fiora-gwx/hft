@@ -1,8 +1,8 @@
 //! Fixture repo for `new-strategy` and `scaffold-gate` (tools/TESTS.md TOOL-020–TOOL-029,
 //! TOOL-069–TOOL-071): a registry whose kind_id ledger has real rows 1–4 (4 retired), the
 //! `strategy_set!` list, a template (`base/`, `model/`, `pipeline/`), engine paths that the gate
-//! watches, `apps/hft-core` and `apps/replayer`, the real deps.toml and scaffold templates; one
-//! commit.
+//! watches, `apps/hft-core`, `apps/replayer` and `tools/hft-pmcfg` (the registry's users), the real
+//! deps.toml and scaffold templates; one commit.
 
 use super::Fixture;
 use super::repos::{copy_real, git};
@@ -13,7 +13,7 @@ pub const REG_LIB: &str = "//! registry\n\nhft_strategy_sdk::strategy_set! {\n  
 
 pub const REG_TOML: &str = "[package]\nname = \"hft-strategy-registry\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-sdk.workspace = true\na = { path = \"../a\" }\n\n[dev-dependencies]\nhft-testkit = { path = \"../../crates/hft-testkit\" }\n";
 
-pub const ROOT_TOML: &str = "[workspace]\nresolver = \"2\"\nmembers = [\n    \"strategies/registry\",\n    \"strategies/a\",\n    \"apps/hft-core\",\n    \"apps/replayer\",\n]\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace.dependencies]\nhft-strategy-sdk = { path = \"crates/hft-strategy-sdk\" }\nhft-strat-lib = { path = \"crates/hft-strat-lib\" }\nhft-strategy-registry = { path = \"strategies/registry\" }\n\n[profile.ci]\ninherits = \"release\"\n";
+pub const ROOT_TOML: &str = "[workspace]\nresolver = \"2\"\nmembers = [\n    \"strategies/registry\",\n    \"strategies/a\",\n    \"apps/hft-core\",\n    \"apps/replayer\",\n    \"tools/hft-pmcfg\",\n]\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace.dependencies]\nhft-strategy-sdk = { path = \"crates/hft-strategy-sdk\" }\nhft-strat-lib = { path = \"crates/hft-strat-lib\" }\nhft-strategy-registry = { path = \"strategies/registry\" }\n\n[profile.ci]\ninherits = \"release\"\n";
 
 pub const BASE_TOML: &str = "[package]\nname = \"{{name}}\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-sdk.workspace = true\nhft-strat-lib.workspace = true\n";
 
@@ -69,16 +69,22 @@ pub fn strat_repo(tag: &str) -> Fixture {
         &format!("{t}/pipeline/pipeline/README.md"),
         "---\ndescription: \"{{name}} plugin\"\nkind: python-package\ntier: cold\nscope: core\nstatus: spec\n---\n\n# {{name}} plugin\n",
     );
-    // Apps (hft-core via the workspace entry, replayer via a direct path).
+    // Registry users (hft-core via the workspace entry, replayer and hft-pmcfg via a direct path;
+    // hft-core dev-depends on hft-pmcfg).
     f.write(
         "apps/hft-core/Cargo.toml",
-        "[package]\nname = \"hft-core\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-registry.workspace = true\n",
+        "[package]\nname = \"hft-core\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-registry.workspace = true\n\n[dev-dependencies]\nhft-pmcfg = { path = \"../../tools/hft-pmcfg\" }\n",
     );
     f.write(
         "apps/replayer/Cargo.toml",
         "[package]\nname = \"replayer\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-registry = { path = \"../../strategies/registry\" }\n",
     );
     f.write("apps/replayer/src/main.rs", "fn main() {}\n");
+    f.write(
+        "tools/hft-pmcfg/Cargo.toml",
+        "[package]\nname = \"hft-pmcfg\"\nversion.workspace = true\nedition.workspace = true\n\n[dependencies]\nhft-strategy-registry = { path = \"../../strategies/registry\" }\n",
+    );
+    f.write("tools/hft-pmcfg/src/lib.rs", "");
     for p in ENGINE_FILES {
         f.write(p, "// fixture\n");
     }
