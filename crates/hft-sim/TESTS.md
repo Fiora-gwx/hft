@@ -16,7 +16,8 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
-| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226 |
+| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226、SIM-231 |
+| journal 衔接(`glue` 模块) | SIM-230 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -1768,3 +1769,33 @@ spec: README.md
 | SIM-229.2 | `DN_B5` 卖方吃单 500 @ 0.55 | 不成交(镜像后吃单方与挂单同侧) |
 | SIM-229.3 | `DN_B5` 买方吃单 10 @ 0.60 | 穿价:成交 10 @ 0.45(镜像价 0.40 < 0.45) |
 | SIM-229.4 | `UP_B5` 卖方吃单 60 @ 0.45 | 同代币规则不变:成交 10 |
+
+### SIM-230 journal 衔接:记录分派、Written 与回报展开
+
+- 规则:[journal 衔接](README.md#journal-衔接glue-模块)
+- 级别:table
+- 里程碑:M3
+- 前置:`Sim::std()`
+- 实现:`crates/hft-sim/tests/glue.rs::sim_230_journal_glue`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-230.1 | `feed_record` 送 BTC_S1 的 `Bbo` 记录体(买一 59 000、卖一 60 000),再送去掉末字段的同一记录体;随后买 0.1 @ 60 000 IOC | 两次都是 `Fed::Market`;成交价 60 000 |
+| SIM-230.2 | `origin = KEYFRAME` 的 `L2Snapshot`;`Note` 记录 | `Fed::Skipped`;`Fed::Clock` |
+| SIM-230.3 | `written` 对 `Place{slot 4, gen 3}`、`Cancel{target 4}`、`SimReset` | `Written`、`slot 4`、`gen 3`、`sent_tsc` = now;撤单的 `target_slot`/`target_gen` = 4/3;`SimReset` → `None` |
+| SIM-230.4 | `reply_parts` 对 A9 的账户级 `ConnState{venue 0}`;对一条 `OrderEvent`,epoch 5 | 依次 S1、P2 各一条 `ConnState`;`OrderEvent.epoch` = 5 |
+
+### SIM-231 `reseed_account` 使两个交易所的后续延迟相同
+
+- 规则:[纯核心 API](README.md#纯核心-api)、[9. 确定性](README.md#9-确定性)
+- 级别:table
+- 里程碑:M3
+- 前置:`setup_sim()` 的延迟模型换成 `Empirical{entry = resp = [(0, 1 000), (10 000, 90 000)]}`;两个交易所 a、b;a 先下 3 张、b 先下 1 张不成交的 GTC 买单
+- 实现:`crates/hft-sim/tests/glue.rs::sim_231_reseed_restarts_the_account_stream`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-231.1 | 不重播种,各下一张 | 两者的 Ack 延迟序列不全相同 |
+| SIM-231.2 | 两者都 `reseed_account(A9, 777)`,再各下 4 张(同一决策时刻) | 每张 Ack 延迟相等 |
+| SIM-231.3 | `reseed_account(AccountId(77), 1)` | 无动作、不出错 |
+

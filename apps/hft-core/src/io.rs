@@ -225,19 +225,8 @@ pub fn feed(msg: FeedMsg, now: Tsc, out: &mut InputSlot, bulk: &mut ByteConsumer
     hft_rt::latency_trace::event(hft_rt::latency_trace::Stage::InputPop, out.kind.0, out.body());
     true
 }
-pub fn rep_parts<R>(msg: &RepMsg, bulk: &[u8], mut f: impl FnMut(EventKind, &[&[u8]]) -> R) -> R {
-    match msg {
-        RepMsg::OrderEvent(b, _) => f(EventKind::ORDER_EVENT, &[b.as_bytes()]),
-        RepMsg::SendReport(b) => f(EventKind::SEND_REPORT, &[b.as_bytes()]),
-        RepMsg::PositionReport(b) => f(EventKind::POSITION_REPORT, &[b.as_bytes()]),
-        RepMsg::BalanceReport(b) => f(EventKind::BALANCE_REPORT, &[b.as_bytes()]),
-        RepMsg::FundingSettle(b) => f(EventKind::FUNDING_SETTLE, &[b.as_bytes()]),
-        RepMsg::ExternalFill(b) => f(EventKind::EXTERNAL_FILL, &[b.as_bytes()]),
-        RepMsg::ConnState(b) => f(EventKind::CONN_STATE, &[b.as_bytes()]),
-        RepMsg::AccountConfigReport(b) => f(EventKind::ACCOUNT_CONFIG_REPORT, &[b.as_bytes(), bulk]),
-        RepMsg::MarginReport(b) => f(EventKind::MARGIN_REPORT, &[b.as_bytes(), bulk]),
-        RepMsg::Note(b) => f(EventKind::NOTE, &[b.as_bytes()]),
-    }
+pub fn rep_parts<R>(msg: &RepMsg, bulk: &[u8], f: impl FnOnce(EventKind, &[&[u8]]) -> R) -> R {
+    msg.with_parts(bulk, f)
 }
 impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     type J = J;

@@ -17,6 +17,7 @@
 mod account;
 mod exec;
 mod fx;
+pub mod glue;
 mod hash;
 mod market;
 mod models;
@@ -579,6 +580,18 @@ impl SimExchange {
                 msg,
                 bulk: &self.bulk,
             });
+        }
+    }
+
+    /// Restarts account `a`'s random sub-stream from `seed` (README "9. 确定性"): the research replay
+    /// reseeds at fixed event-time boundaries so a split replay and a whole one draw the same
+    /// latencies, and parameter variants share the draws of each boundary interval. Unknown account →
+    /// no effect.
+    pub fn reseed_account(&mut self, a: AccountId, seed: u64) {
+        if let Some(ai) = self.acct(a)
+            && let Some(x) = self.accts.get_mut(ai)
+        {
+            x.rng = account_rng(seed, a.0);
         }
     }
 

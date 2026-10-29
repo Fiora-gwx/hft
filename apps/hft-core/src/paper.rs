@@ -3,7 +3,7 @@ use crate::{Error, config::Paper, io};
 use hft_event::*;
 use hft_refdata::{AccountKind, RefData};
 use hft_rt::{ByteProducer, Consumer, Producer};
-use hft_sim::{MarketEventRef, SimExchange, SimInput, SimSetup};
+use hft_sim::{SimExchange, SimSetup};
 use hft_types::{AccountId, InstId, Px, Qty, Tsc, VenueId};
 use std::collections::VecDeque;
 use zerocopy::FromZeros;
@@ -221,39 +221,6 @@ impl Gateway {
                     self.event_tsc = self.event_tsc.max(r.hdr.tsc);
                     busy = true;
                     match EventKind(r.hdr.kind) {
-                        EventKind::BBO => {
-                            if let Ok(b) = r.read::<Bbo>() {
-                                self.exchange
-                                    .on_record(&r.hdr, SimInput::Market(MarketEventRef::Bbo(&b)));
-                            }
-                        }
-                        EventKind::TRADE => {
-                            if let Ok(b) = r.read::<Trade>() {
-                                self.exchange
-                                    .on_record(&r.hdr, SimInput::Market(MarketEventRef::Trade(&b)));
-                            }
-                        }
-                        EventKind::MARK_PRICE => {
-                            if let Ok(b) = r.read::<MarkPrice>() {
-                                self.exchange
-                                    .on_record(&r.hdr, SimInput::Market(MarketEventRef::Mark(&b)));
-                            }
-                        }
-                        EventKind::L2_SNAPSHOT | EventKind::L2_BATCH => {
-                            l2(
-                                &mut self.exchange,
-                                &mut self.levels,
-                                &r.hdr,
-                                EventKind(r.hdr.kind),
-                                r.body,
-                            );
-                        }
-                        EventKind::FUNDING => {
-                            if let Ok(b) = r.read::<Funding>() {
-                                self.exchange
-                                    .on_record(&r.hdr, SimInput::Market(MarketEventRef::Funding(&b)));
-                            }
-                        }
                         EventKind::ORDER_DECISION => {
                             if let Ok(d) = r.read::<OrderDecision>()
                                 && d.reject == 0
@@ -262,8 +229,14 @@ impl Gateway {
                                 self.awaiting = Some((r.hdr.seq, d.venue));
                             }
                         }
-                        _ => {
-                            self.exchange.on_record(&r.hdr, SimInput::Clock);
+                        kind => {
+                            hft_sim::glue::feed_record(
+                                &mut self.exchange,
+                                &r.hdr,
+                                kind,
+                                r.body,
+                                &mut self.levels,
+                            );
                         }
                     }
                 }
@@ -372,63 +345,8 @@ impl TailGuard {
     }
 }
 
-/// Expand SimExchange's account-wide connection fact to its configured venue scope.
-pub fn reply_parts(
-    rd: &RefData,
-    epoch: u16,
-    msg: &RepMsg,
-    bulk: &[u8],
-    mut emit: impl FnMut(EventKind, &[&[u8]]),
-) {
-    if let RepMsg::ConnState(c) = msg
-        && c.venue.0 == 0
-        && c.account.0 != 0
-    {
-        let venues = rd.account(c.account).venues;
-        for v in 1..64 {
-            if venues & (1u64 << v) != 0 {
-                let mut state = *c;
-                state.venue = VenueId(v);
-                io::rep_parts(&RepMsg::ConnState(state), &[], &mut emit);
-            }
-        }
-    } else if let RepMsg::OrderEvent(e, _) = msg {
-        // This adapter only boots a fresh simulator; recovery is rejected at startup.
-        // The pure simulator has no engine epoch, while OMS matches (slot, gen, epoch).
-        let mut event = *e;
-        event.epoch = epoch;
-        io::rep_parts(&RepMsg::OrderEvent(event, hft_event::RecordFlags(0)), bulk, emit);
-    } else {
-        io::rep_parts(msg, bulk, emit);
-    }
-}
-
-/// Task-layer transport acknowledgement; matching/exchange evidence comes later from SimExchange.
-pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport> {
-    use hft_types::{ConnId, SlotId};
-    let (slot, r#gen, target_slot, target_gen) = match cmd.op {
-        GwOp::Place => (cmd.slot, cmd.r#gen, SlotId(0), 0),
-        GwOp::Cancel | GwOp::Amend | GwOp::Query => (cmd.target_slot, cmd.r#gen, cmd.target_slot, cmd.r#gen),
-        GwOp::CancelAll => (SlotId(0), 0, SlotId(0), 0),
-        _ => return None,
-    };
-    Some(SendReport {
-        decision_seq: cmd.decision_seq,
-        sent_tsc: now,
-        slot,
-        r#gen,
-        target_slot,
-        target_gen,
-        venue,
-        account: cmd.account,
-        conn: ConnId(0),
-        status: SendStatus::Written,
-        op: cmd.op,
-        _pad: [0; 3],
-        os_errno: 0,
-        _pad2: 0,
-    })
-}
+/// The shared journal glue (hft-sim "journal 衔接"); re-exported under the names sim-gw has used.
+pub use hft_sim::glue::{reply_parts, written};
 
 /// An `L2Snapshot` (exchange or TopN origin; engine keyframes are book state, not market
 /// data) or `L2Batch` record to the simulated exchange: venues without a Bbo stream
@@ -440,42 +358,7 @@ pub fn l2(
     kind: EventKind,
     body: &[u8],
 ) {
-    use zerocopy::FromBytes;
-    let read = |levels: &mut Vec<Level>, rest: &[u8], n: usize| {
-        levels.clear();
-        for c in rest.chunks_exact(size_of::<Level>()).take(n) {
-            if let Ok(l) = Level::read_from_bytes(c) {
-                levels.push(l);
-            }
-        }
-    };
-    if kind == EventKind::L2_SNAPSHOT {
-        let Ok((h, rest)) = L2SnapHdr::read_from_prefix(body) else {
-            return;
-        };
-        if h.origin == L2SnapHdr::KEYFRAME {
-            return;
-        }
-        let nb = usize::from(h.n_bids);
-        read(levels, rest, nb + usize::from(h.n_asks));
-        let split = nb.min(levels.len());
-        let (bids, asks) = levels.split_at(split);
-        let part = L2SnapshotPart {
-            hdr: h,
-            bids,
-            asks,
-            part: 0,
-            parts: 1,
-        };
-        exchange.on_record(hdr, SimInput::Market(MarketEventRef::L2Snapshot(part)));
-    } else {
-        let Ok((h, rest)) = L2BatchHdr::read_from_prefix(body) else {
-            return;
-        };
-        read(levels, rest, usize::from(h.n_bids) + usize::from(h.n_asks));
-        let view = L2BatchView { hdr: h, levels };
-        exchange.on_record(hdr, SimInput::Market(MarketEventRef::L2Batch(view)));
-    }
+    hft_sim::glue::feed_record(exchange, hdr, kind, body, levels);
 }
 
 /// Pops the `out-sim` head when it projects no order decision (`decision_seq = 0`); an order

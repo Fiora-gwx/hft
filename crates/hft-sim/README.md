@@ -80,6 +80,9 @@ impl SimExchange {
     /// 结算仓位与均价、已实现盈亏和现货余额;返回本次实际永续现金(现货为零),不含费用,不从钱包差额反推。
     /// 未知账户/品种、未绑定 venue 或非正数量/价格返回 None,完整状态不变;不产出回报,推送由 venue 行为层决定。
     pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px) -> Option<Qty>;
+    /// 把账户 a 的随机数子流从 seed 重新开始(子流规则同"9. 确定性");未知账户无动作。研究回放在固定的事件时间
+    /// 边界重播种,使分段回放与整段回放抽到相同的延迟、各参数变体在同一区间共用同一组随机数。
+    pub fn reseed_account(&mut self, a: AccountId, seed: u64);
     pub fn state_hash(&self) -> u64;
 }
 
@@ -150,6 +153,23 @@ impl hft_rt::PollTask for SimGwTask {
 `delay_ms` 越界(`DelayReports` 不在 1..=60 000,其余不为 0)、账户不是 Sim 或 venue 不在该账户内时:不生效,计数 `sim_fault_ignored`(sequencer 已按命令路径拒绝,这里是防御)。故障状态不进快照、不由"重启恢复"重建:sim-gw 重启后全部故障清除。
 
 sim-gw 读 TSC 只用于第 3 步的静默推进与第 4 步的交付时刻;撮合本身只依赖 journal 事件时间与种子,因此 `replayer sim` 用同一种子可逐笔复现(无 `quiet_advance` 的区间)。
+
+### journal 衔接(`glue` 模块)
+
+hft-core 的 sim-gw 与研究回放([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md))共用的转换,都是纯函数:
+
+```rust
+pub enum Fed { Market, Clock, Skipped }
+/// 一条 seq journal 记录(逻辑体,多段已重组)按 journal 顺序交给模拟交易所:Bbo、Trade、MarkPrice、Funding、
+/// 交易所或 TopN 来源的 L2Snapshot、L2Batch → on_record(Market);引擎关键帧 L2Snapshot(簿状态,不是行情)
+/// 与解不出的行情体 → Skipped;其余记录 → on_record(Clock)。旧 schema 写的较短定长体按零扩展读。
+pub fn feed_record(ex: &mut SimExchange, hdr: &RecordHeader, kind: EventKind, body: &[u8], levels: &mut Vec<Level>) -> Fed;
+/// 订单类指令(Place、Cancel、Amend、Query、CancelAll)在任务层的 SendReport{Written},sent_tsc = now;其他 op → None。
+pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport>;
+/// 一条回报成为的 Input 记录:账户级 ConnState(venue 0)展开为该账户 refdata venues 中的每个 venue;
+/// OrderEvent 填入引擎 epoch(纯核心没有 epoch,OMS 按 (slot, gen, epoch) 匹配);其余按 RepMsg::with_parts。
+pub fn reply_parts(rd: &RefData, epoch: u16, msg: &RepMsg, bulk: &[u8], emit: impl FnMut(EventKind, &[&[u8]]));
+```
 
 ### 重启恢复
 
@@ -491,6 +511,7 @@ pub struct StressVerdict {
 | `src/exec.rs` | 指令执行:拒单规则、吃单撮合与已吃流动性记忆、订单表、撤/改/查 |
 | `src/account.rs` | 现货结算与锁定、手续费资产、永续仓位、全仓保证金与强平价、强平、资金费、划转、重置、seed、真值报告 |
 | `src/models.rs` | `LatencyModel`/`Dist` 校验、延迟抽样、账户子流 |
+| `src/glue.rs` | journal 衔接:`feed_record`、`written`、`reply_parts` |
 | `src/view.rs`、`src/hash.rs`、`src/fx.rs` | `SimAccountView`、`state_hash`、i128 定点辅助 |
 | `src/stress.rs`(M4) | `StressSpec`、`StressCase`、`PricePath`、`StressFault`、`StressTransform`、`StressVerdict` |
 | `src/task.rs`(`task` feature,M4) | `SimGwTask`、`DecisionTable` |
