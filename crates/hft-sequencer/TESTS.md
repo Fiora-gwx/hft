@@ -22,7 +22,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 使用本组件 | 不适用:见子节 |
 | 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424、SEQ-441 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
-| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447 |
+| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447–SEQ-449 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
 | advisor | SEQ-030、SEQ-031、SEQ-051、SEQ-339 |
 | 实现说明 | 不适用:见子节 |
@@ -6330,3 +6330,31 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 | SEQ-447.1 | `a1` 的 `L2Snapshot{origin = Exchange}`(`ex_ts_ns` 1 s、`sw_rx_ns` 1.010 s)、`L2Batch`(2 s / 2.012 s)、`Trade`(3 s / 3.013 s);再一条 `a1` 报价 | 在该报价的 `on_event` 中 `md_count(a1) = 3`,`md_stamp(a1, 1..=3)` 依次为 `(MD_SNAPSHOT, 1 s, 1.010 s)`、`(MD_BATCH, …)`、`(MD_TRADE, …)`,`rx_tsc` 非 0;第 0、4 条 `None` |
 | SEQ-447.2 | 再 17 条 `a1` 的 `Trade`(`ex_ts_ns` = 4 s + k) | `md_count(a1) = 20`;第 4 条 `None`,第 5 条为 `ex_ts_ns` 4 s + 1 ns 的 `MD_TRADE`,第 20 条 4 s + 16 ns;`md_count(b1) = 0` |
 | SEQ-447.3 | 写关键帧;再一条 `a1` 的 `Trade`(`ex_ts_ns` 5 s) | 关键帧后 `md_stamp(a1, 20) = None`(seq 不晚于 `rx_from_seq`),`md_count(a1)` 仍为 20;该成交后 `md_count(a1) = 21`,第 21 条为 `ex_ts_ns` 5 s 的 `MD_TRADE`,第 20 条仍 `None` |
+
+
+### SEQ-448 最近一条 Bbo 的戳与当前 Input 的时间戳
+
+- 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)(`bbo_stamp`/`stamps`)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;s1 订阅 `a1` 的 BBO
+- 实现:`crates/hft-sequencer/tests/views.rs::seq_448_bbo_stamp_and_input_stamps`
+
+| 行 | Input | 期望 |
+|---|---|---|
+| SEQ-448.1 | 连接 0 上 `a1` 的 Bbo(`update_id` 900,`ex_ts_ns` 7 s,`sw_rx_ns` 7.011 s) | 在其 `on_event` 中 `bbo_stamp(a1) = (MD_BBO, 7 s, 7.011 s, 该记录的 rx_tsc)`;`stamps()` 的 `kind` = BBO、`venue_ns` 7 s、`sw_rx_ns` 7.011 s、`rx_tsc` 同上、`engine_ns` = `now().engine_ns` |
+| SEQ-448.2 | 连接 1 上同一更新(`update_id` 900,`sw_rx_ns` 7.020 s) | 不被应用,`bbo_stamp(a1).sw_rx_ns` 仍为 7.011 s;`b1` 有稳态报价的戳 |
+| SEQ-448.3 | 写关键帧;再一条 `update_id` 901 的 `a1` Bbo | 关键帧后 `bbo_stamp(a1) = None`;该 Bbo 后为 `Some` |
+
+### SEQ-449 账户在一个 inst 上的未结订单
+
+- 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)(`open_orders`)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;s1 在 `a1` 的报价上下两张 GTC 买单(49 990、49 991,各 0.001),两张都 Ack
+- 实现:`crates/hft-sequencer/tests/views.rs::seq_449_open_orders`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-449.1 | 下一条 `a1` 报价的 `on_event` 中读 `open_orders(账户, a1, …)`,缓冲 1 条与 4 条 | 都返回 2;4 条缓冲依次为 49 990、49 991(槽号递增),1 条缓冲里是第一条;账户在 `b1` 上没有未结订单 |
+| SEQ-449.2 | 第一张收到 `CancelAck`,再一条报价 | 返回 1,剩 49 991 那张 |

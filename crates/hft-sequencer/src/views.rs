@@ -35,9 +35,24 @@ macro_rules! noexec_views {
             market: &$e.market,
             gpos: &$e.gpos,
             now: $e.now,
+            stamps: $crate::views::stamps_of(&$e.trig, $e.now),
             model: false,
         }
     };
+}
+
+/// `Views::stamps` of the Input being processed (its `TrigStamps` and `Now`).
+#[doc(hidden)]
+pub fn stamps_of(t: &hft_oms::TrigStamps, now: Now) -> hft_strategy_sdk::Stamps {
+    hft_strategy_sdk::Stamps {
+        kind: t.kind,
+        venue_ns: t.ex_ts_ns,
+        sw_rx_ns: t.sw_rx_ns,
+        hw_rx_ns: t.hw_rx_ns,
+        rx_tsc: t.rx_tsc,
+        engine_ns: now.engine_ns,
+        utc_ns: now.utc_ns,
+    }
 }
 
 /// Cached `GroupPosView` per (account, group) (`Views::group_pos` returns references).
@@ -209,7 +224,9 @@ pub struct SeqViews<'a> {
     pub market: &'a Market,
     pub gpos: &'a GposCache,
     pub now: Now,
-    /// Model side (`target()`/`order()` return `None`).
+    /// `Views::stamps` of the current Input.
+    pub stamps: hft_strategy_sdk::Stamps,
+    /// Model side (`target()`/`order()`/`open_orders()` return nothing).
     pub model: bool,
 }
 
@@ -406,6 +423,27 @@ impl Views for SeqViews<'_> {
     }
     fn md_count(&self, i: InstId) -> u64 {
         self.market.md_count(i)
+    }
+    fn stamps(&self) -> hft_strategy_sdk::Stamps {
+        self.stamps
+    }
+    fn open_orders(&self, a: AccountId, i: InstId, out: &mut [OrderView]) -> usize {
+        if self.model {
+            return 0;
+        }
+        let mut n = 0usize;
+        self.oms.each_open(self.rd.inst(i).venue, a, i, |h| {
+            if let Some(o) = out.get_mut(n)
+                && let Some(v) = self.order(h)
+            {
+                *o = v;
+            }
+            n += 1;
+        });
+        n
+    }
+    fn bbo_stamp(&self, i: InstId) -> Option<MdStampView> {
+        self.market.bbo_stamp(i)
     }
     fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView> {
         self.market.md_stamp(i, n)

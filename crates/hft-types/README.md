@@ -210,6 +210,7 @@ pub const MAX_BBO_CONN_SLOTS: u8 = 8;
 ```rust
 pub enum Side       { Buy = 1, Sell = 2 }
 pub enum Tif        { Gtc = 1, Ioc = 2, Fok = 3, PostOnly = 4 }
+impl Tif { pub const FAK: Tif = Tif::Ioc; }   // fill-and-kill 与 Ioc 同一订单语义;原生类型名为 FAK 的 venue(Polymarket)把 Ioc 映射过去
 pub enum MarketKind { Spot = 1, LinearPerp = 2 }   // 市场段;反向(币本位)永续与交割不在 core,不分配值
 pub enum HostClass  { Dev2 = 1, C4 = 2, C8 = 3, Metal = 4, C16 = 5, C32 = 6 }   // 主机类:配置 host.class 与 ECF1 头 host_class 的编码,只追加
 impl VenueId {

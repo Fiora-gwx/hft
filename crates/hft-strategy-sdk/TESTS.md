@@ -20,8 +20,8 @@ spec: README.md
 | Strategy 与 Model | SDK-009、SDK-016–SDK-041、SDK-059–SDK-089、SDK-207、SDK-208 |
 | 参数 schema 与 ParamSet | SDK-090–SDK-121 |
 | 策略描述符:Note、报表、策略命令 | SDK-053、SDK-054、SDK-112–SDK-119 |
-| Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213 |
-| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213 |
+| Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213、SDK-214 |
+| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213、SDK-214 |
 | EventRef | SDK-031、SDK-040–SDK-058、SDK-143、SDK-144、SDK-157 |
 | Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212 |
 | 目标意图 | SDK-141、SDK-158–SDK-163 |
@@ -3164,6 +3164,20 @@ spec: README.md
 | SDK-213.2 | `clear_order(r)` | `order(r) = None` |
 | SDK-213.3 | 无行情戳 | `md_count(I1) = 0`,`md_stamp(I1, 1) = None` |
 | SDK-213.4 | `md_push(I1, …)` 20 次(`ex_ts_ns = k`、`sw_rx_ns = 100 + k`) | `md_count(I1) = 20`;`md_stamp` 第 4 条 `None`、第 5 条 `ex_ts_ns = 5`、第 20 条 `sw_rx_ns = 120`、第 21 条 `None`;`md_count(I2) = 0` |
+
+### SDK-214 `Views` 的 `bbo_stamp`、`stamps`、`open_orders` 提供的默认方法
+
+- 规则:[Views 与 ModelViews](README.md#views-与-modelviews)、[视图类型](README.md#视图类型)(`Stamps`)
+- 级别:table
+- 里程碑:M3
+- 前置:`MockViews::new(RefFixture{I1, I2, BTC, USDT, V1, V2, A1})`,`now` 的 `engine_ns`、`utc_ns` 已设;引擎侧见 SEQ-448、SEQ-449
+- 实现:`crates/hft-strategy-sdk/tests/mock_views.rs::sdk_214_provided_stamps_and_open_orders`
+
+| 行 | 读取 | 期望 |
+|---|---|---|
+| SDK-214.1 | `bbo_stamp(I1)` | `None` |
+| SDK-214.2 | `stamps()` | `engine_ns`、`utc_ns` 等于 `now()` 的值;`kind`、`venue_ns`、`sw_rx_ns`、`hw_rx_ns`、`rx_tsc` 为 0 |
+| SDK-214.3 | `open_orders(A1, I1, 2 条缓冲)` | 0 |
 
 ## 验收
 

@@ -124,6 +124,9 @@ pub struct Market {
     pub mem: Vec<MemOnly>,
     /// Market-data stamps (by inst) for `Views::md_count`/`md_stamp`.
     pub md: Vec<MdRing>,
+    /// Stamps and record seq of the last applied Bbo (by inst) for `Views::bbo_stamp`; not in the
+    /// snapshot, same visibility as `md`.
+    pub last_bbo: Vec<(MdStampView, u64)>,
     /// `[venue][slot]`.
     pub conns: Vec<[ConnLive; SLOTS]>,
     /// `max(boot_seq, last snapshot at_seq)`: receive times at or before it are invisible.
@@ -143,6 +146,7 @@ impl Market {
             rows: vec![MarketLastRow::default(); n_insts + 1],
             mem: vec![MemOnly::default(); n_insts + 1],
             md: vec![MdRing::EMPTY; n_insts + 1],
+            last_bbo: vec![(MdStampView::NONE, 0); n_insts + 1],
             conns: vec![[ConnLive::default(); SLOTS]; 256],
             rx_from_seq: 0,
             funding: vec![FundingView::EMPTY; n_insts + 1],
@@ -173,6 +177,27 @@ impl Market {
                 *q = seq;
             }
         }
+    }
+    /// Records the stamps of the applied Bbo of `i` read at `seq`.
+    #[inline]
+    pub fn put_bbo(&mut self, i: InstId, h: &hft_event::MarketHdr, seq: u64) {
+        if let Some(x) = self.last_bbo.get_mut(i.0 as usize) {
+            *x = (
+                MdStampView {
+                    kind: MdStampView::MD_BBO,
+                    ex_ts_ns: h.ex_ts_ns,
+                    sw_rx_ns: h.sw_rx_ns,
+                    rx_tsc: Tsc(h.rx_tsc),
+                },
+                seq,
+            );
+        }
+    }
+    /// `Views::bbo_stamp`: the last applied Bbo of `i` read after `rx_from_seq`.
+    #[inline]
+    pub fn bbo_stamp(&self, i: InstId) -> Option<MdStampView> {
+        let (s, q) = self.last_bbo.get(i.0 as usize)?;
+        (*q > self.rx_from_seq).then_some(*s)
     }
     /// `Views::md_count`.
     #[inline]

@@ -587,6 +587,9 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     let applied = !(out.contains(hft_book::TopOutcome::DUPLICATE)
         || out.contains(hft_book::TopOutcome::OLDER)
         || out.contains(hft_book::TopOutcome::INVALID));
+    if applied {
+        e.market.put_bbo(i, &b.h, e.cur_seq);
+    }
     // Liveness.
     let venue = b.h.venue;
     let conn = b.h.conn.0;

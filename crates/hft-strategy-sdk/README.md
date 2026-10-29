@@ -563,6 +563,15 @@ pub trait Views {
     /// 提供的默认方法返回 0 / None(不带行情戳的实现);引擎实现(hft-sequencer)覆盖二者。
     fn md_count(&self, i: InstId) -> u64;
     fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView>;
+    /// 最近一条更新了该 inst 报价的 Bbo 的戳(kind = MD_BBO;重复与较旧的成员连接更新不算),可见性同 md_stamp;之前没有 → None。
+    /// 提供的默认方法返回 None。
+    fn bbo_stamp(&self, i: InstId) -> Option<MdStampView>;
+    /// 正在投递的 Input 的时间戳:交易所时刻、本机接收戳与引擎时钟(Stamps)。策略按引擎时钟决策,其余可作数据(行情延迟、交易所时间相位)。
+    /// 提供的默认方法只有引擎时钟(kind、交易所与接收戳为 0)。
+    fn stamps(&self) -> Stamps;
+    /// 该账户在 i 上的未结订单(非 Free、非终态),按槽号顺序:前 out.len() 条写入 out,返回总条数(可大于 out.len())。
+    /// 模型侧与提供的默认方法返回 0。成本:该 (venue, 账户) 订单表一遍。
+    fn open_orders(&self, a: AccountId, i: InstId, out: &mut [OrderView]) -> usize;
 }
 
 /// 模型侧视图:advisor 从 journal 重建的同一组状态,截至 Model 当前处理的那条记录(now() = 该记录)。
@@ -638,10 +647,19 @@ pub struct BboView {                     // 按值返回(Views::bbo、EventRef::
     pub conn_up: bool,                   // 有成员连接 up
     pub resync: bool,                    // 该 inst 的报价在重同步或没有健康成员;为真时 quote_live 为假
 }
+pub struct Stamps {                      // 按值(Views::stamps);写者 sequencer,取自当前 Input 的 MarketHdr 或 OrderEvent
+    pub kind: u16,                       // Input 的 EventKind 编号
+    pub venue_ns: i64,                   // 交易所时刻(MarketHdr/OrderEvent.ex_ts_ns,UTC ns;0 = 无)
+    pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用)
+    pub hw_rx_ns: i64,                   // 网卡硬件接收戳(PHC 域,不是 UTC;0 = 不可用)
+    pub rx_tsc: Tsc,                     // 接收线程的 TSC(本次运行;0 = 不是接收到的消息)
+    pub engine_ns: i64,                  // 该 Input 的 Now.engine_ns
+    pub utc_ns: i64,                     // 该 Input 的 Now.utc_ns
+}
 #[repr(u8)] pub enum RxTsSrc { None = 0, Hw = 1, Sw = 2 }   // 0 = 无接收戳;Hw = 网卡 PHC;Sw = 内核软件戳(REALTIME)
 #[derive(Clone, Copy)]
 pub struct MdStampView {                 // 按值(Views::md_stamp);写者 sequencer,取自该消息的 MarketHdr
-    pub kind: u8,                        // MD_BATCH = 1、MD_SNAPSHOT = 2(交易所或 TopN 整簿)、MD_TRADE = 3
+    pub kind: u8,                        // MD_BATCH = 1、MD_SNAPSHOT = 2(交易所或 TopN 整簿)、MD_TRADE = 3、MD_BBO = 4(只由 bbo_stamp 返回)
     pub ex_ts_ns: i64,                   // 交易所消息时刻(UTC ns;0 = 交易所未给)
     pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用);与 ex_ts_ns 之差即交易所 → 本机的行情延迟
     pub rx_tsc: Tsc,                     // 接收线程的 TSC(本次运行;Now::utc_of 换成引擎 UTC)

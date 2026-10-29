@@ -819,6 +819,7 @@ pub(crate) fn full_views(e: &Engine) -> crate::views::SeqViews<'_> {
         market: &e.market,
         gpos: &e.gpos,
         now: e.now,
+        stamps: crate::views::stamps_of(&e.trig, e.now),
         model: false,
     }
 }

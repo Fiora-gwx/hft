@@ -75,8 +75,8 @@ pub use view_types::{
     BboView, BrokenReason, CapBits, CapScopeView, CashView, EngineOrigin, ExternalCause, ExternalFillView,
     FeeView, FundingView, GroupPosView, InstRiskView, InventoryView, LegPos, LegTrack, LegView,
     LiquidationView, MarginLevel, MarginView, MdStampView, NoticeKind, OrderStateView, OrderView,
-    PerpPosView, PnlSummary, PortfolioRead, RiskEvent, RiskStateView, RxTsSrc, StuckReason, TargetOrigin,
-    TargetState, TargetView, TradeView, VenueEquityView, VenueNoticeView, VenueSet,
+    PerpPosView, PnlSummary, PortfolioRead, RiskEvent, RiskStateView, RxTsSrc, Stamps, StuckReason,
+    TargetOrigin, TargetState, TargetView, TradeView, VenueEquityView, VenueNoticeView, VenueSet,
 };
 pub use views::{
     BookRead, BookStatus, EngineClockAnchor, MD_STAMPS_KEPT, ModelViews, Now, RefView, Views, time,

@@ -186,6 +186,12 @@ pub enum Tif {
 }
 const _: () = assert!(size_of::<Tif>() == 1);
 
+impl Tif {
+    /// Fill-and-kill: the unfilled rest is cancelled at once. The same order semantics as `Ioc`;
+    /// venues whose native type is named FAK (Polymarket) map `Ioc` to it.
+    pub const FAK: Tif = Tif::Ioc;
+}
+
 /// Market segment of a `VenueId` (wire enum).
 #[repr(u8)]
 #[derive(
