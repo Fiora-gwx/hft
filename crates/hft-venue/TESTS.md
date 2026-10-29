@@ -33,7 +33,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 协议接口 | VEN-018、VEN-064、VEN-341、VEN-390 |
-| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403 |
+| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403、VEN-411 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264、VEN-404 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
 | 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402、VEN-405 |
@@ -3819,6 +3819,19 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-403.3 | `Cancel{target_slot: 64}` | 恰一条 `SendReport{op: Cancel, target_slot: 64, target_gen: 1, Written}`;撤单帧带槽 64 的 client id 与 `EX-64` 的值 |
 | VEN-403.4 | `Query{target_slot: 64}` | 同 .3,`op: Query`,查单帧带槽 64 的 client id 与 `EX-64` 的值 |
 | VEN-403.5 | `MirrorRestore{slot: 65, …}` | `ConnState{Degraded, reason: 13}`;无镜像 65 |
+
+### VEN-411 槽镜像按账户:两个账户的同一槽号互不覆盖
+
+- 规则:[出环:`OutMsg = GwCmd`](README.md#出环outmsg--gwcmd)(槽镜像)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`,账户 A1、A2 同一 gw
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_411_slot_mirror_per_account`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-411.1 | A1 `Place{slot 7, gen 1, S1}`、A2 `Place{slot 7, gen 5, S2}` | `mirror_of(A1, 7)` = (live, A1, S1, gen 1);`mirror_of(A2, 7)` = (live, A2, S2, gen 5) |
+| VEN-411.2 | A2 `Cancel{target 7}`;A1 `Cancel{target 7}` | 各一条 `SendReport{Written, target_slot 7}`,`target_gen` 依次 5、1 |
 
 ### VEN-410 空闲圈调用 venue 的空闲工作,按账户轮转
 

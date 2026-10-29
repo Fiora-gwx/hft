@@ -789,3 +789,41 @@ fn ven_403_last_slot_is_mirrored() {
     );
     assert!(h.rt.mirror(65).is_none(), "VEN-403.5");
 }
+
+/// VEN-411: the slot mirror is per account — the same slot id on two accounts keeps two entries,
+/// and a Cancel targets its own account's entry.
+#[test]
+fn ven_411_slot_mirror_per_account() {
+    let mut h = gw_full::<StubProto>(g0(), &[A1, A2], GhOpts::default());
+    // .1 slot 7 on both accounts: two entries, each with its own inst and gen.
+    let a = h.place(A1, 7, 1, S1, false);
+    let b = h.place(A2, 7, 5, S2, false);
+    h.cmd(a);
+    h.cmd(b);
+    h.poll(3_000_000);
+    h.reps();
+    let (ma, mb) = (h.rt.mirror_of(A1, 7).unwrap(), h.rt.mirror_of(A2, 7).unwrap());
+    assert_eq!(
+        (ma.live, ma.account, ma.inst, ma.r#gen),
+        (true, A1, S1, 1),
+        "VEN-411.1"
+    );
+    assert_eq!(
+        (mb.live, mb.account, mb.inst, mb.r#gen),
+        (true, A2, S2, 5),
+        "VEN-411.1"
+    );
+    // .2 a Cancel of account 2's slot 7 reports account 2's generation; account 1's likewise.
+    for (acct, want) in [(A2, 5), (A1, 1)] {
+        let c = h.targeted(GwOp::Cancel, acct, 7);
+        h.cmd(c);
+        h.poll(4_000_000);
+        let r = reports(&h.reps());
+        let r = r.iter().find(|r| r.account == acct).unwrap();
+        assert_eq!(
+            (r.status, r.target_slot, r.target_gen),
+            (SendStatus::Written, SlotId(7), want),
+            "VEN-411.2"
+        );
+    }
+}

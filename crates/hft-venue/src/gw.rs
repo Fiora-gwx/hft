@@ -227,7 +227,11 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     utc: UtcClock,
     accts: Vec<Acct<P>>,
     rest_ip: Vec<(u8, RateCounters)>,
+    /// One block of `mslots` entries per account (in `accts` order), indexed by slot id
+    /// 1..=oms_slots inside the block (OMS slot ids are per (venue, account)).
     mirror: Vec<SlotMirror>,
+    /// `oms_slots + 1`: the size of one account's block.
+    mslots: usize,
     cmds: Consumer<OutMsg>,
     out: Producer<RepMsg>,
     pend_rep: VecDeque<RepMsg>,
@@ -476,6 +480,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let t = Ticks::of(&deps.clock);
         let stagger = t.ms(3_600_000);
         let limits = rd.rate_limits(P::VENUE);
+        let n_accts = accts.len().max(1);
         let mut list = Vec::with_capacity(accts.len());
         for a in accts {
             let ix = rd
@@ -536,8 +541,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             t,
             accts: list,
             rest_ip,
-            // Indexed by slot id 1..=oms_slots (OMS slot 0 is reserved and stays empty).
-            mirror: vec![SlotMirror::default(); cfg.oms_slots as usize + 1],
+            // Per account: slot id 1..=oms_slots (OMS slot 0 is reserved and stays empty).
+            mirror: vec![SlotMirror::default(); (cfg.oms_slots as usize + 1) * n_accts],
+            mslots: cfg.oms_slots as usize + 1,
             cmds: deps.cmds,
             out: deps.out,
             pend_rep: VecDeque::with_capacity(REP_PEND_CAP),
@@ -738,7 +744,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             spans: &mut self.sink_spans,
             keys: &mut self.sink_keys,
             ids: &mut x.ids,
-            mirror: &mut self.mirror,
+            mirror: self
+                .mirror
+                .get_mut(a * self.mslots..(a + 1) * self.mslots)
+                .unwrap_or(&mut []),
             account: r.account,
             now,
             epoch: self.epoch,
@@ -1228,7 +1237,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             spans: &mut self.sink_spans,
             keys: &mut self.sink_keys,
             ids,
-            mirror: &mut self.mirror,
+            mirror: self
+                .mirror
+                .get_mut(a * self.mslots..(a + 1) * self.mslots)
+                .unwrap_or(&mut []),
             account,
             now,
             epoch: self.epoch,
@@ -1413,7 +1425,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     })
                     && e.exch_order_id != 0
                     && exch_id_value(key.bytes()) == e.exch_order_id
-                    && let Some(mirror) = self.mirror.get_mut(e.slot.0 as usize)
+                    && let Some(mirror) = self.mirror.get_mut(a * self.mslots + e.slot.0 as usize)
+                    && (e.slot.0 as usize) < self.mslots
                     && mirror.live
                     && (mirror.position_close || P::REST_PLACE_BINDS_ID)
                     && mirror.account == account
@@ -1586,7 +1599,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         {
             return;
         }
-        if let Some(mm) = self.mirror.get_mut(e.slot.0 as usize)
+        if let Some(mm) = self.mir_mut(e.account, e.slot.0)
             && mm.r#gen == e.r#gen
             && mm.epoch == e.epoch
             && mm.account == e.account
@@ -1643,7 +1656,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
 
     fn request_identity(&self, conn: ConnId, account: AccountId, r: ReqRef) -> Option<(ReqRef, SlotMirror)> {
-        let mirror = *self.mirror.get(r.slot as usize)?;
+        let mirror = *self.mir(account, r.slot)?;
         if !mirror.live || mirror.account != account || mirror.r#gen != r.r#gen {
             return None;
         }
@@ -1830,7 +1843,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 } else {
                     (c.target_slot.0, tg.unwrap_or(0))
                 };
-                self.track(conn, slot, r#gen, c.op, ok.sent_tsc);
+                self.track(c.account, conn, slot, r#gen, c.op, ok.sent_tsc);
                 self.tx_tag(conn, slot, r#gen, ok.sent_tsc);
                 self.report(&c, tg, conn, SendStatus::Written, 0, ok.sent_tsc);
                 self.raw_tx(conn, len, ok.sent_tsc);
@@ -1855,8 +1868,25 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
     }
 
+    /// Index of `(account, slot)` in `mirror`; unknown account or slot out of range → `None`.
+    #[inline]
+    fn mix(&self, account: AccountId, slot: u32) -> Option<usize> {
+        let a = self.acct_ix(account)?;
+        let s = slot as usize;
+        (s < self.mslots).then_some(a * self.mslots + s)
+    }
+    #[inline]
+    fn mir(&self, account: AccountId, slot: u32) -> Option<&SlotMirror> {
+        self.mirror.get(self.mix(account, slot)?)
+    }
+    #[inline]
+    fn mir_mut(&mut self, account: AccountId, slot: u32) -> Option<&mut SlotMirror> {
+        let i = self.mix(account, slot)?;
+        self.mirror.get_mut(i)
+    }
+
     fn mirror_target(&self, c: &GwCmd) -> Option<TargetRef> {
-        let m = self.mirror.get(c.target_slot.0 as usize)?;
+        let m = self.mir(c.account, c.target_slot.0)?;
         if !m.live || m.account != c.account {
             return None;
         }
@@ -1870,8 +1900,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     fn target_gen(&self, c: &GwCmd) -> Option<u32> {
         match c.op {
             GwOp::Cancel | GwOp::Amend | GwOp::Query => self
-                .mirror
-                .get(c.target_slot.0 as usize)
+                .mir(c.account, c.target_slot.0)
                 .filter(|m| m.live && m.account == c.account)
                 .map(|m| m.r#gen),
             _ => None,
@@ -1879,11 +1908,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
 
     fn write_mirror(&mut self, c: &GwCmd) {
-        match self.mirror.get_mut(c.slot.0 as usize) {
+        let epoch = self.epoch;
+        match self.mir_mut(c.account, c.slot.0) {
             Some(m) => {
                 *m = SlotMirror {
                     r#gen: c.r#gen,
-                    epoch: self.epoch,
+                    epoch,
                     account: c.account,
                     live: true,
                     inst: c.inst,
@@ -1945,13 +1975,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         Err((last.0, NO_CONN, now))
     }
 
-    fn track(&mut self, conn: ConnId, slot: u32, r#gen: u32, op: GwOp, sent: u64) {
+    fn track(&mut self, account: AccountId, conn: ConnId, slot: u32, r#gen: u32, op: GwOp, sent: u64) {
         if self.inflight.len() < INFLIGHT_CAP {
+            let epoch = self.mir(account, slot).map_or(self.epoch, |m| m.epoch);
             self.inflight.push(Inflight {
                 conn,
                 slot,
                 r#gen,
-                epoch: self.mirror.get(slot as usize).map_or(self.epoch, |m| m.epoch),
+                epoch,
                 op,
                 sent,
             });
@@ -2088,10 +2119,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             let mut cs = [*c; BATCH_CAP];
             let mut tg = [none; BATCH_CAP];
             let mut k = 0usize;
-            let n_slots = self.mirror.len();
+            let (base, n_slots) = (a * self.mslots, self.mslots);
             let mut s = 0usize;
             while s <= n_slots {
-                let item = self.mirror.get(s).copied();
+                let item = if s < n_slots {
+                    self.mirror.get(base + s).copied()
+                } else {
+                    None
+                };
                 let flush = item.is_none() || k == BATCH_CAP;
                 if flush && k > 0 {
                     self.cancel_orders(
@@ -2183,7 +2218,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     ) {
         match self.send_frame(a, len, now) {
             Ok((ok, conn)) => {
-                self.track(conn, 0, 0, GwOp::CancelAll, ok.sent_tsc);
+                let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
+                self.track(account, conn, 0, 0, GwOp::CancelAll, ok.sent_tsc);
                 self.raw_tx(conn, len, ok.sent_tsc);
                 if *conn_used == NO_CONN {
                     *conn_used = conn;
@@ -2220,7 +2256,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     self.n.cmd_bad_account += 1;
                     return;
                 };
-                if !ok_inst || c.slot.0 as usize >= self.mirror.len() {
+                if !ok_inst || c.slot.0 as usize >= self.mslots {
                     self.conn_state(
                         c.account,
                         ConnRole::Order,
@@ -2231,7 +2267,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     );
                     return;
                 }
-                if let Some(m) = self.mirror.get_mut(c.slot.0 as usize) {
+                if let Some(m) = self.mirror.get_mut(a * self.mslots + c.slot.0 as usize) {
                     *m = SlotMirror {
                         r#gen: c.r#gen,
                         epoch: c.epoch(),
@@ -3093,8 +3129,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.inflight.iter().filter(|f| f.conn == conn).count()
     }
 
+    /// The first account's mirror entry of `slot`.
     pub fn mirror(&self, slot: u32) -> Option<SlotMirror> {
-        self.mirror.get(slot as usize).copied()
+        self.mirror
+            .get(slot as usize)
+            .filter(|_| (slot as usize) < self.mslots)
+            .copied()
+    }
+
+    /// The mirror entry of `(account, slot)`.
+    pub fn mirror_of(&self, account: AccountId, slot: u32) -> Option<SlotMirror> {
+        self.mir(account, slot).copied()
     }
 
     /// The `IdTable` of `account`.

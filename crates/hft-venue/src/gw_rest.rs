@@ -101,7 +101,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             let epoch = if c.op == GwOp::Place {
                 self.epoch
             } else {
-                self.mirror.get(r.slot as usize).map_or(self.epoch, |m| m.epoch)
+                self.mir(c.account, r.slot).map_or(self.epoch, |m| m.epoch)
             };
             self.cid(c.account, r.slot, r.r#gen, epoch)
         });
