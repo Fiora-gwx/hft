@@ -47,10 +47,10 @@
 
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
-| `feat/venue-sim-pm` | todo | | 设计 §8.2 M2 |
-| `feat/replay-calib` | todo | | |
-| `feat/paper-venue-sim` | todo | | |
-| `feat/pm-fak-gw` | todo | | 实盘探针需负责人批准 |
+| `feat/venue-sim-pm`:hft-sim `VenueModel`(默认全关,默认下回报与 `state_hash` 不变):`MakerFill::QueueCap`、撤单竞速与墓碑(`cancel_us`、`tombstone`)、吃单延迟与慢尾(`taker`)、二元吃单费 `FeeModel::BinaryTaker`、GTD 到期、条件延迟池(`set_condition`);hft-replay 的条件计算(上一完整分钟 md lag p90 三分位、1 s 参考价变动、窗口相位)与 `--own` 叠加层 | 待验收 | 648ea1ce、5452840a(并行代理,合并 76a8bd8f) | SIM-232–239、RSR-004、RPL-305–306;**待**(研究机):§5.2 对账(88 窗每窗 \|Δ\| ≤ 0.3、撤单后成交比例 ≥ 6 %)。顺带修复 M1 的驱动从未调用 `on_utc`(区间重播种未生效) |
+| `feat/replay-calib`:`replayer calib`(Ack/CancelAck 延迟池 + 条件标签 + 三分位阈值)、`--calib`(含研究侧 `latc.json` 格式) | 待验收 | 67ed01fe | RPL-307;吃单延迟、成交回报延迟与费率不由它估计 |
+| `feat/paper-venue-sim`:sim-gw 薄壳、行情旁路环、`[sim]` 引用校准表 | todo | | |
+| `feat/pm-fak-gw` | blocked | | 仓内没有可核实的 Polymarket marketable/FAK 线上格式(金额/份额取整、`orderType`、过期);需要 py-clob-client-v2 `create_market_order` 的 BUY/SELL 金样(按 tick 的金额与份额取整及请求体)。实盘探针需负责人批准 |
 
 ### M3 特征层
 
@@ -64,8 +64,8 @@
 
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
-| `feat/refdata-account-set` | todo | | 设计 §8.2 M4 |
-| `feat/gw-per-account` | todo | | |
+| `feat/refdata-account-set`:refdata 接受一个实例绑定多个账户(`accounts_of`,主账户 = id 最小);sequencer 实例账户集合(≤ 8)覆盖 cell、模式、风控组表、执行层 cell、halt、行情闸门、连接通知、StrategyCmd;SDK `RefView::accounts`;hft-core 每实例一份参数 blob | done | b5155926 | REF-019(改写)、SEQ-451;单账户行为不变(sequencer 515、exec 283、refdata 84) |
+| `feat/gw-per-account`:槽镜像按 (账户, 槽) | doing | c4100bac(镜像) | VEN-411;**未做**:hft-core 的 REST 池/账户客户端/conn-builder 只装 `accounts[0]`、`AccountCapacity`、按账户 `src_ip`、撤单独立限速桶 |
 | `feat/router-stp-agg-risk` | todo | | |
 | `feat/prod-sim-accounts` | todo | | |
 | `strat/bm-multi-account` | todo | | |
@@ -74,8 +74,8 @@
 
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
-| `fix/utc-line-single` | todo | | 设计 §8.2 M5 |
-| `feat/hft-py-x86-wheel` | todo | | |
+| `fix/utc-line-single`:`UTC_SLEW_PPM`/`UTC_RATE_TOL_PPM` 只在 hft-rt 定义,sequencer 复用;两条线机制不同(引擎线超前量衰减、进快照;发布线降倍率)保持,交叉验证 | 待验收 | b597310c | SEQ-450;**待**:24 h 漂移 < 1 ppm(实盘 `UtcAnchor` 残差);"第二份常数"的机检未加(常数已改为再导出) |
+| `feat/hft-py-x86-wheel`:`research-build.yml`(x86_64 `replayer` + `hft_py` wheel,`HFT_GIT_SHA`);`events()` 按 `t0` 选起点段 | 待验收 | dd2d3f3d | PY-170;**待**:CI 上跑一次 workflow,研究机 `pip install` 冒烟 |
 | `feat/archiver-parquet`(可选) | todo | | |
 | `ops/retire-decoder` | todo | | |
 
@@ -101,6 +101,9 @@
 | SIM-230、SIM-231 | M1 | hft-sim journal 衔接;`reseed_account` |
 | SEQ-448、SEQ-449、SDK-214 | M1 | `bbo_stamp`/`stamps`、`open_orders`、提供的默认方法与 `Tif::FAK` |
 | RPL-304 | M1 | parity |
+| SIM-232–SIM-239、RSR-004、RPL-305–RPL-307 | M2 | 场所模型、校准、`--own`、`replayer calib` |
+| REF-019(改写)、SEQ-451、VEN-411 | M4 | 账户集合、gw 每账户镜像 |
+| SEQ-450、PY-170 | M5 | UTC 线交叉验证、起点段 |
 | RSR-001–RSR-003 | M1 | 变体规格、Parquet 写出、被替换回报的账户字段 |
 | RPL-300–RPL-303 | M1 | 研究回放确定性、不模拟时与日志一致、变体、CLI |
 | FEA-001–FEA-010 | M3 | 特征节点 |
