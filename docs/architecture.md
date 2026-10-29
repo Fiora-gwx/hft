@@ -96,7 +96,7 @@ L1 纯领域    hft-venue-proto ← venue-<x>;hft-ctl-proto;hft-book  hft-oms  h
 L2 策略构件  hft-strat-lib(L0 + hft-strategy-sdk)  hft-feature(hft-strategy-sdk)
 L3 运行时    hft-rt  hft-journal  hft-net  hft-venue(依赖 hft-venue-proto,不依赖具体 venue)
 L4 装配核    hft-sequencer(hft-strategy-sdk + L1 + hft-journal + hft-rt;对 StrategySet 泛型,不依赖任何策略包)
-L5 冷/工具   hft-ctl  hft-telemetry  hft-sim  hft-py(reader + ledger + SDK params 编解码)  hft-testkit(共用 hft-sim 撮合器;不依赖 registry)
+L5 冷/工具   hft-ctl  hft-telemetry  hft-sim  hft-replay(研究回放,只被 replayer 依赖)  hft-py(reader + ledger + SDK params 编解码)  hft-testkit(共用 hft-sim 撮合器;不依赖 registry)
 应用装配    hft-core → hft-venue-proto;dev: hft-testkit + hft-ctl-proto
 测试装配    hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional     hft-ext-proto  hft-amm  hft-chain-evm  hft-chain-solana(冻结)
@@ -132,7 +132,7 @@ DST 的只读观察仅在 `testkit` 构建启用。策略定时器先预留配�
 
 `hft-sequencer` 的三种驱动:实盘读环;恢复从快照重放完整事件、对账后放行,停机标记以 Kill Input 保留;验证回放自检快照、预热窗口并逐字节核对 Output 与哈希,普通滚段延续状态,重启或版本变化从新引导快照独立运行([驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。Advice 是 Input,回放读日志;Model 按合法来源续算,恢复缺口中断冷验证来源([规则](../apps/replayer/README.md#verify))。跨重启时间用 engine_ns,停机不计;跨启动 Advice 按 `basis_seq < Now.boot_seq` 判过期。
 
-**模拟重演**(`replayer sim`)把录下的 journal 行情喂给模拟网关与同一策略,用于排障与复现,**不评估收益**;策略表现只在模拟账户上观察([hft-sim](../crates/hft-sim/README.md))。没有历史回测。
+**模拟重演**(`replayer sim`)把录下的 journal 行情喂给模拟网关与同一策略,用于排障与复现;上线判断看模拟账户([hft-sim](../crates/hft-sim/README.md))。研究回放见 [hft-replay](../crates/hft-replay/README.md),不替代门槛。
 
 Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/README.md#主循环step) 保证,退出前最后一个完整事件及 Drain 快照对恢复读者可见;封段与关闭由装配层执行。
 
