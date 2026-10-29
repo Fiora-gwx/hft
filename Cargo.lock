@@ -585,6 +585,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "hft-event",
+ "hft-feature",
  "hft-refdata",
  "hft-strat-lib",
  "hft-strategy-sdk",
@@ -1599,6 +1600,14 @@ dependencies = [
  "hft-types",
  "proptest",
  "zerocopy",
+]
+
+[[package]]
+name = "hft-feature"
+version = "0.1.0"
+dependencies = [
+ "hft-refdata",
+ "hft-strategy-sdk",
 ]
 
 [[package]]

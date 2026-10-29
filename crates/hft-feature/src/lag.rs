@@ -1,29 +1,17 @@
-//! Venue-load gates (README "规则" 11): the feed lag of the slot insts' market-data messages
-//! (kernel receive stamp − venue time), its 90th percentile and median per receive second, and the
-//! medians of those per minute. Integer, exact: quantiles are kept ×10 (per second) and ×100 (per
-//! minute) in nanoseconds.
+//! `LagQuantiles` (README "节点库"): feed-lag statistics of market-data messages (receive stamp −
+//! venue time): the 90th percentile and median per receive second, and the medians of those per
+//! UTC minute. Integer, exact: quantiles are kept ×10 (per second) and ×100 (per minute) in
+//! nanoseconds.
+
+use crate::fixed::quantile_x10;
+use crate::{ColumnDesc, Events, Feature, FeatureRow, Unit};
 
 /// Lag samples kept per second (more are not counted, `overflow`).
 pub const PER_SEC: usize = 1024;
 const NS_S: i64 = 1_000_000_000;
 
-/// Linear-interpolation quantile `q10 / 10` of the sorted `v` (pandas' default), ×10: with
-/// h = q10·(n − 1), lo = ⌊h / 10⌋, fr = h mod 10: 10·v[lo] + fr·(v[lo + 1] − v[lo]).
-pub fn quantile_x10(v: &[i64], q10: i64) -> Option<i64> {
-    let n = i64::try_from(v.len()).ok().filter(|n| *n > 0)?;
-    let h = q10 * (n - 1);
-    let lo = usize::try_from(h / 10).ok()?;
-    let fr = h % 10;
-    let a = *v.get(lo)?;
-    let b = if fr > 0 { *v.get(lo + 1)? } else { a };
-    Some(
-        a.saturating_mul(10)
-            .saturating_add(fr.saturating_mul(b.saturating_sub(a))),
-    )
-}
-
 #[derive(Debug)]
-pub struct LagGate {
+pub struct LagQuantiles {
     /// Receive second being collected and its samples (ns).
     sec: i64,
     buf: Box<[i64]>,
@@ -43,16 +31,16 @@ pub struct LagGate {
     pub overflow: u64,
 }
 
-impl Default for LagGate {
-    fn default() -> LagGate {
-        LagGate::new()
+impl Default for LagQuantiles {
+    fn default() -> LagQuantiles {
+        LagQuantiles::new()
     }
 }
 
-impl LagGate {
+impl LagQuantiles {
     /// Allocates the per-second buffer (command path).
-    pub fn new() -> LagGate {
-        LagGate {
+    pub fn new() -> LagQuantiles {
+        LagQuantiles {
             sec: i64::MIN,
             buf: vec![0; PER_SEC].into_boxed_slice(),
             n: 0,
@@ -68,7 +56,7 @@ impl LagGate {
         }
     }
 
-    /// One message received at `rx_ns` (UTC) with lag `lag_ns`.
+    /// Handler: one message received at `rx_ns` (UTC) with lag `lag_ns`.
     pub fn push(&mut self, rx_ns: i64, lag_ns: i64) {
         let s = rx_ns.div_euclid(NS_S);
         if s < self.sec {
@@ -88,7 +76,7 @@ impl LagGate {
         }
     }
 
-    /// Strategy time `utc_ns`: closes the collected second once UTC is past it and the minute once
+    /// Handler: strategy time `utc_ns` (any event): closes the collected second once UTC is past it and the minute once
     /// UTC is past that.
     pub fn tick(&mut self, utc_ns: i64) {
         let s = utc_ns.div_euclid(NS_S);
@@ -142,7 +130,7 @@ impl LagGate {
         }
     }
 
-    /// (load, slow) at strategy time `utc_ns`: the previous UTC minute's median of the per-second
+    /// Eval: (load, slow) at strategy time `utc_ns`: the previous UTC minute's median of the per-second
     /// p90 ≥ `load_ns`, its median of the per-second median > `slow_ns` (a threshold of 0 never
     /// gates); neither without that minute.
     pub fn gates(&self, utc_ns: i64, load_ns: u32, slow_ns: u32) -> (bool, bool) {
@@ -152,5 +140,48 @@ impl LagGate {
         let load = load_ns > 0 && self.done_p90 >= i64::from(load_ns) * 100;
         let slow = slow_ns > 0 && self.done_p50 > i64::from(slow_ns) * 100;
         (load, slow)
+    }
+}
+
+/// Handler input of [`LagQuantiles`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LagInput {
+    /// One message: receive UTC ns, lag ns.
+    Sample { rx_ns: i64, lag_ns: i64 },
+    /// Strategy time (UTC ns) of the current event.
+    Tick(i64),
+}
+
+impl Feature for LagQuantiles {
+    type Input<'a> = LagInput;
+    const EVENTS: Events = Events::ANY;
+    const COLUMNS: &'static [ColumnDesc] = &[
+        ColumnDesc {
+            name: "lag_minute",
+            unit: Unit::Minute,
+            exp: 0,
+        },
+        ColumnDesc {
+            name: "lag_p90",
+            unit: Unit::Ns,
+            exp: -2,
+        },
+        ColumnDesc {
+            name: "lag_p50",
+            unit: Unit::Ns,
+            exp: -2,
+        },
+    ];
+    fn on_event(&mut self, x: LagInput) {
+        match x {
+            LagInput::Sample { rx_ns, lag_ns } => self.push(rx_ns, lag_ns),
+            LagInput::Tick(utc_ns) => self.tick(utc_ns),
+        }
+    }
+    fn export(&self, row: &mut FeatureRow<'_>) {
+        let done = self.done_min != i64::MIN;
+        row.put_opt(done.then_some(self.done_min));
+        row.put_opt(done.then_some(self.done_p90));
+        row.put_opt(done.then_some(self.done_p50));
     }
 }

@@ -21,9 +21,10 @@ spec: README.md
 | 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022, BMK-024, BMK-033 |
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-033 |
+| 特征 | BMK-034、BMK-035 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034 |
 | Note 码表与报表字段 | BMK-003 |
-| 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030 |
+| 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
@@ -513,3 +514,23 @@ spec: README.md
 - 步骤:同一事件序列:`U1` 10 份、`D1` 190 份的预热,随后 40 个事件(每 150 ms 一个,轮流为簿变化、参考报价、`U1` 80 份的成交、`D1` 的行情戳与簿事件、槽 12 的 `Cancelled`)
 - 期望:两组参数每个事件的意图逐项相同,且序列中有挂单
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_033_v7_off_is_v6`
+
+### BMK-034 生成事件流上的决定轨迹固定
+
+- 规则:[规则](README.md#规则) 1–11、[实现说明](README.md#实现说明)
+- 级别:unit
+- 里程碑:M3
+- 前置:四组参数(默认;`fv_limit` + `nochase_ms` 500 + `streak_k` 2 + `max_window_cost` 30 USDC;加方向分数;加两道延迟闸门),每组在 1 100 s 换成下一组;固定种子的 xorshift64* 事件流:2 400 s 内每 20–300 ms 一个事件(参考报价、槽位簿(含锁住/交叉)、成交、行情戳(300–900 s 为高延迟段)、存活挂单的成交/撤单/超时/确认、定时器),多数挂单被确认为存活订单,成交累计到 group 持仓,每个窗口清零
+- 步骤:逐事件对捕获的意图、各槽报价状态、分数缓存与公允价锚做 FNV-1a,最后加快照字节
+- 期望:四组的 (哈希, 下单数, 撤单数, 分数有效的事件数, 成交数) 等于用 v7 内联实现记录的值;特征实现迁移(决定不变的修复)后不变
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_034_decision_trace_is_stable`
+
+### BMK-035 特征导出一行定点列
+
+- 规则:[特征](README.md#特征)
+- 级别:unit
+- 里程碑:M3
+- 前置:默认参数;`warm(400, 399, 1)`(400 个参考报价样本,最后一条参考报价中间价 100 005.00)
+- 步骤:`MakerFeatures::export` 写入 7 列的缓冲;另以 9 列的缓冲与 3 列的缓冲各写一次
+- 期望:列名与 `features::COLUMNS` 一致;值依次为 `ref_mid_x2` 20 001 000、`ref_imb` 0、`ref_sigma` = `RealizedVol::sigma(1)`、`ref_samples` 399、三个延迟列 `NA`(延迟闸门关闭);较长的缓冲多出的两格不被写,较短的缓冲只写前三列且写出计数仍为 7
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_035_feature_export_row`

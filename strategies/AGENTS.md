@@ -4,7 +4,7 @@
 
 ## 常驻规则
 
-- **依赖**:只依赖 `hft-strategy-sdk` 与 `hft-strat-lib`(L0 类型经 SDK 重导出);不依赖引擎 crate 与其他策略 crate;外部库只允许纯计算库并在 README 写理由(`cargo xtask deps`)。
+- **依赖**:只依赖 `hft-strategy-sdk`、`hft-strat-lib` 与 `hft-feature`(L0 类型经 SDK 重导出);不依赖引擎 crate 与其他策略 crate;外部库只允许纯计算库并在 README 写理由(`cargo xtask deps`)。
 - **交易所无关**:策略代码、参数名、策略 README 不出现交易所名;差异只经 `Views::caps`/`inst`/`fee` 读取。插件按交易所取公共数据,交易所名只出现在插件的数据源表与源码里。
 - **两腿不同交易所**:引擎强制([SDK](../crates/hft-strategy-sdk/README.md#strategy-与-model))。
 - **快慢分工**:快速部分只做有界的整数判断与意图构造;打分、分位、统计、跨 group 分配放 Model,只经 Advice 交给快速部分([确定性规则](../crates/hft-strategy-sdk/README.md#确定性规则))。

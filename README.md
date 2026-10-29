@@ -45,6 +45,7 @@
 | [crates/hft-ledger](crates/hft-ledger/README.md) | pure | core | 仓位、现货库存、净量记账、权益视图数据、余额基线、PnL(热进程与 Python 同码) |
 | [crates/hft-exec](crates/hft-exec/README.md) | hot | core | 执行层:目标跟踪、吃单切片、两腿 OnFill、Simultaneous;引擎默认减仓 |
 | [crates/hft-strat-lib](crates/hft-strat-lib/README.md) | pure | core | 通用策略构件:价差、确认窗口、脏数据过滤、节流、分位统计、资金费统计、冲击估算 |
+| [crates/hft-feature](crates/hft-feature/README.md) | pure | core | 策略快速部分的特征节点:处理器 + 按需求值、定点导出列 |
 | [crates/hft-sequencer](crates/hft-sequencer/README.md) | hot | core | 主循环(对 `StrategySet` 泛型)、优先级、定时器、快照/恢复 |
 | [crates/hft-ctl](crates/hft-ctl/README.md) | warm | core | ctl-gateway |
 | [crates/hft-telemetry](crates/hft-telemetry/README.md) | cold | core | 延迟样本、直方图、按事件加权的离线延迟统计 |

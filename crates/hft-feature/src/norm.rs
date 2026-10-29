@@ -1,8 +1,8 @@
-//! Integer standard normal CDF Φ and its inverse (1e-9 fixed point) for the fair-value cancel
-//! rule (README "规则"): a table of Φ(k / 64), k = 0..=320 (z up to 5), linear interpolation,
-//! symmetry Φ(−z) = 1 − Φ(z); the inverse by binary search on the same table.
+//! Integer standard normal CDF Φ and its inverse (1e-9 fixed point; README "节点库"): a table of
+//! Φ(k / 64), k = 0..=320 (z up to 5), linear interpolation, symmetry Φ(−z) = 1 − Φ(z); the
+//! inverse by binary search on the same table.
 
-use crate::vol::ONE;
+use crate::fixed::ONE;
 
 /// Table step: z = k / `STEPS`.
 const STEPS: i64 = 64;

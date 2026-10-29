@@ -10,10 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
-# Only the SDK and hft-strat-lib (strategies/AGENTS.md "依赖"; cargo xtask deps rule 9).
+# Only the SDK, hft-strat-lib and hft-feature (strategies/AGENTS.md "依赖"; cargo xtask deps rule 9).
 [dependencies]
 hft-strategy-sdk.workspace = true
 hft-strat-lib.workspace = true
+hft-feature.workspace = true
 
 # Tests: the SDK stubs and hft-testkit's StrategyHarness/ModelHarness; the refdata fixture of
 # tests/common is built with hft-refdata's RDB1 builder.

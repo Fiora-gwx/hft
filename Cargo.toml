@@ -11,6 +11,7 @@ members = [
     "crates/hft-ctl",
     "crates/hft-strategy-sdk",
     "crates/hft-strat-lib",
+    "crates/hft-feature",
     "crates/hft-book",
     "crates/hft-sim",
     "crates/hft-ledger",
@@ -74,6 +75,7 @@ hft-journal = { path = "crates/hft-journal" }
 hft-ctl-proto = { path = "crates/hft-ctl-proto" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 hft-strat-lib = { path = "crates/hft-strat-lib" }
+hft-feature = { path = "crates/hft-feature" }
 latency-probe = { path = "strategies/latency-probe" }
 cross-taker = { path = "strategies/cross-taker" }
 portfolio-carry = { path = "strategies/portfolio-carry" }
