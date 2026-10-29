@@ -206,6 +206,8 @@ struct Acct<P: VenueProtocol> {
     ids: IdTable,
     hold: VecDeque<Held>,
     rate: RateCounters,
+    /// `Cancel`/`CancelAll` windows where the venue declares `Cancels`; empty = they take `rate`.
+    cancel_rate: RateCounters,
     close_after: u64,
     rest_weight: RateCounters,
     http: Option<rest_io::Pools>,
@@ -505,6 +507,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 ids: IdTable::new(cfg.id_table_cap, cfg.id_tomb_cap, t.ms(u64::from(cfg.id_tomb_ms))),
                 hold: VecDeque::with_capacity(usize::from(cfg.unmatched_hold_cap)),
                 rate: RateCounters::new(limits, |ms| t.ms(ms)),
+                cancel_rate: RateCounters::cancels(limits, |ms| t.ms(ms)),
                 close_after: 0,
                 private: crate::private::Private::default(),
                 http: None,
@@ -1488,6 +1491,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             && let Some(x) = self.accts.get_mut(a)
         {
             x.rate.observe_window(obs, now);
+            x.cancel_rate.observe_window(obs, now);
         }
         if let Some(r) = o.outcome_unknown {
             self.n.outcome_unknown += 1;
@@ -1754,7 +1758,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::KillBlocked, 0, 0);
             return;
         }
-        if c.op != GwOp::Query && !self.accts.get_mut(a).is_some_and(|x| x.rate.take(now)) {
+        // Cancels take their own budget where the venue declares one (`Cancels`), else `Orders`.
+        if c.op != GwOp::Query
+            && !self.accts.get_mut(a).is_some_and(|x| {
+                if matches!(c.op, GwOp::Cancel | GwOp::CancelAll) && !x.cancel_rate.is_empty() {
+                    x.cancel_rate.take(now)
+                } else {
+                    x.rate.take(now)
+                }
+            })
+        {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
             return;
         }
@@ -2289,6 +2302,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             GwOp::ResetRate => {
                 if let Some(x) = self.acct_ix(c.account).and_then(|a| self.accts.get_mut(a)) {
                     x.rate.reset();
+                    x.cancel_rate.reset();
                 }
             }
             GwOp::Rotate => {

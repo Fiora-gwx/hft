@@ -1,4 +1,5 @@
-//! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-032).
+//! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-032), the
+//! rate defaults (PMK-037).
 //! REST answers and user-channel frames are copied from a capture of 2026-10-22 (post-only bids
 //! at 0.02, never fillable; `owner` API keys replaced by the test key).
 
@@ -1419,4 +1420,24 @@ fn pmk_035_presigned_orders() {
     c.set_presign(on);
     encode_at(&mut c, &buy(990), &tgt(0), NOW_MS);
     assert_eq!(idle_all(&mut c, NOW_MS), 2, "PMK-035.8");
+}
+
+#[test]
+fn pmk_037_cancels_have_their_own_rate_rule() {
+    use hft_refdata::{LimitBucket, LimitScope};
+    use hft_venue_proto::VenueProtocol;
+    let rules: Vec<_> = Pm::rate_rules()
+        .iter()
+        .map(|r| (r.scope, r.bucket, r.window_ms, r.limit))
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            (LimitScope::Ip, LimitBucket::NewConns, 300_000, 300),
+            (LimitScope::Conn, LimitBucket::WsInMsgs, 1_000, 10),
+            (LimitScope::Account, LimitBucket::Orders, 1_000, 20),
+            (LimitScope::Account, LimitBucket::Cancels, 1_000, 40),
+        ],
+        "PMK-037"
+    );
 }
