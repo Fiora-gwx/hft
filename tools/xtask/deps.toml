@@ -364,9 +364,12 @@ dev_tier_ok = true
 # production archive.
 [pkg."tools/pm-md-probe"]
 tier = "cold"
+# hft-sequencer + hft-strategy-sdk: the `journal` subcommand rebuilds the engine UTC with the
+# sequencer's own `clock::UtcLineRow` (one implementation of the anchoring rules).
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue-proto", "crates/hft-venue", "crates/venue-polymarket",
+    "crates/hft-strategy-sdk", "crates/hft-sequencer",
 ]
 
 [pkg."tools/hft-verify"]

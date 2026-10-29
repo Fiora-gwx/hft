@@ -16,7 +16,9 @@ use hft_event::{
 };
 use hft_journal::{JournalReader, Next};
 use hft_refdata::RefData;
-use hft_types::{InstId, Side, VenueId};
+use hft_sequencer::clock::UtcLineRow;
+use hft_strategy_sdk::EngineClockAnchor;
+use hft_types::{InstId, Side, Tsc, VenueId};
 use venue_polymarket::FeedCtx;
 use zerocopy::{FromBytes, TryFromBytes};
 
@@ -71,50 +73,28 @@ fn asset_side(symbol: &str) -> (&str, &str) {
     (p.next().unwrap_or("?"), p.next().unwrap_or("?"))
 }
 
-/// SDK `EngineClockAnchor::utc_of` / hft-sequencer `clock::add_scaled`:
-/// `base + ⌊(t − t0) × 10^12 / hz⌋` (floor, i128, saturating; `hz = 0` → `base`).
-fn add_scaled(base: i64, t: u64, t0: u64, hz_milli: u64) -> i64 {
-    if hz_milli == 0 {
-        return base;
+/// The segment pair converted at rate `hz` (SDK `EngineClockAnchor::utc_of`, the formula the
+/// sequencer uses before the run's first `UtcAnchor`).
+fn seg_utc(t: u64, calib_tsc: u64, calib_realtime_ns: i64, hz: u64) -> i64 {
+    EngineClockAnchor {
+        base_engine_ns: 0,
+        base_tsc: Tsc(0),
+        tsc_hz_milli: hz,
+        utc_tsc: Tsc(calib_tsc),
+        utc_ns: calib_realtime_ns,
     }
-    let num = (i128::from(t) - i128::from(t0)) * 1_000_000_000_000;
-    let r = i128::from(base) + num.div_euclid(i128::from(hz_milli));
-    r.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
-}
-
-/// hft-sequencer `clock::UTC_SLEW_PPM` / `UTC_RATE_TOL_PPM`.
-const UTC_SLEW_PPM: u64 = 500;
-const UTC_RATE_TOL_PPM: u64 = 1_000;
-
-/// hft-sequencer `clock::UtcLineRow` (section 32): the run's UTC line after its last `UtcAnchor`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-struct UtcLine {
-    tsc: u64,
-    utc_ns: i64,
-    hz_milli: u64,
-    lead_ns: u64,
-}
-
-impl UtcLine {
-    /// `UtcLineRow::utc_at`: `utc_ns + e + max(0, lead_ns − ⌊e × 500 / 10^6⌋)`,
-    /// `e = ⌊(t − tsc) × 10^12 / hz⌋`.
-    fn utc_at(&self, t: u64) -> i64 {
-        let e = add_scaled(0, t, self.tsc, self.hz_milli);
-        let decay = (i128::from(e.max(0)) * i128::from(UTC_SLEW_PPM) / 1_000_000) as u128;
-        let lead = u128::from(self.lead_ns).saturating_sub(decay);
-        let v = i128::from(self.utc_ns) + i128::from(e) + lead as i128;
-        v.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
-    }
+    .utc_of(Tsc(t))
 }
 
 /// Strategy-visible engine UTC (SDK `Now.utc_ns`; hft-sequencer README "引擎 UTC"):
-/// `Engine::utc_at(t)` = `EngineClock::anchor_at(t, seg pair).utc_of(t)`.
+/// `Engine::utc_at(t)` = `EngineClock::anchor_at(t, seg pair).utc_of(t)`. The line itself is
+/// hft-sequencer's `UtcLineRow` (one implementation of the anchoring and slew rules).
 #[derive(Default)]
 struct EngineUtc {
     /// `EngineClock.tsc_hz_milli` of the current run; 0 = no `EngineClock` read yet (the segment
     /// header's `tsc_hz_milli` stands in: hft-core writes the same value into both).
     hz: u64,
-    line: Option<UtcLine>,
+    line: Option<UtcLineRow>,
 }
 
 impl EngineUtc {
@@ -125,8 +105,8 @@ impl EngineUtc {
     /// segment header.
     fn at(&self, t: u64, seg: Option<(u64, i64, u64)>) -> i64 {
         match (&self.line, seg) {
-            (Some(l), _) => l.utc_at(t),
-            (None, Some((ct, cr, shz))) => add_scaled(cr, t, ct, self.hz_or(shz)),
+            (Some(l), _) => l.utc_at(Tsc(t)),
+            (None, Some((ct, cr, shz))) => seg_utc(t, ct, cr, self.hz_or(shz)),
             (None, None) => 0,
         }
     }
@@ -137,25 +117,11 @@ impl EngineUtc {
     }
     /// `UtcAnchor` Input at record tsc `t` (`UtcLineRow::anchored` with `cur` = engine UTC at `t`
     /// before the anchor). Returns (cur, new line).
-    fn anchor(&mut self, t: u64, a: &UtcAnchor, seg: Option<(u64, i64, u64)>) -> (i64, UtcLine) {
+    fn anchor(&mut self, t: u64, a: &UtcAnchor, seg: Option<(u64, i64, u64)>) -> (i64, UtcLineRow) {
         let cur = self.at(t, seg);
-        let ec_hz = self.hz_or(seg.map_or(0, |s| s.2));
-        let tol = u128::from(ec_hz) * u128::from(UTC_RATE_TOL_PPM) / 1_000_000;
-        let hz = if a.hz_milli != 0 && u128::from(a.hz_milli.abs_diff(ec_hz)) <= tol {
-            a.hz_milli
-        } else {
-            ec_hz
-        };
-        let target = add_scaled(a.realtime_ns, t, a.tsc.0, hz);
-        let lead = (i128::from(cur) - i128::from(target)).clamp(0, i128::from(i64::MAX)) as u64;
-        let l = UtcLine {
-            tsc: t,
-            utc_ns: target,
-            hz_milli: hz,
-            lead_ns: lead,
-        };
+        let l = UtcLineRow::anchored(cur, Tsc(t), a, self.hz_or(seg.map_or(0, |s| s.2)));
         // A zero-rate line would be ClockRange in the engine; keep the previous state.
-        if hz != 0 {
+        if l.is_set() {
             self.line = Some(l);
         }
         (cur, l)
@@ -178,7 +144,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
         std::fs::File::create(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?,
     );
     let (mut n_bind, mut n_snap, mut n_batch, mut n_trade) = (0u64, 0u64, 0u64, 0u64);
-    // Local calibration build: engine receive time of the last market event (decisions and order
+    // Engine receive time of the last market event (decisions and order
     // events carry it as t_ns), and the level deltas of every book record.
     let mut last_rx: i64 = 0;
     let lv = |ls: &[hft_event::Level], nb: usize| -> String {
@@ -507,7 +473,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 c.role as u8
             );
         } else if kind == EventKind::BBO {
-            // Reference quotes (local calibration build): the replay's reference price as the engine saw it.
+            // Reference quotes: the reference price as the engine saw it.
             let Ok((b, _)) = Bbo::read_from_prefix(body) else {
                 continue;
             };
@@ -583,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn engine_utc_steps_forward_and_slews_back() {
+    fn pmp_005_engine_utc_steps_forward_and_slews_back() {
         use super::{EngineUtc, UtcAnchor};
         use hft_types::Tsc;
         // 1 GHz counter: 1 tick = 1 ns; segment pair (0, 1_000_000_000_000).

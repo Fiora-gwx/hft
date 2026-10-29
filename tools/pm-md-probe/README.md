@@ -56,13 +56,17 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `batch` | `slot`、`ex_ms`、`rx_ns`、`prev`、`last`、`bb`、`ba` |
 | `trade` | `slot`、`ex_ms`、`rx_ns`、`px`、`qty`、`side` |
 | `conn` | 连接状态事件 |
-| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`inst`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject` |
-| `oev` | (`journal`)`OrderEvent`:`slot`、`inst`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code` |
+| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`inst`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject`、`trig`(`trigger_seq`)、`strat`、`reason`、`ino`(`intent_no`)、`oflags`、`t_ns`(最近一条行情事件的 `sw_rx_ns`) |
+| `oev` | (`journal`)`OrderEvent`:`slot`、`inst`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code`、`t_ns` |
 | `ext` | (`journal`)`ExternalFill`(交割为 `cause` 4):`slot`、`inst`、`cause`、`side`、`px`、`qty`、`end_s` |
 | `bind` | (`journal --orders-only`)每次 `BindSlot`:`inst`、`slot`(`<asset>-<S>-<up|dn>`)、`start_s`;只解码新段的读者靠它自己维护 inst → 窗口标签 |
 | `settle` / `cmdres` | (`journal`)`Settle` 命令(`slot`、`inst`、`end_s`、`payout`、`cmd_id`)与命令结果(`cmd_id`、`status`、`detail`) |
+| `bbo` | (`journal`)参考价 `Bbo`:`inst`、`rx_ns`、`ex_ms`、`bid`、`bq`、`ask`、`aq` |
+| `eclk` / `anchor` | (`journal`)`EngineClock`(`base`、`hz`、`prev`、`src`)与 `UtcAnchor`(`tsc`、`rt`、`hz`、`err`;`cur` = 锚前引擎 UTC,`tgt`/`lhz`/`lead` = 锚后 UTC 线) |
 
 `bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数、feed 计数器与解码器的去重计数(`decoder dups`、`lates`)。`conn` 行的 `Down` 原因 64(hft-net `WS_CLOSE`)既包括 1013,也包括市场结算后约 147 s 交易所的正常关闭,统计异常断开时要按时间排除后者。
+
+`journal` 子命令的每一行另带引擎时钟字段,供研究回放对齐引擎时间:`sq` = 记录 seq;`e` = 记录头 tsc 按段头 `tsc_hz_milli` 折算的 ns(差值即 `engine_ns` 差);`u` = 段校准对折算的 UTC;`eu` = 策略可见的引擎 UTC(`Now.utc_ns`),由 `EngineClock`/`UtcAnchor` 输入按 hft-sequencer 的 `clock::UtcLineRow` 重建(同一份实现,不另抄常数)。`snap` 行另有 `org`(快照来源)与 `lv`,`batch` 行另有 `lv`:该记录的全部档位 `[[side, px, qty], …]`(side 1 = 买、2 = 卖);`conn` 行另有该 inst 的 `slot` 标签。
 
 ### 验收步骤
 
@@ -118,7 +122,7 @@ hft-core 验收运行的 journal 量(2026-10-20,16 个槽位):raw-feed 约 63 GB
 
 ## 依赖
 
-允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-rt`、`hft-journal`(`writer`)、`hft-net`、`hft-venue-proto`、`hft-venue`、`venue-polymarket`;外部 `serde`、`serde_json`、`zerocopy`。不被任何 crate 依赖。
+允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-rt`、`hft-journal`(`writer`)、`hft-net`、`hft-venue-proto`、`hft-venue`、`venue-polymarket`、`hft-strategy-sdk`、`hft-sequencer`(`journal` 的引擎 UTC 用其 `clock::UtcLineRow`);外部 `serde`、`serde_json`、`zerocopy`。不被任何 crate 依赖。
 
 ## 延伸阅读
 
