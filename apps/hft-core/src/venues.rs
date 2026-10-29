@@ -1120,6 +1120,23 @@ pub fn check_kill_caps(protocol: &str, caps: &hft_refdata::VenueCaps) -> Result<
     Ok(())
 }
 
+/// The protocol's `SHARED_EGRESS_IP` (`false` when not built or unknown, reported by
+/// `registered`).
+pub fn shared_egress_ip(protocol: &str) -> bool {
+    use hft_venue_proto::VenueProtocol;
+    match protocol {
+        "binance-usdm" => venue_binance::Usdm::SHARED_EGRESS_IP,
+        "binance-spot" => venue_binance::Spot::SHARED_EGRESS_IP,
+        #[cfg(feature = "bitget")]
+        "bitget-usdt-futures" => venue_bitget::BitgetUsdtFutures::SHARED_EGRESS_IP,
+        #[cfg(feature = "bitget")]
+        "bitget-spot" => venue_bitget::BitgetSpot::SHARED_EGRESS_IP,
+        #[cfg(feature = "polymarket")]
+        "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
+        _ => false,
+    }
+}
+
 /// Cold self-test of the same atomic word handed to the live gateway.
 pub fn selftest_word(kill: &hft_rt::KillWord, ix: u8) -> Result<(), Error> {
     if ix >= 12 {

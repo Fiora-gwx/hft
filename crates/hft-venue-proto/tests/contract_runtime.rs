@@ -5,6 +5,14 @@ use hft_venue_proto::{testkit::*, *};
 mod fake_venue;
 use fake_venue::{FAKE_VENUE as V, Fake, FakePerp, FakeSpot, fake_rd};
 
+#[test]
+fn vpr_153_shared_egress_ip_default() {
+    assert_eq!(
+        (FakeSpot::SHARED_EGRESS_IP, FakePerp::SHARED_EGRESS_IP),
+        (false, false)
+    );
+}
+
 fn place() -> (GwCmd, TargetRef) {
     (
         GwCmd {

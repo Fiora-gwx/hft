@@ -976,6 +976,99 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
 }
 
 #[test]
+fn core_441_shared_account_ip() {
+    use hft_core::config::shared_account_ip;
+    use std::net::Ipv4Addr;
+    let (a, b) = (Ipv4Addr::new(10, 0, 1, 10), Ipv4Addr::new(10, 0, 1, 11));
+    // .1–.3 the rule.
+    assert_eq!(
+        shared_account_ip("v", false, &[(1, a), (2, a)]).map(|e| e.code),
+        Some("SharedAccountIp"),
+        "CORE-441.1"
+    );
+    assert!(
+        shared_account_ip("v", false, &[(1, a), (2, b)]).is_none(),
+        "CORE-441.2"
+    );
+    assert!(shared_account_ip("v", false, &[(1, a)]).is_none(), "CORE-441.2");
+    assert!(
+        shared_account_ip("v", true, &[(1, a), (2, a)]).is_none(),
+        "CORE-441.3"
+    );
+    // .4 the protocols' declarations.
+    assert!(!hft_core::venues::shared_egress_ip("binance-spot"), "CORE-441.4");
+    assert!(!hft_core::venues::shared_egress_ip("binance-usdm"), "CORE-441.4");
+    #[cfg(feature = "polymarket")]
+    assert!(
+        hft_core::venues::shared_egress_ip("polymarket-clob"),
+        "CORE-441.4"
+    );
+    // .5 two live accounts of a Binance venue on the one `src_ip`.
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let account = |n: u8| {
+        format!(
+            "[[venues.public.accounts]]\naccount = {n}\napi_key_path = 'k'\nsession_seed_path = 's'\nrest_api_key_path = 'k'\nrest_secret_path = 's'\n"
+        )
+    };
+    let two = text.replace(
+        "[sim]",
+        &format!(
+            "src_ip = '127.0.0.1'\nbind_device = 'lo'\n{}{}[sim]",
+            account(1),
+            account(2)
+        ),
+    );
+    std::fs::write(&path, two).unwrap();
+    let codes: Vec<_> = hft_core::config::load(&path, false)
+        .unwrap_err()
+        .iter()
+        .map(|e| e.code)
+        .collect();
+    assert!(
+        codes.contains(&"AccountCapacity") && codes.contains(&"SharedAccountIp"),
+        "CORE-441.5 {codes:?}"
+    );
+    // .6 the live Polymarket configuration with a second account: only the assembly's capacity.
+    #[cfg(feature = "polymarket")]
+    {
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+            day_loss_carry: None,
+            daily_loss_abs: None,
+            daily_loss_max_resumes: None,
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot2"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&pm).unwrap()).unwrap();
+        let accounts = config["venues"]["pm"]["accounts"].as_array_mut().unwrap();
+        let mut second = accounts[0].clone();
+        second
+            .as_table_mut()
+            .unwrap()
+            .insert("account".into(), toml::Value::Integer(2));
+        accounts.push(second);
+        std::fs::write(&pm, toml::to_string(&config).unwrap()).unwrap();
+        let codes: Vec<_> = hft_core::config::load(&pm, false)
+            .unwrap_err()
+            .iter()
+            .map(|e| e.code)
+            .collect();
+        assert!(codes.contains(&"AccountCapacity"), "CORE-441.6 {codes:?}");
+        assert!(!codes.contains(&"SharedAccountIp"), "CORE-441.6 {codes:?}");
+    }
+}
+
+#[test]
 fn core_433_venue_rest_timeout_and_max_idle() {
     let d = tempfile::tempdir().unwrap();
     let path = support::write(d.path(), &d.path().join("hot"), None);

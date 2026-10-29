@@ -47,6 +47,7 @@ pub trait VenueProtocol: Sized + 'static {
     type GwCtx;                          // 只放 venue 私有状态:请求 id 编码、累计量合成表、成交与资金费去重环(契约 22)、保证金推送缓存
     type Templates;                      // 帧模板:该 (venue, account) 的预编码片段与非敏感配置(凭证按调用借用,契约 7);随 refdata 在启动期构建一次(refdata 不热换,变更 = 重启);
                                          // gw 与 acct-fetch 各构建一份(交易 REST key),reconciler 以只读 key 构建自己的一份(契约 31)
+    const SHARED_EGRESS_IP: bool = false; // true:同一 venue 的 Live 账户可以共用一个出口 IP(hft-core 不报 SharedAccountIp);只给按 IP 的限额排队而不拒绝、下单限额按 key 计的所(Polymarket)
     const CANCEL_ALL_SWEEP: bool = false; // true:gw 发完 CancelAll 后再查一次挂单列表兜底(契约 29;OKX)
     const BBO_SNAPSHOT_BATCH: u16 = 1;   // 一次 BBO 补帧请求可覆盖的 inst 上限(契约 24);u16::MAX = 只受 RestReqBuf 长度限制
     const USER_STREAM: bool = false;     // true:私有频道在独立的用户流连接上(Binance USDT-M listenKey 流),而不是下单连接(hft-venue §4b)
