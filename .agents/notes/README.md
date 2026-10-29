@@ -2,6 +2,15 @@
 
 这里只放一种设计文档。**Agent Note** 记录一个影响本仓库的决定或提案——**为什么**、**放弃了什么**、**需要什么验证**,也就是代码与 README 承载不了的部分。本文件规定 Agent Note 放在哪里、何时写、文件格式。改编自 DeepSeek Harness 的 `.agents/notes/README.md`(样例在 architecture-v2/research/_dsh/notes_README.md(未入库的资料缓存:`architecture-v2/research/_dsh/notes_README.md`));改编理由见 [dsh-style-documentation](proposed/process/2026-09-30-dsh-style-documentation.md)。
 
+## 引擎重构决定(2026-10-29)
+
+| 当前 Note | 决定 | 被收窄或放宽的 Note |
+|---|---|---|
+| [replay-as-research-tool](proposed/architecture/2026-10-29-replay-as-research-tool.md) | 回放是研究与参数筛选工具,输出带校准哈希、对账误差与种子方差;上线门槛不变 | [sim-accounts-not-backtest](proposed/architecture/2026-10-02-sim-accounts-not-backtest.md) |
+| [account-set-per-instance](proposed/architecture/2026-10-29-account-set-per-instance.md) | 一个账户只被一个实例交易;一个实例可交易多个账户(M4 落地) | [one-account-per-strategy-instance](proposed/architecture/2026-10-02-one-account-per-strategy-instance.md) |
+
+进度与里程碑见 [docs/refactor/PROGRESS.md](../../docs/refactor/PROGRESS.md)。
+
 ## 永续/现货产品形态(2026-10-16)
 
 [产品形态](implemented/feature/2026-10-16-perp-spot-shape.md) 收窄两策略为指定永续空头与现货多头,其他形态及反向开仓禁用。

@@ -59,7 +59,7 @@ cargo xtask fuzz <target>   # 解码器 fuzz(固定的 nightly 工具链,见 too
 - **依赖只能向下**:见 [crates/AGENTS.md](crates/AGENTS.md#依赖方向);`venue-*` 是纯协议;`apps/*` 只装配。
 - **策略与引擎解耦**:引擎 crate(含 dev 依赖)不依赖 `strategies/*` 与 `hft-strategy-registry`;策略 crate 只依赖 `hft-strategy-sdk` 与 `hft-strat-lib`;新增策略 = `strategies/<name>` + registry 清单一行,引擎、app 与 `python/` 框架零改动([strategies/AGENTS.md](strategies/AGENTS.md),`cargo xtask deps` 机检)。
 - **名字不越界**:引擎 crate、app 与 `python/` 框架包不出现策略族名(含小写 `cdex`)或某个策略的规则数字;策略 crate 不出现交易所名,交易所差异进 `VenueCaps` 与 `venue-*`(`doc-check` 机检)。
-- **一个账户一个策略实例**:一个交易所(子)账户只绑定一个策略实例,同一时刻只由一个系统交易([hft-refdata](crates/hft-refdata/README.md))。
+- **一个账户一个策略实例**:一个交易所(子)账户只绑定一个策略实例,同一时刻只由一个系统交易([hft-refdata](crates/hft-refdata/README.md));已决定放宽为"一个实例可交易多个账户",重构 M4 落地前仍按此执行([account-set-per-instance](.agents/notes/proposed/architecture/2026-10-29-account-set-per-instance.md))。
 - **不做同一交易所的现货 × 永续**:一个账户在同一交易所只用一个市场;refdata 与 `SetParams` 都拒绝([hft-refdata](crates/hft-refdata/README.md))。
 - **事件 schema 只追加**:新增字段追加在体尾,改语义用新 kind([cookbook](docs/cookbook/adding-an-event-kind.md))。
 - **无硬编码可调参数**:阈值、限额、超时、名单进 refdata、策略参数或 `RiskParams`,经控制环替换并被记录;账户事实(如永续杠杆)从交易所读取;协议常量与安全不变量除外。
@@ -68,7 +68,7 @@ cargo xtask fuzz <target>   # 解码器 fuzz(固定的 nightly 工具链,见 too
 - **测量先于优化**:性能声明附直方图或基准输出;延迟只用 [latency-budget](docs/latency-budget.md) 的分段名;延迟验收只在选定的统一升级主机上、prod 与 sim 同机时做,`dev2` 只记录。
 - **测试描述行为**:每个测试对应 `TESTS.md` 或 `docs/tests/` 里的一个用例,函数名以用例编号开头(如 `oms_014_…`,[docs/tests §6](docs/tests/README.md#6-与代码的对应));金样不对就修 fixture 来源,不迁就归一化逻辑;策略、执行层、风控、OMS 改动必须过 `replay-verify` 与 DST([testing.md](docs/testing.md))。
 - **交付路径**:`dev2`(不放正式实盘账户)→ 统一升级主机(`prod` 与 `sim` 同机)→ 通过上线门槛、零成交冒烟与正式实例 Shadow 后正式实盘;没有小额实盘阶段([launch](docs/runbooks/launch.md))。
-- **评估用模拟账户,不用回测**:策略表现在模拟账户(实时行情 + 模拟撮合)上观察,只在 `instance.name = "sim"` 的实例运行;`prod` 实例不含 Sim 账户;回放只用于确定性验证与排障([hft-sim](crates/hft-sim/README.md))。
+- **上线评估用模拟账户,回放用于研究**:上线门槛只认模拟账户(实时行情 + 模拟撮合,只在 `instance.name = "sim"` 的实例运行;`prod` 实例不含 Sim 账户)与 Shadow;回放用于确定性验证、排障与研究筛选,研究输出带校准哈希、对账误差与种子方差([hft-sim](crates/hft-sim/README.md)、[replay-as-research-tool](.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md))。
 - **sim 与 prod 同机隔离**:sim 只用非隔离核,独立 slice、journal、冷盘目录、网卡与出口 IP;数值归 [hft-core](apps/hft-core/README.md)。
 - **CI 是唯一构建环境**:本地只写代码并推送;GitHub 托管 runner(不用自托管 runner)跑质量门并产出 aarch64 发布构建与验证包;服务器只安装 CI 产出的制品,**不编译**;累计 fuzz 与 DST 在服务器上运行验证包([development.md](docs/development.md))。
 - **发布纪律**:冷生产、不可变归档 + SHA-256 + `RELEASE.json`、保留一个已验证回滚版本;内核参数、资源护栏与调优脚本随发布归档([deploy/](deploy/README.md))。

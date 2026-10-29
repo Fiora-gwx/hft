@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> **重构修订(2026-10-29)**:收窄第 6 条与"历史回测 / 假设回放 / 参数扫描"的否决——回放(`replayer research`/`parity`)是研究与参数筛选工具,输出带校准表哈希、对账误差与随机种子方差;第 7 条门槛 ⑦ 与模拟账户的其余规则不变;见 [replay-as-research-tool](2026-10-29-replay-as-research-tool.md)。
+
 > **第八轮补充(2026-10-03)**:收窄第 1 条——模拟账户的回报环 `rep-sim` 优先级最低、每轮处理量 ≤ `sim_max_per_round`、同一事件先派发实盘;统一升级后模拟只在只含模拟账户、不持 key 的 `instance = "sim"` 实例运行(同一二进制;本 Note 否决的"独立的模拟进程"指另一套代码);见 [sim-only-instance](2026-10-03-sim-only-instance.md)。
 
 > **第八轮第三次修订(2026-10-03)**:收窄第 5 条——没有小额实盘阶段:同参数模拟实例在 sim 实例上与**正式实盘**并行校准;见 [no-small-live](2026-10-03-no-small-live.md)、[sim-colocated-with-prod](2026-10-03-sim-colocated-with-prod.md)。
