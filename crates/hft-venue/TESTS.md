@@ -44,7 +44,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
 | 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397、VEN-399 |
-| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402、VEN-405–VEN-408 |
+| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402、VEN-405–VEN-409 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
 | 5. 心跳 | VEN-120、VEN-134、VEN-280–VEN-283 |
@@ -3889,3 +3889,16 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-408.1 | `Cancel{target_slot 2}` × (n + 1),k = 0..=n | 只有第 n + 1 条立即得 `SendReport{NoConn, conn 0}`;`rest_cancel_queued` = n、`rest_cancel_dropped` = 1 |
 | VEN-408.2 | 轮询于 `t_0 + 10 s`;再于 `t_{n−1} + 10 s + 1`;其后一条连接的应答交出 | 第一次无报告;第二次 n 条 `SendReport{NoConn, target_slot 2}`;应答交出后无报告、无撤单编码 |
 | VEN-408.3 | `Cancel{target_slot 3}` 两条(第一条用空出的连接),再 `retire_all` | 第一条 `Written`;`retire_all` 时第二条得 `SendReport{NoConn}` |
+
+### VEN-409 REST 订单的 `SendReport.sent_tsc` 与 `RawTx` 取写出返回的时刻
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)(第 4、6 步)
+- 级别:table
+- 里程碑:M3
+- 前置:`order_channel = Rest` 的桩协议,一个两条连接的 REST 池;两条连接的下一次写出都在 4 777 返回
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_409_rest_send_report_carries_the_write_tsc`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-409.1 | `Place{slot 7}`,轮询于 4 000 | 恰一条 `SendReport{Written}`,`sent_tsc` = 4 777(写出返回时刻,不是本圈开始的 4 000) |
+| VEN-409.2 | 同上 | 该请求的 `RawTx` 记录头 `tsc` = 4 777 |

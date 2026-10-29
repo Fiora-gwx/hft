@@ -1371,9 +1371,9 @@ impl Conn {
     // ------------------------------------------------------------------ warm-thread helpers
 
     /// Encrypts `data` as application data into tx and flushes (Upgrade request).
-    pub(crate) fn send_plain(&mut self, data: &[u8]) -> Result<(), SendErr> {
+    pub(crate) fn send_plain(&mut self, data: &[u8]) -> Result<SendOk, SendErr> {
         self.encrypt_into_tx(data)?;
-        self.flush_inner().map(|_| ())
+        self.flush_inner()
     }
 
     /// The unconsumed plaintext.

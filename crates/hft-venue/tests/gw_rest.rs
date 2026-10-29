@@ -852,3 +852,40 @@ fn ven_408_queued_cancel_fails_when_the_queue_is_full_or_waits_too_long() {
     h.rt.retire_all(t + 12);
     assert_eq!(statuses(&h.reps()), vec![SendStatus::NoConn], "VEN-408.3");
 }
+
+#[test]
+fn ven_409_rest_send_report_carries_the_write_tsc() {
+    use hft_net::sock::{SendKind, SendStep};
+    let mut h = setup::<V_REST_ORDERS>();
+    // The lanes' next write returns at 4 777, after the poll started at 4 000.
+    for id in [114, 115] {
+        h.rt.conn(ConnId(id))
+            .unwrap()
+            .script()
+            .unwrap()
+            .push_send(SendStep {
+                post_tsc: 4_777,
+                kind: SendKind::All,
+            });
+    }
+    let c = h.place(A1, 7, 3, S1, false);
+    h.cmd(c);
+    h.poll(4000);
+    // .1 the Written report carries the TSC right after the write, not the poll start.
+    let r = reports(&h.reps());
+    assert_eq!(r.len(), 1, "VEN-409.1");
+    assert_eq!(
+        (r[0].status, r[0].sent_tsc.0),
+        (SendStatus::Written, 4_777),
+        "VEN-409.1"
+    );
+    // .2 the request's RawTx has the same header tsc.
+    let rec = h
+        .raw
+        .records()
+        .into_iter()
+        .rev()
+        .find(|r| r.kind == hft_event::EventKind::RAW_TX)
+        .unwrap();
+    assert_eq!(rec.tsc, 4_777, "VEN-409.2");
+}

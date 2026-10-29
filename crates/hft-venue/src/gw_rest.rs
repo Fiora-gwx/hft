@@ -85,7 +85,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         wire: &RestReqBuf,
         urgent: bool,
         now: u64,
-    ) -> Result<ConnId, HttpError> {
+    ) -> Result<(ConnId, u64), HttpError> {
         let weight = self
             .rd
             .rate_limits(P::VENUE)
@@ -117,7 +117,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             .endpoints
             .get_mut(usize::from(wire.endpoint))
             .ok_or(RestErr::Proto)?;
-        let conn = crate::rest::submit(&mut pool.1, wire, tag, urgent, now)?;
+        let (conn, sent_tsc) = crate::rest::submit(&mut pool.1, wire, tag, urgent, now)?;
         http.tag = tag;
         http.pending.push(Pending {
             tag,
@@ -142,9 +142,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             what::REST_RESPONSE,
             RawHdr::REDACTED,
             &meta[..1 + path.len()],
-            now,
+            sent_tsc,
         );
-        Ok(conn)
+        Ok((conn, sent_tsc))
     }
     /// README §4 "撤单优先": queued cancels go first; a cancel that finds no free connection
     /// waits in the account's queue instead of failing.
@@ -254,7 +254,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let mut wire = RestReqBuf::default();
         let clk = self.wall(now);
         let x = &mut self.accts[a];
-        if P::encode_rest_ctx(
+        // Encoding includes the request signature (README §4 step 4).
+        lt::stamp(TraceStage::EncodeStart, [0; 4]);
+        let r = P::encode_rest_ctx(
             self.rd,
             &x.tpl,
             &mut x.ctx,
@@ -263,9 +265,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             &target,
             &clk,
             &mut wire,
-        )
-        .is_err()
-        {
+        );
+        lt::stamp(TraceStage::EncodeEnd, [0; 4]);
+        if r.is_err() {
             self.report(
                 &c,
                 tg,
@@ -290,11 +292,11 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             inst: c.inst,
         };
         match self.submit_http(a, c, origin, &wire, urgent(c.op), now) {
-            Ok(conn) => {
+            Ok((conn, sent_tsc)) => {
                 if c.op == GwOp::Place {
                     self.write_mirror(&c);
                 }
-                self.report(&c, tg, conn, SendStatus::Written, 0, now);
+                self.report(&c, tg, conn, SendStatus::Written, 0, sent_tsc);
             }
             Err(HttpError::Net(RestErr::Send(SendErr::Io(e)))) => {
                 if c.op == GwOp::Place {

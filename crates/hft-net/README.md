@@ -283,6 +283,8 @@ impl<const N: usize> RestPool<N> {
     pub fn submit(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr>;
     /// 同 submit,但可以占用保留的通道:没有空闲的 Open 通道才 Busy。
     pub fn submit_urgent(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr>;
+    /// 在途请求的连接与其 sendmsg 返回后的 TSC(SendOk::sent_tsc);无此在途请求 → None。
+    pub fn pending_sent(&self, tag: ReqTag) -> Option<(ConnId, u64)>;
     /// 只读有在途请求的连接;返回一个完整响应(已去 chunk)或一个失败(该连接随之退役)。
     pub fn poll(&mut self, now_tsc: u64) -> Option<Result<RestResp<'_>, RestFail>>;
     /// 对没有在途请求的连接各做一次非阻塞读,只为发现对端关闭(EOF、RST、close_notify)或协议错误(未请求的数据),
