@@ -62,6 +62,7 @@ fn sreq(conn: u8, role: ConnRole, deadline_ns: i64) -> BuildReq {
         src_ip_idx: 0,
         rx_queue: 0,
         deadline_ns,
+        account: hft_types::AccountId(0),
     }
 }
 

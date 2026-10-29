@@ -4,7 +4,7 @@
 use std::net::Ipv4Addr;
 
 use hft_event::ConnRole;
-use hft_types::{ConnId, VenueId};
+use hft_types::{AccountId, ConnId, VenueId};
 
 use crate::arena::{ConnArena, Handoff, RetireMsg};
 use crate::config::{NetConfig, TlsMode};
@@ -34,6 +34,9 @@ pub struct BuildReq {
     pub rx_queue: u16,
     /// Deadline of the whole job; the earlier of it and the stage timeout applies.
     pub deadline_ns: i64,
+    /// The account a private connection (order, user stream, account REST) belongs to, for its
+    /// session credentials; 0 = not account-scoped (market data, public REST).
+    pub account: AccountId,
 }
 
 /// Build-job handle (`index | generation << 8`).

@@ -422,6 +422,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                         src_ip_idx: x.src_ip_idx,
                         rx_queue: 0,
                         deadline_ns: i64::MAX,
+                        account: x.account,
                     };
                     if self.build.try_push(req).is_ok() {
                         self.building[id.0 as usize] = Some((a, ConnRole::Rest, ep));

@@ -302,6 +302,7 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
                                         rx_queue: 0,
                                         deadline_ns: ns
                                             .saturating_add(i64::from(self.cfg.timeout_ms) * 1_000_000),
+                                        account: hft_types::AccountId(0),
                                     },
                                     wire.as_bytes(),
                                 )

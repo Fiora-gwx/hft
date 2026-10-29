@@ -3012,6 +3012,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                             src_ip_idx: src,
                             rx_queue: 0,
                             deadline_ns: i64::MAX,
+                            account: self.accts.get(a).map_or(AccountId(0), |x| x.account),
                         };
                         if self.build.try_push(req).is_ok() {
                             if let Some(s) = self.building.get_mut(id.0 as usize) {
