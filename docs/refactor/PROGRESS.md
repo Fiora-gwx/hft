@@ -65,7 +65,7 @@
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
 | `feat/refdata-account-set`:refdata 接受一个实例绑定多个账户(`accounts_of`,主账户 = id 最小);sequencer 实例账户集合(≤ 8)覆盖 cell、模式、风控组表、执行层 cell、halt、行情闸门、连接通知、StrategyCmd;SDK `RefView::accounts`;hft-core 每实例一份参数 blob | done | b5155926 | REF-019(改写)、SEQ-451;单账户行为不变(sequencer 515、exec 283、refdata 84) |
-| `feat/gw-per-account`:槽镜像按 (账户, 槽) | doing | c4100bac(镜像) | VEN-411;**未做**:hft-core 的 REST 池/账户客户端/conn-builder 只装 `accounts[0]`、`AccountCapacity`、按账户 `src_ip`、撤单独立限速桶 |
+| `feat/gw-per-account`:槽镜像按 (账户, 槽);hft-core 每账户基线、账户 REST 客户端、gw REST 池与私有连接(hft-net `BuildReq.account`);`AccountCapacity` 放宽到 12;`accounts[].src_ip`;撤单独立限速(`LimitBucket::Cancels`,PM 下单 20/s、撤单 40/s);`pm_sim_config --live-account` | 待验收 | c4100bac、78e8b906、55974594、091e3199(并行代理,合并 a4b9f99c) | VEN-411–413、CORE-446、PMK-037、REF-075.6/REF-009.23(改写);**未做**:hft-core 层 conn-builder 账户路由测试(参照的 mock-REST 测试在 Windows 不运行,由 VEN-413 在 gw 层覆盖);**注意**:gw 连接号 112–255 共 144 个,12 个 PM 账户(各约 11 条)接近上限;旧二进制读含 `Cancels` 的 refdata 会拒绝加载;**待**:实盘 2 账户 Shadow(需负责人批准)
 | `feat/router-stp-agg-risk` | doing | b6796b5f(STP) | SEQ-452:策略下单与同实例其他账户的挂单(同 venue/inst、反向、价格可达)交叉时 `RejectBits::SELF_TRADE`,在风控之前;**未做**:`RoutePolicy` 路由、互补 token 的 STP(需要 refdata 的互补关系字段,负责人决定)、实例聚合限额(需要改 RiskParams `RKP1` 格式,负责人决定) |
 | `feat/prod-sim-accounts` | todo | | |
 | `strat/bm-multi-account` | todo | | |
@@ -109,6 +109,7 @@
 | FEA-001–FEA-010 | M3 | 特征节点 |
 | SDK-215、RSR-005、RPL-308 | M3 | 策略特征导出钩子、可空特征列、`replayer features` |
 | SIM-240 | M2 | 条件跟踪的三个分量 |
+| CORE-446、VEN-412、VEN-413、PMK-037(新增);CORE-441.5/.6、REF-075.6、REF-009.23(改写) | M4 | 多 Live 账户 gw 装配、撤单限速桶 |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
 
 ## 执行中的技术决定
