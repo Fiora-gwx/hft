@@ -39,9 +39,9 @@
 
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
-| `feat/replay-research`:`ResearchDriver` 流式读、账户屏蔽、变体表、现有 hft-sim queue 模型、Parquet sink、多种子 + 区间重播种 | 待验收 | aa103ce9(hft-sim glue、`reseed_account`、`RepMsg::with_parts`)、d5f294f4 | RPL-300–303、RSR-001–003;**待**(研究机):(a) 28 份 journal 的决策一致率、(b) 与 `bm_sim.py` 逐窗相关 ≥ 0.95、(c) 10 M 事件 < 60 s;`--own` 与 `parity` 子命令未做 |
-| `feat/sdk-views-stamps`:`MD_BBO` stamp、`stamps()`、`open_orders` | todo | | |
-| `feat/sdk-fak`:`Tif::Fak` | todo | | |
+| `feat/replay-research`:`ResearchDriver` 流式读、账户屏蔽、变体表、现有 hft-sim queue 模型、Parquet sink、多种子 + 区间重播种;`parity` 子命令 | 待验收 | aa103ce9(hft-sim glue、`reseed_account`、`RepMsg::with_parts`)、d5f294f4、b34add60(parity) | RPL-300–304、RSR-001–003;**待**(研究机):(a) 28 份 journal 的 `replayer parity` 一致率、(b) 与 `bm_sim.py` 逐窗相关 ≥ 0.95、(c) 10 M 事件 < 60 s;`--own` 移到 M2(依赖模拟场所的自有挂单叠加层) |
+| `feat/sdk-views-stamps`:`bbo_stamp`(最近被应用的 Bbo 的 `MdStampView`,`MD_BBO`)、`stamps()`、`open_orders` | done | 10f96b40 | SEQ-448、SEQ-449、SDK-214;`md_count`/`md_stamp` 语义不变(BBO 戳单独存,不挤占既有环) |
+| `feat/sdk-fak`:`Tif::FAK`(= `Ioc` 的别名) | done | 10f96b40 | SDK-214.3;Polymarket 把 `Ioc` 映射为 FAK 订单在 M2 `feat/pm-fak-gw` |
 
 ### M2 VenueSim 高保真 + 校准 + 吃单执行
 
@@ -99,6 +99,8 @@
 | VEN-409 | M0 REST 打点 | REST 订单 `sent_tsc`/`RawTx` 取写出返回时刻 |
 | CORE-445.4 | M0 预签名默认 | 实盘配置默认预签名、`--no-presign` 不写 |
 | SIM-230、SIM-231 | M1 | hft-sim journal 衔接;`reseed_account` |
+| SEQ-448、SEQ-449、SDK-214 | M1 | `bbo_stamp`/`stamps`、`open_orders`、提供的默认方法与 `Tif::FAK` |
+| RPL-304 | M1 | parity |
 | RSR-001–RSR-003 | M1 | 变体规格、Parquet 写出、被替换回报的账户字段 |
 | RPL-300–RPL-303 | M1 | 研究回放确定性、不模拟时与日志一致、变体、CLI |
 | FEA-001–FEA-010 | M3 | 特征节点 |
@@ -115,5 +117,7 @@
 | 2026-10-30 | 变体字段只作用于 schema 含它的被模拟实例;所有实例都没有才报错 | 一个 journal 可有多种策略;拼写错误仍会被发现 |
 | 2026-10-30 | `hft-replay` 标 `scope: optional` | 上线不依赖研究回放(Agent Note:门槛不变) |
 | 2026-10-30 | M3 由并行代理在 `E:\hft-m3` worktree 完成后合入 | 设计 §8.6:M1 ∥ M3,crate 不相交 |
+| 2026-10-30 | `Tif::FAK` 是 `Tif::Ioc` 的别名,不新增枚举值 | FAK 与 IOC 订单语义相同;新增值要改全仓 `matches!(tif, Ioc | Fok)` 的十余处,漏一处即错;Polymarket 在适配器里把 Ioc 映射为 FAK |
+| 2026-10-30 | BBO 戳用单独的 `bbo_stamp`,不进 `md_stamp` 环 | 放进环会改变 `md_count` 的计数语义与 SEQ-447;`MarketLastRow` 进快照、不能加字段 |
 | 2026-10-30 | M0 的两项服务器验收未完成时开始 M1 | M1 的代码不依赖这两项测量(解码器 diff、`egress` 分段);它们只阻塞 `refactor-m0` tag,不阻塞开发
 | 2026-10-29 | 本机可编译与测试(Windows,Rust 1.97.1),每个工作项提交前在本机跑受影响包的测试 | 比"只推 CI"更快发现错误;结论仍以 CI 为准 |
