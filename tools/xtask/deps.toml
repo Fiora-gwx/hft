@@ -48,7 +48,7 @@ journal_writer_allowed = ["apps/hft-core", "apps/replayer", "apps/chain-core"]
 journal_writer_roots = ["apps/*", "crates/hft-py"]
 # rule 9: strategy decoupling.
 registry = "strategies/registry"
-registry_users = ["apps/hft-core", "apps/replayer"]
+registry_users = ["apps/hft-core", "apps/replayer", "tools/hft-pmcfg"]
 no_strategy_closure = ["crates/hft-testkit", "tools/hft-cfg", "crates/hft-py"]
 # rule 10
 verify = "tools/hft-verify"
@@ -277,7 +277,8 @@ dev = [
 # ---------------------------------------------------------------- apps (assembly only)
 [pkg."apps/hft-core"]
 tier = "hot"
-dev = ["crates/hft-testkit", "crates/hft-ctl-proto"]
+# tools/hft-pmcfg: the Polymarket configuration fixtures of tests/support and the example pm_sim_config.
+dev = ["crates/hft-testkit", "crates/hft-ctl-proto", "tools/hft-pmcfg"]
 deps = [
     "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
@@ -387,6 +388,16 @@ deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue-proto", "crates/hft-venue", "crates/venue-polymarket",
     "crates/hft-strategy-sdk", "crates/hft-sequencer",
+]
+
+# Polymarket configuration generator (tools/hft-pmcfg/README.md): the strategy descriptors come from the
+# registry (a registry user); hft-sequencer only for EngineSetup and its ECF1 encoder.
+[pkg."tools/hft-pmcfg"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk",
+    "strategies/registry", "crates/hft-risk", "crates/hft-ledger", "crates/hft-oms", "crates/hft-exec",
+    "crates/hft-sequencer", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-polymarket",
 ]
 
 [pkg."tools/hft-verify"]

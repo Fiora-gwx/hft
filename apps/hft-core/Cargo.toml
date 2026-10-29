@@ -55,6 +55,8 @@ hft-ledger.workspace = true
 hft-testkit = { workspace = true, features = ["seq"] }
 tempfile = "3"
 base64 = "0.22"
+# The Polymarket configuration generator behind tests/support and the example pm_sim_config.
+hft-pmcfg = { path = "../../tools/hft-pmcfg" }
 
 [lints]
 workspace = true
