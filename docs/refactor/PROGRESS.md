@@ -140,6 +140,7 @@
 | 2026-10-29 | `RestPool::pending_sent` 与既有 `pending_conn` 并存,`submit` 签名不变 | 不改 hft-net 的公开提交接口与其测试;按标签取写出时刻 |
 | 2026-10-30 | 研究回放中被模拟账户每个 (账户, venue, 资产) 保留第一条日志 `BalanceReport` | 账本现金从第一条 BalanceReport 初始化(`UNINIT`);全部屏蔽时 DST 里的第二腿 `LINK_FUNDS` 拒单 |
 | 2026-10-30 | 研究回放丢弃日志里 owner ≠ Sys 的 `Timer`,由引擎堆触发 | 回放的订单流与实盘不同,堆定时器(OMS、风控、执行层、策略)必须跟随回放状态;Sys 定时器(滚段、日切、关键帧)是环境 |
+| 2026-10-30 | deny.toml:`num-bigint` 只允许 arrow-buffer/parquet 引入;许可证白名单加 CC0-1.0(tiny-keccak) | 研究回放的 Parquet 依赖(冷路径);N4 只禁 hot/pure,`xtask deps` 保证它不进其闭包;CI cargo-deny 首次在 PR #139 报出 |
 | 2026-10-30 | Linux 专用代码(`run_linux` 等)在本机 WSL Ubuntu-22.04 离线检查:`CARGO_HOME` 的 registry 链到 Windows 的缓存,`cargo check/clippy/test --offline`,target 目录在 WSL 内 | Windows 上 aws-lc-sys 交叉编译缺 C 工具链;WSL 无外网;Ubuntu-24.04 的根分区被重挂为只读(未动) |
 | 2026-10-30 | sim-gw 不另开行情旁路环,继续尾读 seq journal | 尾读即引擎看到的顺序,条件跟踪与撮合都按它;旁路环只省一次读,且要另处理与决策屏障的先后 |
 | 2026-10-30 | 变体字段只作用于 schema 含它的被模拟实例;所有实例都没有才报错 | 一个 journal 可有多种策略;拼写错误仍会被发现 |
