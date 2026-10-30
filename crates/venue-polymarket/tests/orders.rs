@@ -1,5 +1,6 @@
 //! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-032), the
-//! rate defaults (PMK-037).
+//! rate defaults (PMK-037), FAK / FOK orders (PMK-038 – PMK-040; answers and `trade` events of the
+//! 2026-10-30 probe).
 //! REST answers and user-channel frames are copied from a capture of 2026-10-22 (post-only bids
 //! at 0.02, never fillable; `owner` API keys replaced by the test key).
 
@@ -18,7 +19,7 @@ use venue_polymarket::sign::{
 };
 use venue_polymarket::{GwCtx, PolymarketClob as Pm, ReportClass};
 
-use super::{DN, RX, T_DN, T_UP, UP, V, rd};
+use super::{DN, RX, T_DN, T_UP, T_UP1, UP, UP1, V, rd};
 
 /// Test-only key of the signing golden (never a real key).
 const KEY: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
@@ -257,15 +258,7 @@ fn pmk_024_place_refusals() {
         EncodeErr::UnknownInst,
         "PMK-024.1"
     );
-    // .2 IOC / FOK; reduce-only.
-    for tif in [Tif::Ioc, Tif::Fok] {
-        let c = cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, tif);
-        assert_eq!(
-            encode(&ctx(), &c, &tgt(0)).unwrap_err(),
-            EncodeErr::Unsupported(GwOp::Place),
-            "PMK-024.2"
-        );
-    }
+    // .2 reduce-only (IOC / FOK are FAK / FOK orders, PMK-038).
     let mut c = ok;
     c.oflags = hft_event::OrderFlags::REDUCE_ONLY.0;
     assert_eq!(
@@ -1440,4 +1433,449 @@ fn pmk_037_cancels_have_their_own_rate_rule() {
         ],
         "PMK-037"
     );
+}
+
+// ---------------------------------------------------------------- FAK / FOK (README "吃单")
+
+const ZERO32: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+const EXPIRED: OrderEventKind = OrderEventKind::Expired;
+const SELL: u8 = Side::Sell as u8;
+
+/// The order hash a `POST /order` body signs, either side.
+fn body_hash(place: &RestReqBuf) -> String {
+    let b: serde_json::Value = serde_json::from_slice(place.body.as_slice()).unwrap();
+    let o = &b["order"];
+    let n = |k: &str| o[k].as_str().unwrap().parse::<u64>().unwrap();
+    let order = OrderV2 {
+        salt: o["salt"].as_u64().unwrap(),
+        maker: venue_wallet(),
+        signer: venue_wallet(),
+        token_id: parse_u256(o["tokenId"].as_str().unwrap()).unwrap(),
+        maker_amount: n("makerAmount"),
+        taker_amount: n("takerAmount"),
+        side: if o["side"] == "BUY" { 0 } else { 1 },
+        signature_type: 3,
+        timestamp_ms: n("timestamp"),
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let hash = order_digest(&exchange_domain("2", CHAIN_ID, &EXCHANGE_V2), &order);
+    let mut hex = [0u8; 66];
+    hex_bytes(&hash, &mut hex).unwrap().to_string()
+}
+
+/// (makerAmount, takerAmount, side, expiration, orderType) of a `POST /order` body.
+fn amounts_of(r: &RestReqBuf) -> (String, String, String, String, String) {
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let o = &b["order"];
+    let s = |v: &serde_json::Value| v.as_str().unwrap().to_string();
+    (
+        s(&o["makerAmount"]),
+        s(&o["takerAmount"]),
+        s(&o["side"]),
+        s(&o["expiration"]),
+        s(&b["orderType"]),
+    )
+}
+
+fn amts(m: &str, t: &str, side: &str, exp: &str, ty: &str) -> (String, String, String, String, String) {
+    (m.into(), t.into(), side.into(), exp.into(), ty.into())
+}
+
+/// Encodes a FAK / FOK `Place` (slot 7, gen 3) on `c`; returns its signed hash.
+fn taker_place(c: &mut GwCtx, side: Side, px: i64, qty: i64, tif: Tif) -> String {
+    body_hash(&encode_mut(c, &cmd(GwOp::Place, UP, side, px, qty, tif), &tgt(0)).unwrap())
+}
+
+/// A `matched` place answer (2026-10-30 probe shape).
+fn matched(h: &str, taking: &str, making: &str) -> String {
+    format!(
+        "{{\"errorMsg\":\"\",\"orderID\":\"{h}\",\"takingAmount\":\"{taking}\",\"makingAmount\":\"{making}\",\"status\":\"matched\",\"transactionsHashes\":[\"0x8202cc734ee4becdd60e22f9332ed76c20e0137d38783b72b2feec083bba4dbc\"],\"success\":true}}"
+    )
+}
+
+/// A user-channel `trade` event of taker order `h` (fields and order of the 2026-10-30 probe).
+fn trade_frame(h: &str, id: &str, status: &str, side: &str, size: &str, price: &str) -> String {
+    format!(
+        "{{\"type\":\"TRADE\",\"id\":\"{id}\",\"taker_order_id\":\"{h}\",\"market\":\"0xa5967ac6a28e7c128230757adf58052287c4102cbfaa398041740596b3acffbd\",\"asset_id\":\"{T_UP}\",\"side\":\"{side}\",\"size\":\"{size}\",\"fee_rate_bps\":\"0\",\"price\":\"{price}\",\"status\":\"{status}\",\"match_time\":\"1793337929\",\"last_update\":\"1793337929\",\"outcome\":\"Up\",\"owner\":\"{API_KEY}\",\"trade_owner\":\"{API_KEY}\",\"maker_address\":\"{WALLET}\",\"transaction_hash\":\"0x8202cc734ee4becdd60e22f9332ed76c20e0137d38783b72b2feec083bba4dbc\",\"bucket_index\":0,\"maker_orders\":[{{\"order_id\":\"0x2a88f6e9a52d5b8844fdff03cbb1c93e3bf25f45ae2d39689712f44b5dd703a2\",\"owner\":\"5166b8dc-9810-9a37-d007-a08bae334156\",\"maker_address\":\"0x21f4C1A1bE34a39a7Bc20985Df4b7e5a39fB691d\",\"matched_amount\":\"{size}\",\"price\":\"0.6500000343137221\",\"fee_rate_bps\":\"\",\"asset_id\":\"{T_DN}\",\"outcome\":\"Down\",\"outcome_index\":0,\"side\":\"BUY\"}}],\"trader_side\":\"TAKER\",\"timestamp\":\"1793337929464\",\"event_type\":\"trade\"}}"
+    )
+}
+
+const TRADE_ID: &str = "bbe7815b-acf6-4652-86ff-5b4e8d2c08ae";
+/// `trade` event time of the probe (ms → ns).
+const TRADE_NS: i64 = 1_793_337_929_464_000_000;
+
+#[test]
+fn pmk_038_fak_and_fok_bodies() {
+    // .1 FAK BUY 0.35 × 2.914286 shares: the probe's fill amounts (1.02 USDC for ≥ 2.9142 shares).
+    let c = cmd(GwOp::Place, UP, Side::Buy, 350, 2_914_286, Tif::FAK);
+    let r = encode(&ctx(), &c, &tgt(0)).unwrap();
+    assert_eq!(
+        amounts_of(&r),
+        amts("1020000", "2914200", "BUY", "0", "FAK"),
+        "PMK-038.1"
+    );
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let mut keys: Vec<_> = b.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["deferExec", "order", "orderType", "owner"], "PMK-038.1");
+    assert_eq!(b["deferExec"].as_bool(), Some(false), "PMK-038.1");
+    let (ts, salt, ok) = body_order(&r);
+    assert!(ok && ts == NOW_MS as u64 && salt & 0xF_FFFF == 7, "PMK-038.1");
+    // .2 byte layout: the GTD layout with `"expiration":"0"`, `orderType` FAK and no `postOnly`.
+    let sig = b["order"]["signature"].as_str().unwrap();
+    let want = format!(
+        "{{\"order\":{{\"salt\":{salt},\"maker\":\"{WALLET}\",\"signer\":\"{WALLET}\",\"tokenId\":\"{T_UP}\",\"makerAmount\":\"1020000\",\"takerAmount\":\"2914200\",\"side\":\"BUY\",\"expiration\":\"0\",\"signatureType\":3,\"timestamp\":\"{NOW_MS}\",\"metadata\":\"0x{ZERO32}\",\"builder\":\"0x{ZERO32}\",\"signature\":\"{sig}\"}},\"owner\":\"{API_KEY}\",\"orderType\":\"FAK\",\"deferExec\":false}}"
+    );
+    assert_eq!(text(r.body.as_slice()), want, "PMK-038.2");
+    let g = encode(
+        &ctx(),
+        &cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, Tif::PostOnly),
+        &tgt(0),
+    )
+    .unwrap();
+    let gb: serde_json::Value = serde_json::from_slice(g.body.as_slice()).unwrap();
+    let (gsalt, gsig, exp) = (
+        gb["order"]["salt"].as_u64().unwrap(),
+        gb["order"]["signature"].as_str().unwrap(),
+        NOW_MS / 1000 + 300,
+    );
+    let want = format!(
+        "{{\"order\":{{\"salt\":{gsalt},\"maker\":\"{WALLET}\",\"signer\":\"{WALLET}\",\"tokenId\":\"{T_UP}\",\"makerAmount\":\"2250000\",\"takerAmount\":\"5000000\",\"side\":\"BUY\",\"expiration\":\"{exp}\",\"signatureType\":3,\"timestamp\":\"{NOW_MS}\",\"metadata\":\"0x{ZERO32}\",\"builder\":\"0x{ZERO32}\",\"signature\":\"{gsig}\"}},\"owner\":\"{API_KEY}\",\"orderType\":\"GTD\",\"deferExec\":false,\"postOnly\":true}}"
+    );
+    assert_eq!(text(g.body.as_slice()), want, "PMK-038.2");
+    // .3 FOK BUY 0.31 × 3.2258 shares: the probe's no-fill amounts (1.00 USDC, ≥ 3.2258 shares).
+    let c = cmd(GwOp::Place, UP, Side::Buy, 310, 3_225_807, Tif::Fok);
+    let r = encode(&ctx(), &c, &tgt(0)).unwrap();
+    assert_eq!(
+        amounts_of(&r),
+        amts("1000000", "3225800", "BUY", "0", "FOK"),
+        "PMK-038.3"
+    );
+    assert!(body_order(&r).2, "PMK-038.3");
+    // .4 FAK SELL 0.35 × 2.914286: 2.91 shares for ≥ 1.0185 USDC.
+    let c = cmd(GwOp::Place, UP, Side::Sell, 350, 2_914_286, Tif::FAK);
+    let r = encode(&ctx(), &c, &tgt(0)).unwrap();
+    assert_eq!(
+        amounts_of(&r),
+        amts("2910000", "1018500", "SELL", "0", "FAK"),
+        "PMK-038.4"
+    );
+    assert!(body_order(&r).2, "PMK-038.4");
+    // .5 tick 0.001: shares of a buy to 5 decimals; a sell's USDC is exact.
+    let mut c1 = ctx();
+    Pm::bind_order_wire(&mut c1, UP1, &parse_u256(T_UP1).unwrap()).unwrap();
+    let r = encode(
+        &c1,
+        &cmd(GwOp::Place, UP1, Side::Buy, 355, 3_000_000, Tif::FAK),
+        &tgt(0),
+    )
+    .unwrap();
+    assert_eq!(
+        amounts_of(&r),
+        amts("1060000", "2985910", "BUY", "0", "FAK"),
+        "PMK-038.5"
+    );
+    let r = encode(
+        &c1,
+        &cmd(GwOp::Place, UP1, Side::Sell, 355, 3_005_000, Tif::FAK),
+        &tgt(0),
+    )
+    .unwrap();
+    assert_eq!(
+        amounts_of(&r),
+        amts("3000000", "1065000", "SELL", "0", "FAK"),
+        "PMK-038.5"
+    );
+    // .6 a price off the tick; amounts that round to 0.
+    for (side, px, qty) in [
+        (Side::Buy, 355, 3_000_000),
+        (Side::Buy, 350, 20_000),
+        (Side::Sell, 350, 9_000),
+    ] {
+        assert_eq!(
+            encode(&ctx(), &cmd(GwOp::Place, UP, side, px, qty, Tif::FAK), &tgt(0)).unwrap_err(),
+            EncodeErr::FieldOverflow,
+            "PMK-038.6 {side:?} {px} {qty}"
+        );
+    }
+    // .7 never pre-signed: a FAK at a pre-signed price and size is signed now and leaves the
+    // pre-signed orders alone; a FAK alone anchors nothing.
+    use venue_polymarket::Presign;
+    let on = Presign::new(1, 1, 10_000, 30_000).unwrap();
+    let mut c = ctx();
+    c.set_presign(on);
+    let mut t6 = tgt(0);
+    t6.id.slot = 6;
+    let mut g6 = cmd(GwOp::Place, UP, Side::Buy, 350, 3_000_000, Tif::Gtc);
+    g6.slot = SlotId(6);
+    encode_at(&mut c, &g6, &t6, NOW_MS);
+    assert_eq!(idle_all(&mut c, NOW_MS + 10), 3, "PMK-038.7");
+    let f = cmd(GwOp::Place, UP, Side::Buy, 350, 3_000_000, Tif::FAK);
+    let (ts, salt, ok) = body_order(&encode_at(&mut c, &f, &tgt(0), NOW_MS + 20));
+    assert!(
+        ok && ts == NOW_MS as u64 + 20 && salt & 0xF_FFFF == 7,
+        "PMK-038.7"
+    );
+    assert_eq!(c.presigned(), 3, "PMK-038.7");
+    let mut c = ctx();
+    c.set_presign(on);
+    encode_at(&mut c, &f, &tgt(0), NOW_MS);
+    assert!(!idle_at(&mut c, NOW_MS + 10), "PMK-038.7");
+}
+
+#[test]
+fn pmk_039_fak_and_fok_answers() {
+    // .1 the probe's fill: Ack, then Fill of the shares received at the answer's average price;
+    // the trade's MATCHED and MINED events add nothing.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 350, 2_914_286, Tif::FAK);
+    let mut s = VecSink::default();
+    let o = rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "2.914286", "1.02"));
+    let k = key_of(&h);
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (FILL, SlotId(7), 3, 0, 2_914_286, 2_914_286, 350, BUY, k),
+        ],
+        "PMK-039.1"
+    );
+    assert_eq!(orders(&s)[1].px, Px(350), "PMK-039.1");
+    assert_eq!((o.events, o.outcome_unknown), (2, None), "PMK-039.1");
+    for st in ["MATCHED", "MINED"] {
+        let o = report(
+            &mut c,
+            &mut s,
+            &trade_frame(&h, TRADE_ID, st, "BUY", "2.914286", "0.35"),
+        );
+        assert_eq!(o.skip, Skip::Listed, "PMK-039.1");
+    }
+    assert_eq!(orders(&s).len(), 2, "PMK-039.1");
+    // .2 no liquidity within the limit (FAK) / not fully fillable (FOK): HTTP 400 is a Reject
+    // with the message's code (distinct for the two), never an unknown outcome.
+    let mut codes = Vec::new();
+    for (tif, msg) in [
+        (
+            Tif::FAK,
+            "no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.",
+        ),
+        (
+            Tif::Fok,
+            "order couldn't be fully filled. FOK orders are fully filled or killed.",
+        ),
+    ] {
+        let mut c = ctx();
+        let h = taker_place(&mut c, Side::Buy, 310, 3_225_807, tif);
+        let mut s = VecSink::default();
+        let body = format!("{{\"error\":\"{msg}\",\"orderID\":\"{h}\"}}");
+        let o = rest(&mut c, &mut s, GwOp::Place, 400, &body);
+        let e = orders(&s);
+        assert_eq!(e.len(), 1, "PMK-039.2");
+        assert_eq!(
+            (e[0].what, e[0].slot, e[0].r#gen, e[0].reject_code),
+            (OrderEventKind::Reject, SlotId(7), 3, raw_code_str(msg.as_bytes())),
+            "PMK-039.2"
+        );
+        assert_eq!(
+            (o.raw_code, o.outcome_unknown),
+            (raw_code_str(msg.as_bytes()), None),
+            "PMK-039.2"
+        );
+        // A trade naming the killed order (never expected) writes nothing.
+        report(
+            &mut c,
+            &mut s,
+            &trade_frame(&h, TRADE_ID, "MATCHED", "BUY", "1", "0.31"),
+        );
+        assert_eq!(orders(&s).len(), 1, "PMK-039.2");
+        codes.push(o.raw_code);
+    }
+    assert_ne!(codes[0], codes[1], "PMK-039.2");
+    // .3 accepted but `unmatched`: Ack, then Expired with nothing filled.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 350, 2_914_286, Tif::FAK);
+    let mut s = VecSink::default();
+    rest(&mut c, &mut s, GwOp::Place, 200, &placed_answer(&h, "unmatched"));
+    let k = key_of(&h);
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (EXPIRED, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+        ],
+        "PMK-039.3"
+    );
+    // .4 `delayed`: only the Ack; the trade then reports the fill (bound by the signed client id).
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 350, 2_914_286, Tif::FAK);
+    let mut s = VecSink::default();
+    rest(&mut c, &mut s, GwOp::Place, 200, &placed_answer(&h, "delayed"));
+    assert_eq!(rows(&s).len(), 1, "PMK-039.4");
+    report(
+        &mut c,
+        &mut s,
+        &trade_frame(&h, TRADE_ID, "MATCHED", "BUY", "2.914286", "0.35"),
+    );
+    let k = key_of(&h);
+    assert_eq!(
+        rows(&s)[1],
+        (FILL, SlotId(7), 3, 5, 2_914_286, 2_914_286, 350, BUY, k),
+        "PMK-039.4"
+    );
+    assert_eq!(orders(&s)[1].ex_ts_ns, TRADE_NS, "PMK-039.4");
+}
+
+#[test]
+fn pmk_040_fak_fills_from_trades_and_the_answer() {
+    // FAK BUY 5 shares at 0.40 (2.00 USDC); the exchange matches 3 shares for 1.20 and kills the
+    // rest.
+    let place = |c: &mut GwCtx| taker_place(c, Side::Buy, 400, 5_000_000, Tif::FAK);
+    // .1 answer first: Ack, PartialFill 3, Expired at cum 3; the trade afterwards adds nothing.
+    let mut c = ctx();
+    let h = place(&mut c);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    let o = rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "3", "1.2"));
+    report(
+        &mut c,
+        &mut s,
+        &trade_frame(&h, TRADE_ID, "MATCHED", "BUY", "3", "0.40"),
+    );
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (PARTIAL, SlotId(7), 3, 0, 3_000_000, 3_000_000, 400, BUY, k),
+            (EXPIRED, SlotId(7), 3, 0, 0, 3_000_000, 400, 0, k),
+        ],
+        "PMK-040.1"
+    );
+    assert_eq!(o.events, 3, "PMK-040.1");
+    // .2 trade first (then MINED and a repeat of MATCHED), answer last: PartialFill bound by the
+    // signed client id, nothing for the repeats, then Ack and Expired at cum 3.
+    let mut c = ctx();
+    let h = place(&mut c);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    for st in ["MATCHED", "MINED", "MATCHED"] {
+        report(&mut c, &mut s, &trade_frame(&h, TRADE_ID, st, "BUY", "3", "0.40"));
+    }
+    rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "3", "1.2"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (PARTIAL, SlotId(7), 3, 5, 3_000_000, 3_000_000, 400, BUY, k),
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (EXPIRED, SlotId(7), 3, 0, 0, 3_000_000, 400, 0, k),
+        ],
+        "PMK-040.2"
+    );
+    assert_eq!(orders(&s)[0].ex_ts_ns, TRADE_NS, "PMK-040.2");
+    // .3 two trades (2 at 0.39, 1 at 0.40), then the answer (3 shares for 1.18): cumulative
+    // average 0.393; the answer adds no fill.
+    let mut c = ctx();
+    let h = place(&mut c);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    report(
+        &mut c,
+        &mut s,
+        &trade_frame(&h, "t-a", "MATCHED", "BUY", "2", "0.39"),
+    );
+    report(
+        &mut c,
+        &mut s,
+        &trade_frame(&h, "t-b", "MATCHED", "BUY", "1", "0.40"),
+    );
+    rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "3", "1.18"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (PARTIAL, SlotId(7), 3, 5, 2_000_000, 2_000_000, 390, BUY, k),
+            (PARTIAL, SlotId(7), 3, 5, 1_000_000, 3_000_000, 393, BUY, k),
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (EXPIRED, SlotId(7), 3, 0, 0, 3_000_000, 393, 0, k),
+        ],
+        "PMK-040.3"
+    );
+    // .4 the whole maker amount used, below the size (1.01 USDC of 2.91 × 0.35): QueryResult
+    // {Filled} at cum 2.885714.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 350, 2_910_000, Tif::FAK);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "2.885714", "1.01"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (PARTIAL, SlotId(7), 3, 0, 2_885_714, 2_885_714, 350, BUY, k),
+            (QUERY, SlotId(7), 3, 0, 0, 2_885_714, 350, 3, k),
+        ],
+        "PMK-040.4"
+    );
+    // .5 FAK SELL 3 at 0.40 filled at 0.42: `makingAmount` is the shares, `takingAmount` the USDC.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Sell, 400, 3_000_000, Tif::FAK);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "1.26", "3"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (FILL, SlotId(7), 3, 0, 3_000_000, 3_000_000, 420, SELL, k),
+        ],
+        "PMK-040.5"
+    );
+    // .6 a buy filled below its limit spends its USDC: more shares than its size.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 400, 3_000_000, Tif::FAK);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    rest(&mut c, &mut s, GwOp::Place, 200, &matched(&h, "3.157894", "1.2"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (FILL, SlotId(7), 3, 0, 3_157_894, 3_157_894, 380, BUY, k),
+        ],
+        "PMK-040.6"
+    );
+    // .7 the answer lost: the query of the FAK order (more shares matched than its original size)
+    // ends it; a later trade adds nothing.
+    let mut c = ctx();
+    let h = taker_place(&mut c, Side::Buy, 350, 2_914_286, Tif::FAK);
+    let k = key_of(&h);
+    let mut s = VecSink::default();
+    let body = format!(
+        "{{\"id\":\"{h}\",\"status\":\"MATCHED\",\"asset_id\":\"{T_UP}\",\"original_size\":\"2.9142\",\"size_matched\":\"2.914286\",\"price\":\"0.35\",\"side\":\"BUY\"}}"
+    );
+    query(&mut c, &mut s, UP, &body);
+    report(
+        &mut c,
+        &mut s,
+        &trade_frame(&h, TRADE_ID, "MATCHED", "BUY", "2.914286", "0.35"),
+    );
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (QUERY, SlotId(7), 3, 0, 0, 2_914_286, 350, 3, k),
+        ],
+        "PMK-040.7"
+    );
+    // .8 `order` events of a FAK order, and trades of orders this process did not sign as taker
+    // orders, write nothing.
+    let mut c = ctx();
+    let h = place(&mut c);
+    let mut s = VecSink::default();
+    report(&mut c, &mut s, &order_frame(&h, "UPDATE", "MATCHED", "5"));
+    let o = report(
+        &mut c,
+        &mut s,
+        &trade_frame(H1, TRADE_ID, "MATCHED", "BUY", "1", "0.40"),
+    );
+    assert_eq!((orders(&s).len(), o.skip), (0, Skip::Listed), "PMK-040.8");
 }

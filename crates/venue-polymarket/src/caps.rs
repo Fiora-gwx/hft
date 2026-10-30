@@ -44,8 +44,9 @@ pub(crate) fn rate_rules() -> &'static [RateRule] {
     &RULES
 }
 
-/// Every place is GTD with `expiration = now + GTD_S`: the exchange rejects a request whose
-/// expiration is too close and never matches an order past it (README "VenueCaps 默认值").
+/// Every resting place is GTD with `expiration = now + GTD_S`: the exchange rejects a request
+/// whose expiration is too close and never matches an order past it; a FAK / FOK order never
+/// rests (README "VenueCaps 默认值").
 pub(crate) fn stale_guard() -> StaleGuard {
     StaleGuard::ExpireAt {
         default_ms: crate::orders::GTD_S * 1000,
