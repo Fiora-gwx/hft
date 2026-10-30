@@ -31,6 +31,35 @@ pub fn write_live(root: &Path, hot: &Path, is_prod: bool) -> PathBuf {
     write_mode(root, hot, None, None, true, is_prod, &[])
 }
 
+/// The Sim account of `write_live_shadow_with`: its label and bound instance (2 = its own instance
+/// of the same strategy kind, 1 = the Live account's instance).
+#[derive(Clone, Copy, Debug)]
+pub struct Shadow {
+    pub label: &'static str,
+    pub instance: u8,
+}
+
+/// `write_live(…, false)` with a Shadow variant (CORE-449): Sim account 2 `sim-shadow` bound to
+/// its own instance 2 of the same strategy kind, `[sim]` without quotes and a `sim-venue` thread at
+/// nice 19.
+#[allow(dead_code)]
+pub fn write_live_shadow(root: &Path, hot: &Path) -> PathBuf {
+    write_live_shadow_with(
+        root,
+        hot,
+        Shadow {
+            label: "sim-shadow",
+            instance: 2,
+        },
+    )
+}
+
+/// `write_live_shadow` with another label or binding of the Sim account.
+#[allow(dead_code)]
+pub fn write_live_shadow_with(root: &Path, hot: &Path, shadow: Shadow) -> PathBuf {
+    write_mode_ext(root, hot, None, None, true, false, &[], Some(shadow))
+}
+
 #[allow(dead_code)]
 pub fn write_live_endpoints(root: &Path, rows: &[(EndpointEnv, EndpointRole, &str)]) -> PathBuf {
     write_mode(root, &root.join("hot"), None, None, true, false, rows)
@@ -45,6 +74,24 @@ fn write_mode(
     is_prod: bool,
     endpoints: &[(EndpointEnv, EndpointRole, &str)],
 ) -> PathBuf {
+    write_mode_ext(root, hot, user, params, live, is_prod, endpoints, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_mode_ext(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    params: Option<&toml::Value>,
+    live: bool,
+    is_prod: bool,
+    endpoints: &[(EndpointEnv, EndpointRole, &str)],
+    shadow_spec: Option<Shadow>,
+) -> PathBuf {
+    let shadow_spec = shadow_spec.filter(|_| live);
+    let shadow = shadow_spec.is_some();
+    // A second strategy instance (with its own parameter blob) only for a separately bound variant.
+    let own_instance = shadow_spec.is_some_and(|s| s.instance != 1);
     std::fs::create_dir_all(root).unwrap();
     let second = params.is_some();
     let perp_spot = params.is_some_and(|p| p.get("groups").is_some());
@@ -287,6 +334,37 @@ fn write_mode(
             .into(),
         uid_policy: UidPolicy::Verified,
     });
+    let s = AccountId(2);
+    if let Some(spec) = shadow_spec {
+        if own_instance {
+            b.instance(InstanceSpec {
+                id: StrategyId(spec.instance),
+                kind_id: desc.kind_id,
+                name: "paper-probe-shadow".into(),
+            });
+        }
+        b.account(AccountSpec {
+            id: s,
+            sim: true,
+            bound_instance: StrategyId(spec.instance),
+            is_prod: false,
+            venues: 1 << v.0,
+            label: spec.label.into(),
+            uid_policy: UidPolicy::Verified,
+        });
+        b.sim(SimSpec {
+            account: s,
+            fee_tier: 0,
+            latency_model: 0,
+            margin_model: 0,
+        });
+        b.sim_balance(SimBalanceSpec {
+            account: s,
+            venue: v,
+            asset: usdt,
+            qty: Qty(100_000_000_000),
+        });
+    }
     if live {
         b.account_venue(AccountVenueSpec {
             account: a,
@@ -359,60 +437,65 @@ fn write_mode(
         },
     )
     .unwrap();
-    let h = StrategyParamsHdr {
-        strategy: StrategyId(1),
-        account: a,
-        kind_id: desc.kind_id,
-        schema_id: schema.id,
-        schema_ver: schema.version,
-        source: ParamSource::Manual,
-        _pad: 0,
-        n_groups: 1,
-        _pad2: 0,
-        version: 1,
-        generated_at_ns: 0,
-        body_len: body.len() as u32,
-        group_ctr_hwm: 1,
-        schema_digest: hft_strategy_sdk::params::schema_digest(desc, schema.version),
-    };
-    let none = LegDef {
-        inst: InstId(0),
-        venue: VenueId(0),
-        kind: 0,
-        _pad: 0,
-        route: 0,
-        _pad2: 0,
-    };
-    let group = GroupSpec {
-        id: GroupId::compose(StrategyId(1), 1).unwrap(),
-        asset: btc,
-        n_legs: if second { 2 } else { 1 },
-        open_allowed: 1,
-        legs: [
-            LegDef {
-                inst: InstId(1),
-                venue: v,
-                kind: LegDef::CEX,
-                ..none
-            },
-            if second {
+    let blob = |strategy: StrategyId, account: AccountId| {
+        let h = StrategyParamsHdr {
+            strategy,
+            account,
+            kind_id: desc.kind_id,
+            schema_id: schema.id,
+            schema_ver: schema.version,
+            source: ParamSource::Manual,
+            _pad: 0,
+            n_groups: 1,
+            _pad2: 0,
+            version: 1,
+            generated_at_ns: 0,
+            body_len: body.len() as u32,
+            group_ctr_hwm: 1,
+            schema_digest: hft_strategy_sdk::params::schema_digest(desc, schema.version),
+        };
+        let none = LegDef {
+            inst: InstId(0),
+            venue: VenueId(0),
+            kind: 0,
+            _pad: 0,
+            route: 0,
+            _pad2: 0,
+        };
+        let group = GroupSpec {
+            id: GroupId::compose(strategy, 1).unwrap(),
+            asset: btc,
+            n_legs: if second { 2 } else { 1 },
+            open_allowed: 1,
+            legs: [
                 LegDef {
-                    inst: InstId(2),
-                    venue: other,
+                    inst: InstId(1),
+                    venue: v,
                     kind: LegDef::CEX,
                     ..none
-                }
-            } else {
-                none
-            },
-            none,
-            none,
-        ],
-        _rsv: 0,
+                },
+                if second {
+                    LegDef {
+                        inst: InstId(2),
+                        venue: other,
+                        kind: LegDef::CEX,
+                        ..none
+                    }
+                } else {
+                    none
+                },
+                none,
+                none,
+            ],
+            _rsv: 0,
+        };
+        let mut params = h.as_bytes().to_vec();
+        params.extend_from_slice(group.as_bytes());
+        params.extend_from_slice(&body);
+        params
     };
-    let mut params = h.as_bytes().to_vec();
-    params.extend_from_slice(group.as_bytes());
-    params.extend(body);
+    let params = blob(StrategyId(1), a);
+    let shadow_params = own_instance.then(|| blob(StrategyId(2), s));
     let mut risk = hft_risk::ParamsBuilder::new(&rd);
     risk.rate_headroom = Rate(100_000_000);
     risk.classes.push(hft_risk::BandSpec {
@@ -420,44 +503,43 @@ fn write_mode(
         ioc_max_cross: Rate(5_000_000),
         rr_max_cross: Some(Rate(10_000_000)),
     });
-    risk.accounts.push((
-        a,
-        hft_risk::AcctSpec {
-            max_order_notional: Notional(if perp_spot { 25_000_000 } else { 100_000_000 }),
-            max_account_notional: Notional(1_000_000_000),
-            account_notional_from_equity: Rate(1_000_000_000),
-            default_group: hft_risk::GroupLimits {
-                max_group_notional: Notional(500_000_000),
-                max_pos_qty: Qty(10_000_000),
-                naked_gate: Rate(500_000_000),
-                naked_gate_min: Notional(100_000_000),
-            },
-            max_hedge_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
-            max_reduce_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
-            daily_loss_kill: Rate(100_000_000),
-            daily_loss_abs: Notional(100_000_000),
-            recon_closeonly_notional: Notional(5_000_000),
-            ..hft_risk::AcctSpec::default()
+    let acct_spec = hft_risk::AcctSpec {
+        max_order_notional: Notional(if perp_spot { 25_000_000 } else { 100_000_000 }),
+        max_account_notional: Notional(1_000_000_000),
+        account_notional_from_equity: Rate(1_000_000_000),
+        default_group: hft_risk::GroupLimits {
+            max_group_notional: Notional(500_000_000),
+            max_pos_qty: Qty(10_000_000),
+            naked_gate: Rate(500_000_000),
+            naked_gate_min: Notional(100_000_000),
         },
-    ));
-    risk.venues.push((
-        v,
-        a,
-        hft_risk::VenueSpec {
-            max_venue_notional: Notional(1_000_000_000),
-            inst_bucket_per_s: 10,
-            backoff_base_ms: 500,
-            backoff_max_ms: 8000,
-            rr_reserve: None,
-        },
-    ));
+        max_hedge_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
+        max_reduce_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
+        daily_loss_kill: Rate(100_000_000),
+        daily_loss_abs: Notional(100_000_000),
+        recon_closeonly_notional: Notional(5_000_000),
+        ..hft_risk::AcctSpec::default()
+    };
+    let venue_spec = hft_risk::VenueSpec {
+        max_venue_notional: Notional(1_000_000_000),
+        inst_bucket_per_s: 10,
+        backoff_base_ms: 500,
+        backoff_max_ms: 8000,
+        rr_reserve: None,
+    };
+    for id in std::iter::once(a).chain(shadow.then_some(s)) {
+        risk.accounts.push((id, acct_spec));
+        risk.venues.push((v, id, venue_spec));
+    }
     let risk = risk.build();
     let rpb = risk.encode_blob().unwrap();
     let mut ledger = hft_ledger::LedgerConfig::default();
     ledger.stable_par_fallback.clear();
     let rig = RigConfig {
         refdata_blob: rdb.clone(),
-        params: vec![params.clone()],
+        params: std::iter::once(params.clone())
+            .chain(shadow_params.clone())
+            .collect(),
         risk,
         risk_blob: rpb.clone(),
         caps: hft_ledger::Capacities {
@@ -574,11 +656,14 @@ qty_raw = 200000000
         ("engine", ecf),
         ("risk_params", rpb),
         ("strategy_params", params),
-    ] {
+    ]
+    .into_iter()
+    .chain(shadow_params.map(|b| ("strategy_params_shadow", b)))
+    {
         let file = format!("{name}.bin");
         std::fs::write(root.join(&file), &bytes).unwrap();
-        let table = if name == "strategy_params" {
-            format!("[[blobs.{name}]]")
+        let table = if name.starts_with("strategy_params") {
+            "[[blobs.strategy_params]]".to_string()
         } else {
             format!("[blobs.{name}]")
         };
@@ -590,7 +675,14 @@ qty_raw = 200000000
     let path = root.join("core.toml");
     if live {
         let mut config: toml::Value = toml::from_str(&text).unwrap();
-        config.as_table_mut().unwrap().remove("sim");
+        if shadow {
+            // The sim-venue settings: no paper quotes in a prod instance.
+            let sim = config["sim"].as_table_mut().unwrap();
+            sim.remove("quotes");
+            sim.remove("quote_interval_ms");
+        } else {
+            config.as_table_mut().unwrap().remove("sim");
+        }
         config["instance"]["name"] = "prod".into();
         config["instance"]
             .as_table_mut()
@@ -614,6 +706,9 @@ qty_raw = 200000000
         ] {
             threads
                 .push(toml::from_str(&format!("name='{name}'\ntask='{task}'\npark_us=100\nnice=0")).unwrap());
+        }
+        if shadow {
+            threads.push(toml::from_str("name='sim-venue'\ntask='sim-venue'\npark_us=100\nnice=19").unwrap());
         }
         if perp_spot {
             let credentials = config["venues"]["public"]["accounts"].clone();

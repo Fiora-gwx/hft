@@ -67,7 +67,7 @@
 | `feat/refdata-account-set`:refdata 接受一个实例绑定多个账户(`accounts_of`,主账户 = id 最小);sequencer 实例账户集合(≤ 8)覆盖 cell、模式、风控组表、执行层 cell、halt、行情闸门、连接通知、StrategyCmd;SDK `RefView::accounts`;hft-core 每实例一份参数 blob | done | b5155926 | REF-019(改写)、SEQ-451;单账户行为不变(sequencer 515、exec 283、refdata 84) |
 | `feat/gw-per-account`:槽镜像按 (账户, 槽);hft-core 每账户基线、账户 REST 客户端、gw REST 池与私有连接(hft-net `BuildReq.account`);`AccountCapacity` 放宽到 12;`accounts[].src_ip`;撤单独立限速(`LimitBucket::Cancels`,PM 下单 20/s、撤单 40/s);`pm_sim_config --live-account` | 待验收 | c4100bac、78e8b906、55974594、091e3199(并行代理,合并 a4b9f99c) | VEN-411–413、CORE-446、PMK-037、REF-075.6/REF-009.23(改写);**未做**:hft-core 层 conn-builder 账户路由测试(参照的 mock-REST 测试在 Windows 不运行,由 VEN-413 在 gw 层覆盖);**注意**:gw 连接号 112–255 共 144 个,12 个 PM 账户(各约 11 条)接近上限;旧二进制读含 `Cancels` 的 refdata 会拒绝加载;**待**:实盘 2 账户 Shadow(需负责人批准)
 | `feat/router-stp-agg-risk` | doing | b6796b5f(STP) | SEQ-452:策略下单与同实例其他账户的挂单(同 venue/inst、反向、价格可达)交叉时 `RejectBits::SELF_TRADE`,在风控之前;**未做**:`RoutePolicy` 路由、互补 token 的 STP(需要 refdata 的互补关系字段,负责人决定)、实例聚合限额(需要改 RiskParams `RKP1` 格式,负责人决定) |
-| `feat/prod-sim-accounts` | doing | | 并行代理(分支 `refactor/m4-prod-sim`) |
+| `feat/prod-sim-accounts` | 待验收 | 67bca491(hft-risk:Sim 账户 `ORDER_CONNS` 不要求热备)、ec3ec88a(`MAX_SIM_ACCOUNTS` 64)、9e5a096d、9359cfc9(RPL-309) | CORE-449、CORE-450、RSK-101.18、RPL-309 本地绿(Windows `hft-core --features polymarket` 全绿;WSL Ubuntu-22.04 `clippy`/`test -p hft-core --features polymarket` EXIT 0;`hft-risk`、`hft-sim`、`replayer`、`hft-testkit`、`hft-sequencer`、`hft-pmcfg`、`hft-replay` 全绿;`xtask deps`/`hot-check`/`test-trace`/`doc-check` PASS,doc-check 问题 0、警告数与改动前相同)。`prod` 配置无 Sim 账户时装配、`--check`、journal 不变;无 journal 字节/快照布局变化。**未做**:hft-pmcfg 生成带 Shadow 变体的 PM 实盘配置(`--shadow`)、`sim-venue` 的进程级(Linux)测试;**待**:实盘 Shadow 变体 ≥ 2 天(需负责人批准)、`sim` 实例 2 账户 × 2 变体 48 h;**负责人决定**:基线文档仍写"`prod` 不含 Sim 账户"(根 `AGENTS.md`、`apps/AGENTS.md`、Agent Note 2026-10-03-sim-only-instance、deploy/glossary/defensive-patterns/journal-format、design 01/07),未改,需批准后同步(可并入 `docs/baseline-v2`);`prod` 的 Sim 账户与 `sim` 实例的账户名同为 `sim-…`,可能重名(ops_bot 按名路由) |
 | `strat/bm-multi-account` | todo | | |
 
 ### M5 时钟 / 导出 / 退役
@@ -111,6 +111,7 @@
 | SIM-240、CORE-447 | M2 | 条件跟踪的三个分量、`[sim] calib` |
 | CORE-448 | M6 | 运行装配 |
 | CORE-446、VEN-412、VEN-413、PMK-037(新增);CORE-441.5/.6、REF-075.6、REF-009.23(改写) | M4 | 多 Live 账户 gw 装配、撤单限速桶 |
+| CORE-449、CORE-450、RSK-101.18、RPL-309(新增);CORE-040.3/.4、CORE-045.1/.2、SIM-002、SIM-003.17/.18(改写) | M4 | `prod` 实例内的 Sim 账户与 sim-venue、决策屏障只对 Sim 账户、Sim 账户不要求热备、含 Sim 账户的 prod journal verify、`MAX_SIM_ACCOUNTS` 64 |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
 | PMC-001–PMC-006(新增);TOOL-021(期望扩展:hft-pmcfg 清单副本) | M6 | hft-pmcfg 命令行、`--account`、多账户输出、工具 = 库逐字节、引擎基底 = SeqRig |
 
@@ -131,3 +132,9 @@
 | 2026-10-30 | BBO 戳用单独的 `bbo_stamp`,不进 `md_stamp` 环 | 放进环会改变 `md_count` 的计数语义与 SEQ-447;`MarketLastRow` 进快照、不能加字段 |
 | 2026-10-30 | M0 的两项服务器验收未完成时开始 M1 | M1 的代码不依赖这两项测量(解码器 diff、`egress` 分段);它们只阻塞 `refactor-m0` tag,不阻塞开发
 | 2026-10-29 | 本机可编译与测试(Windows,Rust 1.97.1),每个工作项提交前在本机跑受影响包的测试 | 比"只推 CI"更快发现错误;结论仍以 CI 为准 |
+| 2026-10-30 | `prod` 实例的 sim-venue 尾读 seq journal 取行情(与 sim-gw 同一 `paper::Gateway`),不做 feed 任务的 md 旁路环 | 尾读即引擎看到的顺序,决策屏障顺序天然成立、条件跟踪与 sim-gw 相同;旁路环要改 feed 热路径(多写一份 `FeedMsg`)并另处理与屏障的先后;代价是 sim-venue 多读一次 seq journal(warm 线程、非隔离核) |
+| 2026-10-30 | 任务名 `sim-venue` 只用于 `prod` 实例,`sim` 实例保持 `sim-gw` | 已部署的 sim 配置不改;两者同一实现 |
+| 2026-10-30 | `prod` 实例的撮合设置沿用 `[sim]` 表(有 Sim 账户 ⇔ 有 `[sim]`),不得有 `quotes`、`quote_interval_ms`;`quote_interval_ms` 在 `prod` 形状里可省略,`sim` 实例仍必填(错误码不变) | 不新增配置键;`seed`、延迟、保证金模型与 `calib` 与 sim 实例同一份解析 |
+| 2026-10-30 | hft-risk:Sim 账户的 `ORDER_CONNS` 不看热备 | hft-risk README 已写"模拟账户 `standby_up` 恒为真",代码只在 `allow_missing_standby` 时成立;`prod` 实例不能为 Sim 账户放宽 Live 账户的热备要求。`sim` 实例强制 `allow_missing_standby = 1`、DST 给 Sim 账户发热备,行为都不变 |
+| 2026-10-30 | sim-venue 的"最低优先级"按线程 `nice` 不低于计划中任何线程判定,核隔离在线程启动时查 `/sys/devices/system/cpu/isolated` | 本装配一线程一任务,无法"与 housekeeping 同线程";`nice` 与核是现有配置能表达的两项 |
+| 2026-10-30 | RPL-309 用 TK-058 的世界(两个 taker、账户 b 为 Sim)加 `WorldSpec.role_prod`,不用 RPL-012 的 `probe-target` | `probe-target` 的 Sim 账户在 RPL-012 世界里不下单(一次性计划点),验证不到 Sim 回报 |

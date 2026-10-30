@@ -19,7 +19,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288、RPL-309 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | research | RPL-300–RPL-303、RPL-305、RPL-306 |
 | parity | RPL-304 |
@@ -159,6 +159,17 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 - 实现:`apps/replayer/tests/dst.rs::rpl_012_dst_journals_verify`
 
 普通测试默认运行 1 个提交派生种子与全部回归集,无 ignore 标记;独立托管 `replay-dst.yml` 显式设置上面的完整种子数量,小批结果不能替代整批验收。环境 `HFT_REPLAY_DST_SEED`、`HFT_REPLAY_DST_COUNT` 与 `HFT_REPLAY_DST_SUITE` 用于明确的种子复现,CI 固定数量并不设置 suite 覆盖。每行保存故障表、完整物理段、逐文件 SHA-256、完整回放 JSON 与复现命令,总表同时记录实际完成步数、比较数量和失败行。每行目录以证据目录持有(hft-testkit [`TmpDir::evidence`](../../crates/hft-testkit/README.md#11-临时目录)):通过的种子在测试结束时删除、失败的保留;`replay-dst.yml` 设 `HFT_TEST_KEEP_TMP=1` 保留全部行供制品上传。RPL-283–RPL-288 的定向文件目录同样只在失败时保留。Model 必须实际产出 Advice,每条记录均参加重算;无来源、导出重编号、读回差异、任何 DST 不变量或子进程失败均使该种子失败。
+
+### RPL-309 含 Sim 账户(Shadow 变体)的 `prod` 实例 journal 逐字节回放
+
+- 规则:[verify](README.md#verify)(Sim 账户的回报是 Input,不重跑模拟;设计 R8)
+- 级别:dst
+- 里程碑:M4
+- 前置:标准套件第一个、2 000 步、`RerunPolicy::Never`;世界同 TK-058(两个 `probe-taker`,账户 b 为 Sim),`physical_journal`、`model_advice`,`WorldSpec.role_prod = true`(ECF1 `role_prod`,即 `prod` 实例)
+- 故障:该套件的默认故障目录,按种子的故障表注入
+- 种子:固定 1
+- 实现:`apps/replayer/tests/dst.rs::rpl_309_prod_role_journal_with_sim_account_verifies`
+- 断言:与 RPL-012 相同的独立进程 `verify --advice recompute` 退出 0、`verify = "pass"`、`recompute = "pass"`(不要求 Advice 条数);Live 账户 a 与 Sim 账户 b 都有被接受的 `OrderDecision`;报告的 `instance = "prod"`
 
 ### RPL-283 DST 文件保留原件并跨连续恢复重算
 

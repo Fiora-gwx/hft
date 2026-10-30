@@ -31,26 +31,34 @@ pub fn policy(c: &Config, task: &str) -> Result<Thread, Error> {
         .cloned()
         .ok_or_else(|| Error::config("ThreadPlan", task))
 }
+/// Whether `cpu` is in the kernel's isolated list (`isolated`, the text of
+/// `/sys/devices/system/cpu/isolated`, e.g. `2-5,7`).
+pub fn in_cpu_list(isolated: &str, cpu: u16) -> bool {
+    isolated.trim().split(',').any(|part| {
+        let (first, last) = part.split_once('-').unwrap_or((part, part));
+        first
+            .parse::<u16>()
+            .ok()
+            .zip(last.parse::<u16>().ok())
+            .is_some_and(|(first, last)| first <= cpu && cpu <= last)
+    })
+}
 pub fn pin(t: &Thread) -> Result<(), Error> {
-    if t.idle == Idle::Spin {
-        let isolated = std::fs::read_to_string("/sys/devices/system/cpu/isolated").unwrap_or_default();
-        let allowed = t.core.is_some_and(|cpu| {
-            isolated.trim().split(',').any(|part| {
-                let (first, last) = part.split_once('-').unwrap_or((part, part));
-                first
-                    .parse::<u16>()
-                    .ok()
-                    .zip(last.parse::<u16>().ok())
-                    .is_some_and(|(first, last)| first <= cpu && cpu <= last)
-            })
-        });
-        if !allowed {
-            return Err(Error::runtime(
-                "ThreadPolicy",
-                "spin requires a dedicated isolated CPU",
-                3,
-            ));
-        }
+    let isolated = || std::fs::read_to_string("/sys/devices/system/cpu/isolated").unwrap_or_default();
+    if t.idle == Idle::Spin && !t.core.is_some_and(|cpu| in_cpu_list(&isolated(), cpu)) {
+        return Err(Error::runtime(
+            "ThreadPolicy",
+            "spin requires a dedicated isolated CPU",
+            3,
+        ));
+    }
+    // sim-venue shares the prod instance with live tasks: never on an isolated (hot) CPU.
+    if t.task == crate::config::SIM_VENUE && t.core.is_some_and(|cpu| in_cpu_list(&isolated(), cpu)) {
+        return Err(Error::runtime(
+            "ThreadPolicy",
+            format!("{}: sim-venue on an isolated CPU", t.name),
+            3,
+        ));
     }
     if let Some(cpu) = t.core {
         hft_rt::pin_current_thread(cpu)
@@ -115,7 +123,7 @@ fn claim(
         "persist" => HbKind::Persist,
         "housekeeping" => HbKind::Housekeeping,
         "ctl-gateway" => HbKind::Ctl,
-        "sim-gw" => HbKind::Gw,
+        crate::config::SIM_GW | crate::config::SIM_VENUE => HbKind::Gw,
         "paper-feed" => HbKind::Feed,
         s if s.starts_with("gw:") => HbKind::Gw,
         s if s.starts_with("feed:") => HbKind::Feed,
@@ -729,7 +737,10 @@ fn run_linux(
         }
         Ok(())
     })?;
-    if dry {
+    // The simulated exchange: the sim instance's sim-gw, or a prod instance's sim-venue for its Sim
+    // accounts (Shadow variants). Both tail the seq journal behind the decision barrier
+    // (`paper::barrier`); the replies are Inputs on rep-sim, the lowest-priority ring.
+    if let Some(sim_task) = c.sim_task() {
         let p = c
             .sim
             .as_ref()
@@ -737,7 +748,7 @@ fn run_linux(
         let tail_cfg = storage::reader_cfg(c);
         let model = paper::model(p)?;
         if let Some(sha) = &model.calib_sha {
-            eprintln!("hft-core: sim-gw calibration table sha256 {sha}");
+            eprintln!("hft-core: {sim_task} calibration table sha256 {sha}");
         }
         let gateway = paper::Gateway::new(
             paper::exchange(p, rd, clock.hz_milli)?,
@@ -767,7 +778,7 @@ fn run_linux(
             }
             None => gateway,
         };
-        workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
+        workers.spawn(policy(c, sim_task)?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
                 t.heartbeat.beat();
                 if !gateway.poll(hft_rt::tsc_now())? {
@@ -776,6 +787,8 @@ fn run_linux(
             }
             Ok(())
         })?;
+    }
+    if dry {
         workers.spawn(policy(c, "paper-feed")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
                 t.heartbeat.beat();

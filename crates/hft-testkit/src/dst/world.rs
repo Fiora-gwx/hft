@@ -283,6 +283,9 @@ pub struct WorldSpec {
     /// run trades in cycles instead of holding its first position. Off in W1 for now: the cycles
     /// expose engine failures still open (docs: hft-testkit README "DST 的世界模型").
     pub taker_cycles: bool,
+    /// ECF1 `role_prod`: the world is a prod instance (its Sim accounts are Shadow variants;
+    /// `SimFault` is refused). Off = the sim-role world every recorded counterexample ran in.
+    pub role_prod: bool,
 }
 
 /// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
@@ -421,6 +424,7 @@ impl WorldSpec {
             model_advice: false,
             margin_feed: false,
             taker_cycles: false,
+            role_prod: false,
         }
     }
 

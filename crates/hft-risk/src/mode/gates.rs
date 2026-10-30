@@ -118,7 +118,9 @@ impl Mode {
         let allow_missing = self.cfg.allow_missing_standby;
         let Some(g) = self.gates.get_mut(ix) else { return };
         let mut bits = g.bits & (gb::FEEDS | gb::NO_UNKNOWN | gb::CLOCK);
-        if venues & !g.conns_ok == 0 && (allow_missing || venues & !g.standby_ok == 0) {
+        // A simulated venue has no standby connection: `standby_up` counts as true for Sim accounts
+        // (README "启动闸门", 模拟账户), whatever `allow_missing_standby` says.
+        if venues & !g.conns_ok == 0 && (allow_missing || sim || venues & !g.standby_ok == 0) {
             bits |= gb::ORDER_CONNS;
         }
         if sim {

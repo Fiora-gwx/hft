@@ -7,8 +7,8 @@ use hft_types::{AccountId, AssetId, InstId, Notional, Px, Qty, Rate, Side, SlotI
 
 /// `OrderEvent.reject_code` of a simulated reject = `SIM_CODE_BASE + n` (README "拒单规则").
 pub const SIM_CODE_BASE: u32 = 0x1000_0000;
-/// Upper bound of `SimSetup.accounts`.
-pub const MAX_SIM_ACCOUNTS: usize = 16;
+/// Upper bound of `SimSetup.accounts` (Shadow variants × accounts of a prod instance, README "配置").
+pub const MAX_SIM_ACCOUNTS: usize = 64;
 /// Upper bound of `SimSetup.latency_models`.
 pub const MAX_LATENCY_MODELS: usize = 16;
 /// Upper bound of `SimSetup.margin_models`.

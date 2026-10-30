@@ -1,5 +1,5 @@
 //! RPL-012: actual DST -> physical files -> independent replayer process, no checkpoints.
-use hft_event::{EventKind, OrderEvent, OrderEventKind, SegmentRoll};
+use hft_event::{EventKind, OrderDecision, OrderEvent, OrderEventKind, SegmentRoll};
 use hft_testkit::dst::{DstConfig, DstOutcome, RerunPolicy, run_record};
 use hft_testkit::scenarios::{SeqEngine, replay_config, suites};
 use serde_json::{Value, json};
@@ -26,6 +26,11 @@ fn executable() -> PathBuf {
 }
 
 fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
+    verify_case_with(cfg, dir, true)
+}
+
+/// `verify_case`; `model` = the world has a Model whose Advice must be produced and recomputed.
+fn verify_case_with(cfg: &DstConfig, dir: &Path, model: bool) -> Value {
     std::fs::create_dir_all(dir).unwrap();
     let plan = cfg.fault_plan();
     std::fs::write(
@@ -107,7 +112,9 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
     assert!(report["model_no_start"].as_array().unwrap().is_empty());
     assert!(summary["checkpoint_key"].as_array().unwrap().is_empty());
     let advice = log.recs.iter().filter(|r| r.kind == EventKind::ADVICE).count();
-    assert!(advice > 0, "real Model channel was never exercised");
+    if model {
+        assert!(advice > 0, "real Model channel was never exercised");
+    }
     assert_eq!(summary["model_advice_compared"].as_u64(), Some(advice as u64));
     let recovery_seqs: Vec<_> = log
         .recs
@@ -122,6 +129,17 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         .map(|r| r.seq)
         .collect();
     let recovery = recovery_seqs.len();
+    // Accepted order decisions per account (RPL-309: both the Live and the Sim account trade).
+    let mut decisions = std::collections::BTreeMap::<u8, u64>::new();
+    for d in log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::ORDER_DECISION)
+        .filter_map(|r| r.read::<OrderDecision>())
+        .filter(|d| d.reject == 0)
+    {
+        *decisions.entry(d.account.0).or_default() += 1;
+    }
     let partial_fills = log
         .recs
         .iter()
@@ -229,7 +247,7 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         "records": log.recs.len(), "segments": log.segs.len(), "recovery_runs": recovery,
         "recovery_seqs": recovery_seqs,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
-        "advices": advice, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
+        "advices": advice, "decisions_by_account": decisions, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
         "stale_gen": stale_gen, "late_recycle": late_recycle, "cancel_filled": cancel_filled,
         "faults_planned": plan.items.len(),
         "faults_scheduled_before_end": plan.items.iter().filter(|(t, _)| *t <= rec.end_ns).count(),
@@ -260,6 +278,38 @@ fn rpl_283_dst_files_preserve_records_and_model_across_recovery() {
     let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
     let result = verify_case(&cfg, &dir);
     assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
+}
+
+/// RPL-309: a prod instance's journal (`role_prod`) with a Live account and a Sim account (Shadow
+/// variant) verifies: the simulated replies are Inputs, verify does not re-run the simulation.
+#[test]
+fn rpl_309_prod_role_journal_with_sim_account_verifies() {
+    // The suite world (two takers) with account b Sim, as `tk_058`, recorded as a prod instance.
+    let mut cfg = suites()[0].config(1);
+    cfg.steps = 2_000;
+    cfg.rerun = RerunPolicy::Never;
+    cfg.world.physical_journal = true;
+    cfg.world.model_advice = true;
+    cfg.world.accounts[1].kind = hft_testkit::dst::world::AccountKind::Sim;
+    cfg.world.role_prod = true;
+    let dir = root().join(format!(
+        "target/dst/0000000000000001/rpl-309-{}",
+        std::process::id()
+    ));
+    let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
+    let result = verify_case_with(&cfg, &dir, false);
+    let by_account = &result["decisions_by_account"];
+    let live = cfg.world.accounts[0].id.0.to_string();
+    let sim = cfg.world.accounts[1].id.0.to_string();
+    assert!(
+        by_account[&live].as_u64().unwrap_or(0) > 0,
+        "RPL-309 Live account traded: {result}"
+    );
+    assert!(
+        by_account[&sim].as_u64().unwrap_or(0) > 0,
+        "RPL-309 Sim account traded: {result}"
+    );
+    assert_eq!(result["summary"]["instance"], "prod", "RPL-309 {result}");
 }
 
 #[test]

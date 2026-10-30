@@ -717,7 +717,7 @@ pub fn engine_setup(w: &WorldSpec, tsc_hz: u64, epoch: u32) -> EngineSetup {
         },
         feeds: VenueSet(vbits(&venues)),
         keys_required: keys,
-        role_prod: false,
+        role_prod: w.role_prod,
         advisor_max_lag_ms: 5_000,
         drain_timeout_ms: 30_000,
         day_pnl_carry: Vec::new(),
