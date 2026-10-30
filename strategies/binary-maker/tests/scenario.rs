@@ -1274,6 +1274,35 @@ fn bmk_027_score_skips_the_token_it_is_against() {
     h.views_mut().at_engine_ns(399_600_000_000);
     let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
     assert_eq!(cancels(&out), vec![11], "BMK-027.6");
+    // .7 comp_skip −0.5 (directional maker): balanced books, both scores within ±0.5: nothing.
+    let mut h = harness(&comp_params(&[("comp_skip", -500_000_000)]));
+    let out = warm_sized(&mut h, 100, 100);
+    let c = h.strategy().fast.comp;
+    assert!(
+        c.ok && c.z[0].abs() <= 500_000_000 && c.z[1].abs() <= 500_000_000,
+        "BMK-027.7 {c:?}"
+    );
+    assert_eq!(placed(&out), vec![], "BMK-027.7");
+    // .8 comp_skip −0.5, 10 / 190 shares: only the favoured Down quoted.
+    let mut h = harness(&comp_params(&[("comp_skip", -500_000_000)]));
+    let out = warm_sized(&mut h, 10, 190);
+    assert_eq!(placed(&out), vec![(SLOTS[3], Px(450))], "BMK-027.8");
+    // .9 continuing .8 with live quotes on both legs (slots 11, 12): at 399.8 s the score is
+    // recomputed; the Up bid (score not above 0.5) is cancelled, the Down bid stays.
+    for (i, slot) in [(2usize, 11u32), (3, 12)] {
+        set_quote(
+            &mut h,
+            i,
+            binary_maker::fast::QState::Live,
+            slot,
+            300,
+            399_500_000_000,
+        );
+    }
+    h.views_mut().at_engine_ns(399_800_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-027.9");
+    assert_eq!(out.places().count(), 0, "BMK-027.9");
 }
 
 #[test]
