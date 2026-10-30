@@ -23,7 +23,7 @@ spec: README.md
 | Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213、SDK-214 |
 | 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213、SDK-214 |
 | EventRef | SDK-031、SDK-040–SDK-058、SDK-143、SDK-144、SDK-157 |
-| Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212 |
+| Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212、SDK-216 |
 | 目标意图 | SDK-141、SDK-158–SDK-163 |
 | Advice 载荷 | SDK-052、SDK-067、SDK-086、SDK-171–SDK-176、SDK-211 |
 | 预热注入 | SDK-055、SDK-180–SDK-184、SDK-210 |
@@ -3192,6 +3192,21 @@ spec: README.md
 |---|---|---|
 | SDK-215.1 | `feature_columns(0xFF01)`、`(0xFF02)`、`(0xFF09)` | `["mode", "groups"]`;空;空 |
 | SDK-215.2 | `export_features` 写进 4 格、初值 `NA` 的存储 | EchoProbe:`len = 2`,存储 `[0, 3, NA, NA]`;TargetProbe:什么都不写(`is_empty`) |
+
+### SDK-216 按金额买入:`spend_buy` 与 `spend_qty`
+
+- 规则:[Ctx 与订单意图](README.md#ctx-与订单意图)(按金额买入)
+- 级别:table
+- 里程碑:M3
+- 前置:`e = AssetExp{px_exp −3, qty_exp −6}`(二元结果代币,价 0.001、量 1e-6)
+- 实现:`crates/hft-strategy-sdk/tests/ctx.rs::sdk_216_spend_buy_and_spend_qty`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SDK-216.1 | `OrderIntent::SPEND`;`spend_buy(V1, A1, G1, I1, Ioc, Px(110), Qty(9_090_000), 7)` | `0x80`(= hft-event `OrderFlags::SPEND`);`side Buy`、`class Open`、`flags = SPEND`、`spend()` 真、`reduce_only()` 假、无链接、`max_rest_ms 0`、`tag 7` |
+| SDK-216.2 | `spend_qty(Notional(1_000_000), Px(110), e, 10_000)`(1 USDC、0.11、lot 0.01) | `Qty(9_090_000)`(9.09) |
+| SDK-216.3 | 同上,`lot 1` | `Qty(9_090_909)` |
+| SDK-216.4 | `Px(0)`;`Notional(0)`;`px_exp 40` | 都为 `Qty(0)` |
 
 ## 验收
 

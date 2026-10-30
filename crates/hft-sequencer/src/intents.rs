@@ -6,7 +6,7 @@ use hft_event::{GwCmd, NoteLevel, OrderAction, OrderDecision, OrderFlags, Record
 use hft_exec::{ExecOrder, ExecOrigin, LinkBrokenCause, LinkNotice, LinkPhase, PlaceResult};
 use hft_oms::{
     ApprovedIntent, HedgeGate, HedgePx, HedgeRequest, OmsOut, OmsTimerKind, OrderState, link_valid,
-    price_hedge,
+    price_hedge, spend_valid,
 };
 use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
@@ -143,6 +143,10 @@ fn oflags_of(it: &OrderIntent, c: &Classification, extra: u16) -> u16 {
     if it.link.get().is_some() {
         f |= OrderFlags::LINKED.0;
     }
+    // Only a valid spend order (step 0) reaches here with the bit.
+    if it.spend() {
+        f |= OrderFlags::SPEND.0;
+    }
     f
 }
 
@@ -162,10 +166,9 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     let mut reason = 0u32;
     let mut extra_flags = 0u16;
     let mut smoke_ttl = 0u32;
-    // 0. Link structure (strategy place with a LegLink).
+    // 0. Link structure (strategy place with a LegLink) and spend-order shape.
     if let Src::Strategy { .. } = src
-        && let Some(l) = it.link.get()
-        && !link_valid(l)
+        && (it.link.get().is_some_and(|l| !link_valid(l)) || !spend_valid(&it))
     {
         let shadow = e.risk.mode.effective(CellKey {
             strategy: e.rd.account(it.account).bound_instance,

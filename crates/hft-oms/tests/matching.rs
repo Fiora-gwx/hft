@@ -437,3 +437,98 @@ fn oms_460_fee_of_fill_after_non_fill_report() {
     assert_eq!(h.out.fees[0].fee, 600, "OMS-460 step 6");
     assert_eq!(h.slot(r).fee_accum, 1000, "OMS-460 step 6");
 }
+
+/// OMS-490 slot: spend buy X 0.01 @ 60000.00 IOC on a1@VS, acked.
+fn spend_slot(h: &mut H, spend: bool) -> OrderRef {
+    let mut it = intent(VS, A1, X, Side::Buy, Tif::Ioc, p("60000.00"), q("0.01"), g1());
+    if spend {
+        it.intent.flags = hft_strategy_sdk::OrderIntent::SPEND;
+    }
+    let r = h.place_ok(&it, 0);
+    h.ack(r, 1, 0);
+    r
+}
+
+fn spend_fill(h: &mut H, r: OrderRef, what: OrderEventKind, cum: &str) {
+    let mut e = h.oe(r, what);
+    e.cum_filled = q(cum);
+    e.avg_px = p("50000.00");
+    e.fee_asset = USDT;
+    h.ev(&e, 1);
+}
+
+#[test]
+fn oms_490_spend_buy() {
+    use hft_event::OrderFlags;
+    use hft_strategy_sdk::{LegLinkOpt, OrderIntent};
+    let spend_bit = |h: &H, r: OrderRef| h.slot(r).oflags & OrderFlags::SPEND.0 != 0;
+    // .1 spends 600 for 0.012: a normal fill, the slot stays open.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    assert!(spend_bit(&h, r), "OMS-490.1");
+    spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.012");
+    assert_eq!(h.out.fills.len(), 1, "OMS-490.1");
+    assert_eq!(h.out.fills[0].qty, q("0.012"), "OMS-490.1");
+    assert_eq!(h.out.fills[0].flags & fill_flags::OVERFILL, 0, "OMS-490.1");
+    assert_eq!(h.n_notes(notes::OVERFILL), 0, "OMS-490.1");
+    assert_eq!(h.slot(r).state, OrderState::Live, "OMS-490.1");
+    assert_eq!(h.slot(r).filled, q("0.012"), "OMS-490.1");
+    // .2 the venue's Fill ends it.
+    spend_fill(&mut h, r, OrderEventKind::Fill, "0.012");
+    assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.2");
+    assert!(h.out.fills.is_empty(), "OMS-490.2");
+    // .3 605 spent: overfill.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.0121");
+    assert!(h.out.fills[0].flags & fill_flags::OVERFILL != 0, "OMS-490.3");
+    assert_eq!(h.n_notes(notes::OVERFILL), 1, "OMS-490.3");
+    // .4 in flight = the unspent amount at the order price.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.006");
+    assert_eq!(h.o.inflight().pos(A1, X).open_buy, q("0.005"), "OMS-490.4");
+    h.what(r, OrderEventKind::Expired, 2);
+    assert_eq!(h.slot(r).state, OrderState::Cancelled, "OMS-490.4");
+    assert_eq!(h.o.inflight().pos(A1, X).open_buy, Qty(0), "OMS-490.4");
+    // .5 Expired after more than qty: Filled.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.012");
+    h.what(r, OrderEventKind::Expired, 2);
+    assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.5");
+    // .6 QueryResult{Filled} ends it.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.012");
+    h.query(r, 3, q("0.012"), p("50000.00"), 2);
+    assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.6");
+    // .7 shape.
+    let base = intent(VS, A1, X, Side::Sell, Tif::Ioc, p("60000.00"), q("0.01"), g1()).intent;
+    let with = |side, tif, link: bool| {
+        let mut it = base;
+        it.side = side;
+        it.tif = tif;
+        it.flags = OrderIntent::SPEND;
+        if link {
+            it.link = LegLinkOpt::some(link_l1(plan_l1()));
+        }
+        it
+    };
+    assert!(spend_valid(&base), "OMS-490.7");
+    assert!(spend_valid(&with(Side::Buy, Tif::Fok, false)), "OMS-490.7");
+    assert!(!spend_valid(&with(Side::Sell, Tif::Ioc, false)), "OMS-490.7");
+    assert!(!spend_valid(&with(Side::Buy, Tif::Gtc, false)), "OMS-490.7");
+    assert!(!spend_valid(&with(Side::Buy, Tif::Ioc, true)), "OMS-490.7");
+    let mut h = H::new();
+    let mut it = intent(VS, A1, X, Side::Sell, Tif::Ioc, p("60000.00"), q("0.01"), g1());
+    it.intent.flags = OrderIntent::SPEND;
+    let r = h.place_ok(&it, 0);
+    assert!(!spend_bit(&h, r), "OMS-490.7");
+    // .8 other slots: unchanged overfill rule.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, false);
+    spend_fill(&mut h, r, OrderEventKind::Fill, "0.012");
+    assert!(h.out.fills[0].flags & fill_flags::OVERFILL != 0, "OMS-490.8");
+    assert_eq!(h.n_notes(notes::OVERFILL), 1, "OMS-490.8");
+}

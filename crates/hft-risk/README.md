@@ -763,6 +763,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 
 ## 已知限制与后续工作
 
+- 按金额买入(`OrderFlags::SPEND`,[hft-oms](../hft-oms/README.md#按金额买入))的单笔名义(#6)与在途名义按 `px × qty` 计,正确地限住花费;仓位检查 #7 按意图的 `qty` 计,而成交价低于限价时实际数量可多出 `px / 成交价` 倍,成交后实际仓位才计入(下一笔意图起生效)。可选扩展:#7 对 SPEND 单按 `px × qty / 最低可成交价` 计数量上界(触发条件:有策略用 SPEND 单开出接近 `max_pos_qty` 的仓位)。
 - 自成交未检查。可选扩展:`SELF_CROSS` 位(触发条件:启用挂单类执行算法 `MakerFirst` 或同一账户在同一 inst 同时挂双边单)。
 - 桶只按"单数"。可选扩展:按请求权重计的桶(触发条件:接入按权重限速下单的 venue,或权重限速在 core venue 上实际触发)。
 - 链接 Open 对链接 venue 的令牌只查不扣:同一事件内多笔链接 Open 可能共同耗尽链接 venue 的非预留令牌,此时第二腿用预留令牌,预留被更快消耗。可选扩展:链接 Open 预扣(触发条件:实测出现第二腿因 `RATE` 被拒)。

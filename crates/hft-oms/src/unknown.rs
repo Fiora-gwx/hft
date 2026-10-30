@@ -150,6 +150,7 @@ impl Oms {
             cash_sum: ev.cash_sum,
             execution_cash: ev.fill_cash_qty.0 > 0,
             query: true,
+            done: false,
             seq,
         };
         if sl.state.terminal() {
@@ -291,6 +292,7 @@ impl Oms {
                 .map_or(Qty(0), |x| x.cash_sum),
             execution_cash: false,
             query: true,
+            done: false,
             seq,
         };
         if ev.order_status == ST_NOT_FOUND {

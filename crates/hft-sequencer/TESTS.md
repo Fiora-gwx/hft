@@ -5171,7 +5171,7 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
   - `step()` 返回 `Fatal(TimerOverflow)`;该 Input 之后无任何出环帧
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_351_timer_overflow_fatal`
 
-### SEQ-352 策略链接结构不合法时只写 INVALID 决策,不经检查链
+### SEQ-352 策略链接结构或按金额买入的形态不合法时只写 INVALID 决策,不经检查链
 
 - 规则:[意图管线](README.md#意图管线)
 - 级别:table
@@ -5185,6 +5185,9 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 | SEQ-352.2 | `role = Second` | 一条 `OrderDecision{reject = INVALID}`;`Ctx::outcome = Rejected(INVALID)`;`risk.evaluate` 未被调用;令牌、在途、槽都不变;无出环 |
 | SEQ-352.3 | `kind = Simultaneous`、`on_fail = Retry` | 同 .2 |
 | SEQ-352.4 | 期望模式 Shadow 且 `role = Second` | `OrderDecision{SHADOW, reject = INVALID}`、结果 Shadowed;结构检查仍先短路,不调用 evaluate、不扣资源、不出环 |
+| SEQ-352.5 | 去掉链接、改为卖出、`flags = OrderIntent::SPEND` | 同 .2 |
+| SEQ-352.6 | 去掉链接、`flags = OrderIntent::SPEND`(买入 IOC) | 照常出环;`OrderDecision.oflags` 含 `OrderFlags::SPEND`(.1 不含) |
+| SEQ-352.7 | 保留合法链接、`flags = OrderIntent::SPEND` | 同 .2 |
 
 ### SEQ-353 OMS 的 P0 级 OmsUnknown 在同一 Input 内设 UnknownTimeout cap
 

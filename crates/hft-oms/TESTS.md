@@ -30,6 +30,7 @@ spec: README.md
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
 | 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480、OMS-481–OMS-483 |
+| 按金额买入 | OMS-490 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420, OMS-487, OMS-488 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469、OMS-485 |
@@ -4521,3 +4522,22 @@ POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜�
 | OMS-489.3 | t = 2 500 sweep(超 `cancel_timeout`,s `Unknown`);t = 3 000 `EARLY`;t = 3 100 `Ack` | `EARLY` 后 s 仍 `Unknown`、置 `CANCEL_HELD`、无撤单;`Ack` 的同一调用 s → `Live` → `PendingCancel`,一条撤单,清 `CANCEL_HELD` |
 | OMS-489.4 | 同 .3,但 t = 3 100 `CancelAck` | s `Cancelled`;无撤单;清 `CANCEL_HELD` |
 | OMS-489.5 | s 已 Ack(`Live`,未撤)时 `EARLY` | 异常 Note(`OmsAnomaly{Table}`),s 保持 `Live`,无撤单 |
+
+### OMS-490 按金额买入:超过 qty 的成交不是超量,交易所说成交完才终结,在途按未花金额
+
+- 规则:[按金额买入](README.md#按金额买入)、[回报匹配与成交增量](README.md#回报匹配与成交增量)、[InflightBook](README.md#inflightbook)
+- 级别:table
+- 里程碑:M2
+- 前置:P0;a1@VS 的槽 s:买 X `qty 0.01`、限价 60000.00、IOC、意图 `flags = OrderIntent::SPEND`(花费上限 600 USDT),`place` 后 `Ack`;每行从前置重新开始
+- 实现:`crates/hft-oms/tests/matching.rs::oms_490_spend_buy`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| OMS-490.1 | `PartialFill{cum 0.012, avg_px 50000.00}`(花 600) | s 的 `oflags` 含 `SPEND`;`FillOut{qty 0.012}` 不带 `OVERFILL`;无 `Note{OmsOverfill}`;s 仍 `Live`、`filled = 0.012` |
+| OMS-490.2 | .1 之后 `Fill{cum 0.012}` | s → `Filled`;无新 `FillOut` |
+| OMS-490.3 | `PartialFill{cum 0.0121, avg_px 50000.00}`(花 605) | `FillOut.flags ⊇ OVERFILL`;`Note{OmsOverfill}` 一条 |
+| OMS-490.4 | `PartialFill{cum 0.006, avg_px 50000.00}`(花 300) | `open_buy(a1, X)` = 0.005(未花的 300 按 60000 折算),不是 `qty − filled` = 0.004;再 `Expired` → s `Cancelled`,`open_buy` = 0 |
+| OMS-490.5 | .1 之后 `Expired` | s → `Filled` |
+| OMS-490.6 | .1 之后 `QueryResult{Filled, cum 0.012, avg_px 50000.00}` | s → `Filled` |
+| OMS-490.7 | `spend_valid`:不带 `SPEND` 的卖单;带 `SPEND` 的买入 `Fok`;带 `SPEND` 的卖出 `Ioc`;带 `SPEND` 的买入 `Gtc`;带 `SPEND` 与 L1 链接的买入 `Ioc`;另以带 `SPEND` 的卖出 `Ioc` 意图直接 `place` | 真、真、假、假、假;直接 `place` 的槽 `oflags` 不含 `SPEND` |
+| OMS-490.8 | 不带 `SPEND` 的同一买单,`Fill{cum 0.012, avg_px 50000.00}` | `OVERFILL` 与 `Note{OmsOverfill}`(其他槽的超量规则不变) |

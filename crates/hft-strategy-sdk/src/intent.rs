@@ -10,7 +10,9 @@
 
 use core::mem::{align_of, offset_of, size_of};
 
-use hft_types::{AccountId, GroupId, InstId, Px, Qty, Rate, RejectBits, Side, Tif, VenueId};
+use hft_types::{
+    AccountId, AssetExp, GroupId, InstId, Notional, Px, Qty, Rate, RejectBits, Side, Tif, VenueId,
+};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 /// Category the strategy declares for an order intent; the final classification is hft-risk
@@ -195,7 +197,7 @@ impl LegLinkOpt {
     }
 }
 
-/// One order intent (112 B). `flags` bits: [`OrderIntent::REDUCE_ONLY`].
+/// One order intent (112 B). `flags` bits: [`OrderIntent::REDUCE_ONLY`], [`OrderIntent::SPEND`].
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct OrderIntent {
@@ -234,9 +236,78 @@ impl OrderIntent {
     /// `flags` bit: the order is reduce-only.
     pub const REDUCE_ONLY: u8 = 1;
 
+    /// `flags` bit: BUY by spend amount (only a `Buy` with `Tif::Ioc`/`Tif::Fok` and no link,
+    /// else the engine rejects the intent with `INVALID`): the order spends at most `px × qty` of
+    /// quote and may receive more than `qty` when it fills below `px`; it ends when the venue says
+    /// so. Same bit as hft-event `OrderFlags::SPEND`.
+    pub const SPEND: u8 = 0x80;
+
     /// Whether [`OrderIntent::REDUCE_ONLY`] is set.
     pub const fn reduce_only(&self) -> bool {
         self.flags & Self::REDUCE_ONLY != 0
+    }
+
+    /// Whether [`OrderIntent::SPEND`] is set.
+    pub const fn spend(&self) -> bool {
+        self.flags & Self::SPEND != 0
+    }
+
+    /// A single-leg `Open` BUY by spend amount ([`OrderIntent::SPEND`]) at worst price `px`:
+    /// spends at most `px × qty` of quote (`qty` from [`OrderIntent::spend_qty`]); `tif` must be
+    /// `Ioc` or `Fok`.
+    #[allow(clippy::too_many_arguments)]
+    pub const fn spend_buy(
+        venue: VenueId,
+        account: AccountId,
+        group: GroupId,
+        inst: InstId,
+        tif: Tif,
+        px: Px,
+        qty: Qty,
+        tag: u32,
+    ) -> OrderIntent {
+        OrderIntent {
+            venue,
+            account,
+            side: Side::Buy,
+            tif,
+            class: IntentClass::Open,
+            flags: Self::SPEND,
+            _pad: [0; 2],
+            inst,
+            group,
+            px,
+            qty,
+            link: LegLinkOpt::NONE,
+            tag,
+            max_rest_ms: 0,
+        }
+    }
+
+    /// The quantity whose cost at `px` is at most `quote` (a [`Notional`], exponent −6, in the
+    /// inst's quote asset): `quote / px` rounded down to a multiple of `lot` (`lot ≤ 1` = no
+    /// rounding). `Qty(0)` when `px ≤ 0`, `quote ≤ 0`, an exponent is out of range or the result
+    /// does not fit.
+    pub fn spend_qty(quote: Notional, px: Px, e: AssetExp, lot: i64) -> Qty {
+        if px.0 <= 0 || quote.0 <= 0 {
+            return Qty(0);
+        }
+        // qty = quote · 10^t / px with t = −6 − px_exp − qty_exp.
+        let t = -6 - i32::from(e.px_exp) - i32::from(e.qty_exp);
+        let Some(p) = 10i128.checked_pow(t.unsigned_abs()) else {
+            return Qty(0);
+        };
+        let (num, den) = if t >= 0 {
+            (i128::from(quote.0).checked_mul(p), Some(i128::from(px.0)))
+        } else {
+            (Some(i128::from(quote.0)), i128::from(px.0).checked_mul(p))
+        };
+        let (Some(num), Some(den)) = (num, den) else {
+            return Qty(0);
+        };
+        let q = num.checked_div(den).unwrap_or(0);
+        let q = if lot > 1 { q - q % i128::from(lot) } else { q };
+        Qty(i64::try_from(q).unwrap_or(0))
     }
 }
 

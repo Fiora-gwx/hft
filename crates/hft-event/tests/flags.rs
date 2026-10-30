@@ -20,6 +20,8 @@ fn evt_051_order_flags() {
         ("EVT-051.4", OrderFlags::HEDGE_FIX, 0x0008),
         ("EVT-051.5", OrderFlags::RISK_REDUCING, 0x0010),
         ("EVT-051.6", OrderFlags::SMOKE, 0x0020),
+        ("EVT-051.9", OrderFlags::POSITION_CLOSE, 0x0040),
+        ("EVT-051.9", OrderFlags::SPEND, 0x0080),
     ];
     for (row, f, v) in six {
         assert_eq!(f.0, v, "{row}");

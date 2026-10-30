@@ -627,7 +627,8 @@ spec: README.md
 | EVT-051.5 | `RISK_REDUCING` | `0x0010` |
 | EVT-051.6 | `SMOKE` | `0x0020` |
 | EVT-051.7 | `WIRE_MASK` | `0x00FF` |
-| EVT-051.8 | 六个标志两两按位与;各自与 `!WIRE_MASK` 按位与 | 全部为 0 |
+| EVT-051.8 | 八个标志(.1–.6、`POSITION_CLOSE`、`SPEND`)两两按位与;各自与 `!WIRE_MASK` 按位与 | 全部为 0 |
+| EVT-051.9 | `POSITION_CLOSE`、`SPEND` | `0x0040`、`0x0080` |
 
 ### EVT-052 OrderDecision 的 oflags 含 bit 8..15 时 debug 构建断言失败
 

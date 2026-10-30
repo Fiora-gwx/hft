@@ -31,6 +31,8 @@ pub(crate) struct FillIn {
     pub(crate) execution_cash: bool,
     /// QueryResult / reconciliation: without `avg_px` the order price is used (`PX_EST`).
     pub(crate) query: bool,
+    /// The report is a `Fill` (the venue says the order is done): ends a spend order.
+    pub(crate) done: bool,
     pub(crate) seq: u64,
 }
 
@@ -125,6 +127,9 @@ impl Oms {
         let smoke = it.origin == Origin::Command && it.smoke_ttl_ms > 0;
         if smoke {
             oflags |= OrderFlags::SMOKE.0;
+        }
+        if crate::price::spend_valid(oi) && oi.spend() {
+            oflags |= OrderFlags::SPEND.0;
         }
         let group = if smoke { GROUP_NONE } else { oi.group };
         let leg_ix = self.leg_ix_of(oi.account, group, oi.inst);
@@ -807,6 +812,7 @@ impl Oms {
             cash_sum: ev.cash_sum,
             execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
+            done: false,
             seq,
         };
         if let Some(fd) = self.apply_fill(ti, s, &f, now, out) {
@@ -836,6 +842,7 @@ impl Oms {
             cash_sum: ev.cash_sum,
             execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
+            done: ev.what == OrderEventKind::Fill,
             seq,
         };
         self.fill_to_state(ti, s, &f, None, now, seq, out);
@@ -869,13 +876,17 @@ impl Oms {
                 && to != st
             {
                 self.transition(ti, s, to, cause, now, seq, out);
+            } else if forced.is_none() && sl.spend() && f.done && st.open() {
+                // A spend order's `Fill` ends it even without a new increment (README "按金额买入").
+                self.transition(ti, s, OrderState::Filled, TransitionCause::Fill, now, seq, out);
             }
             return;
         };
         if st == OrderState::PendingNew {
             self.or_flag(ti, s, SlotFlags::FILL_BEFORE_ACK);
         }
-        let full = f.cum.0 >= sl.qty.0;
+        // A spend order ends when the venue says so (README "按金额买入"), not at `qty`.
+        let full = if sl.spend() { f.done } else { f.cum.0 >= sl.qty.0 };
         use OrderState as S;
         let (to, cause) = match forced {
             Some(x) => x,
@@ -977,10 +988,6 @@ impl Oms {
         }
         let info = *self.inst(sl.inst);
         let mut flags = 0u8;
-        let overfill = f.cum.0 > sl.qty.0;
-        if overfill {
-            flags |= fill_flags::OVERFILL;
-        }
         let hedge_gross = f
             .cum
             .0
@@ -998,6 +1005,21 @@ impl Oms {
             let i = i128::from(px.0) * i128::from(d);
             (i, sl.filled_notional + i)
         };
+        // A spend order may receive more than `qty`: it overfills only when it spent more than
+        // `px × qty` beyond the rounding of an average price (half a price unit per unit of
+        // `cum`); an estimated price (`PX_EST`) proves nothing (README "按金额买入").
+        let overfill = if sl.spend() {
+            flags & fill_flags::PX_EST == 0
+                && new_notional.saturating_mul(2)
+                    > (i128::from(sl.px.0) * i128::from(sl.qty.0))
+                        .saturating_mul(2)
+                        .saturating_add(i128::from(f.cum.0))
+        } else {
+            f.cum.0 > sl.qty.0
+        };
+        if overfill {
+            flags |= fill_flags::OVERFILL;
+        }
         let px = Px(div_half_even(incr, i128::from(d)));
         let fee_asset = if f.fee_asset.0 != 0 {
             f.fee_asset

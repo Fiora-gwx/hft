@@ -961,7 +961,7 @@ pub enum TargetReject { NotOwner = 1, BadLegs = 2, SpecInvalid = 3, AlgoUnsuppor
 pub struct OrderIntent {                 // 112 B
     pub venue: VenueId, pub account: AccountId, pub side: Side, pub tif: Tif,  // Ioc | Gtc | PostOnly | Fok
     pub class: IntentClass,              // 策略声明的类别;最终分类以 hft-risk classify() 为准
-    pub flags: u8,                       // REDUCE_ONLY
+    pub flags: u8,                       // REDUCE_ONLY = 1 | SPEND = 0x80(按金额买入,见下)
     pub _pad: [u8; 2],
     pub inst: InstId, pub group: GroupId,
     pub px: Px, pub qty: Qty,
@@ -1003,6 +1003,19 @@ pub struct HedgePlan {                   // 48 B
 #[repr(u8)] pub enum OnFail { Retry = 1, Reverse = 2, Hold = 3 }
 #[repr(u8)] pub enum ResidualPolicy { Defer = 1, TrimExcess = 2, Hold = 3 }
 #[repr(C)] pub struct OrderRef { pub venue: VenueId, pub account: AccountId, pub _pad: [u8; 2], pub slot: u32, pub gen: u32 } // 12 B;= hft-oms 的槽句柄(代码中写作 r#gen,2024 版保留字)
+```
+
+**按金额买入(`OrderIntent::SPEND`)**:只用于无链接的买入 `Ioc`/`Fok`(其他组合 → `Rejected(INVALID)`,判定归 [hft-sequencer 意图管线](../hft-sequencer/README.md#意图管线) 第 0 步);订单至多花 `px × qty` 的计价资产,成交价低于 `px` 时收到的数量可以多于 `qty`(这是正常成交,不是超量),何时终结由交易所回报决定。有的交易所只能按金额下吃单买入(该交易所的 venue 协议拒绝不带此位的吃单买入),策略只读 `VenueCaps`/回报,不按交易所名分支。风控按 `px × qty` 计名义与在途;仓位检查 #7 按 `qty` 计,实际成交多出的数量在成交后计入仓位([hft-risk](../hft-risk/README.md#已知限制与后续工作))。成交语义归 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量)。构造:
+
+```rust
+impl OrderIntent {
+    pub const SPEND: u8 = 0x80;                                  // 与 hft-event OrderFlags::SPEND 同位
+    pub const fn spend(&self) -> bool;
+    /// 单腿 Open 买入,flags = SPEND,max_rest_ms = 0;tif 须为 Ioc 或 Fok。
+    pub const fn spend_buy(venue: VenueId, account: AccountId, group: GroupId, inst: InstId, tif: Tif, px: Px, qty: Qty, tag: u32) -> OrderIntent;
+    /// quote(Notional,指数 −6,inst 的计价资产)在 px 下至多买到的数量:quote / px 向下取整到 lot 的整数倍(lot ≤ 1 不取整);px ≤ 0、quote ≤ 0、指数越界或溢出 → Qty(0)。
+    pub fn spend_qty(quote: Notional, px: Px, e: AssetExp, lot: i64) -> Qty;
+}
 ```
 
 `LegLink`/`HedgePlan`/`OrderRef`/`IntentClass` 的**类型**定义在本 crate(意图词汇);第二腿怎么下(`OnFill` 按第一腿每个成交增量、`Simultaneous` 在第一腿 `place` 的同一事件内)、重试、对冲量上限、`LinkTable` 等**语义**归 [hft-oms](../hft-oms/README.md) 与 [hft-exec](../hft-exec/README.md)。

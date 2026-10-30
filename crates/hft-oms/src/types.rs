@@ -350,6 +350,23 @@ impl OrderSlot {
     pub fn remaining(&self) -> Qty {
         Qty(self.qty.0.saturating_sub(self.filled.0).max(0))
     }
+    /// A BUY by spend amount (`OrderFlags::SPEND`, README "按金额买入").
+    #[inline]
+    pub fn spend(&self) -> bool {
+        self.oflags & hft_event::OrderFlags::SPEND.0 != 0
+    }
+    /// What the slot may still take, in quantity at its price: `remaining()`, or for a spend
+    /// order `qty − ⌈filled_notional / px⌉` (≥ 0), the unspent part of `px × qty`.
+    #[inline]
+    pub fn open_qty(&self) -> Qty {
+        if !self.spend() || self.px.0 <= 0 {
+            return self.remaining();
+        }
+        let px = i128::from(self.px.0);
+        let used = (self.filled_notional.max(0) + px - 1) / px;
+        let rem = i128::from(self.qty.0).saturating_sub(used).max(0);
+        Qty(i64::try_from(rem).unwrap_or(0))
+    }
     /// Handle of this generation.
     #[inline]
     pub fn handle(&self) -> OrderRef {

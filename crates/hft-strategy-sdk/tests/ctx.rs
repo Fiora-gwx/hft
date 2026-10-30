@@ -225,3 +225,54 @@ fn sdk_212_timer_admission_preserves_call_order() {
     );
     assert_eq!((remaining, c.next_timer_id(), c.full_count()), (1, u64::MAX, 1));
 }
+
+#[test]
+fn sdk_216_spend_buy_and_spend_qty() {
+    use hft_types::{AssetExp, Notional, Tif};
+    assert_eq!(OrderIntent::SPEND, 0x80, "SDK-216.1");
+    assert_eq!(
+        u16::from(OrderIntent::SPEND),
+        hft_event::OrderFlags::SPEND.0,
+        "SDK-216.1"
+    );
+    let o = OrderIntent::spend_buy(V1, A1, G1, I1, Tif::Ioc, Px(110), Qty(9_090_000), 7);
+    assert_eq!(o.side, Side::Buy, "SDK-216.1");
+    assert_eq!(o.class, IntentClass::Open, "SDK-216.1");
+    assert_eq!(o.tif, Tif::Ioc, "SDK-216.1");
+    assert_eq!(o.flags, OrderIntent::SPEND, "SDK-216.1");
+    assert!(o.spend() && !o.reduce_only(), "SDK-216.1");
+    assert!(o.link.get().is_none(), "SDK-216.1");
+    assert_eq!((o.max_rest_ms, o.tag), (0, 7), "SDK-216.1");
+    assert_eq!(
+        (o.venue, o.account, o.group, o.inst),
+        (V1, A1, G1, I1),
+        "SDK-216.1"
+    );
+    assert_eq!((o.px, o.qty), (Px(110), Qty(9_090_000)), "SDK-216.1");
+    let e = AssetExp {
+        px_exp: -3,
+        qty_exp: -6,
+    };
+    let one = Notional(1_000_000);
+    assert_eq!(
+        OrderIntent::spend_qty(one, Px(110), e, 10_000),
+        Qty(9_090_000),
+        "SDK-216.2"
+    );
+    assert_eq!(
+        OrderIntent::spend_qty(one, Px(110), e, 1),
+        Qty(9_090_909),
+        "SDK-216.3"
+    );
+    assert_eq!(OrderIntent::spend_qty(one, Px(0), e, 1), Qty(0), "SDK-216.4");
+    assert_eq!(
+        OrderIntent::spend_qty(Notional(0), Px(110), e, 1),
+        Qty(0),
+        "SDK-216.4"
+    );
+    let bad = AssetExp {
+        px_exp: 40,
+        qty_exp: -6,
+    };
+    assert_eq!(OrderIntent::spend_qty(one, Px(110), bad, 1), Qty(0), "SDK-216.4");
+}
