@@ -130,7 +130,8 @@ fn rsr_004_calibration_table() {
     // .1 the native fields and research latc.json pools (seconds), with the file hash.
     let text = br#"{"maker_fill":"queue_cap","tombstone":true,"cancel_us":[35000,5000],
         "taker":{"base_us":195000,"slow_us":1250000,"slow_ppm":125000,"resp_us":15000},
-        "fee_k":0.07,"gtd_ms":300000,"fill_resp_us":12000,"split_us":5000,"min_n":20,
+        "fee_k":0.07,"gtd_ms":300000,"fill_resp_us":12000,"taker_nofill_reject":true,
+        "split_us":5000,"min_n":20,
         "thr":[30.0,60.0],"window_s":300,"phase_s":5,
         "pools":{"ack|1|0|0":[0.04,0.05],"cxl|2":[0.06],"take":[0.2],"other":[1.0]}}"#;
     let mut p = SimParams::default();
@@ -147,6 +148,7 @@ fn rsr_004_calibration_table() {
     );
     assert_eq!(v.fee, FeeModel::BinaryTaker { k_e9: 70_000_000 }, "RSR-004.1");
     assert_eq!((v.gtd_ms, v.fill_resp_us), (300_000, Some(12_000)), "RSR-004.1");
+    assert!(v.taker_nofill_reject, "RSR-004.1");
     assert_eq!(p.cond.load_thr_ns, vec![30_000_000, 60_000_000], "RSR-004.1");
     let pools = v.pools.as_ref().unwrap();
     assert_eq!(

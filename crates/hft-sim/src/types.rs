@@ -183,6 +183,9 @@ pub struct VenueModel {
     /// model's response leg).
     pub fill_resp_us: Option<u32>,
     pub pools: Option<LatPools>,
+    /// An Ioc/Fok order that matches nothing is rejected (`RejectReason::NoMatch`, no Ack) instead
+    /// of Ack + `Expired`: the Polymarket FAK/FOK HTTP 400 answer (venue-polymarket "吃单").
+    pub taker_nofill_reject: bool,
 }
 
 impl Default for VenueModel {
@@ -195,6 +198,7 @@ impl Default for VenueModel {
             gtd_ms: 0,
             fill_resp_us: None,
             pools: None,
+            taker_nofill_reject: false,
         }
     }
 }
@@ -268,6 +272,8 @@ pub enum RejectReason {
     InsufficientMargin = 10,
     RateLimited = 11,
     Injected = 12,
+    /// An Ioc/Fok order that matched nothing (`VenueModel::taker_nofill_reject`).
+    NoMatch = 13,
 }
 
 impl RejectReason {

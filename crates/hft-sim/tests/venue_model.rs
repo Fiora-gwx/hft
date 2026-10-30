@@ -394,3 +394,112 @@ fn sim_239_default_model_is_the_plain_exchange() {
     };
     assert_eq!(run(false), run(true), "SIM-239.1");
 }
+
+/// SIM-241 book: asks 5 @ 0.40 and (`deep`) 50 @ 0.45.
+fn spend_book(deep: bool, vm: VenueModel) -> Sim {
+    let mut s = binary(MakerFill::QueueCap, vm);
+    let asks: &[(&str, &str)] = if deep {
+        &[("0.40", "5"), ("0.45", "50")]
+    } else {
+        &[("0.40", "5")]
+    };
+    s.topn(ms(100), UP_B5, asks, &[("0.35", "50")]);
+    s
+}
+
+fn spend_place(s: &mut Sim, qty: &str, p: &str, tif: Tif, oflags: u16) -> hft_types::SlotId {
+    s.place_flags(A9, UP_B5, Buy, q(qty), px(p), tif, oflags, ms(100))
+}
+
+#[test]
+fn sim_241_spend_buy_fills_by_spend() {
+    use hft_event::OrderFlags;
+    let spend = OrderFlags::SPEND.0;
+    use OrderEventKind::{Ack, Expired, Fill, PartialFill};
+    // .1 10 @ 0.50 spends at most 5.00: 5 @ 0.40 (2.00), then 6 @ 0.45 (2.70): 11 shares.
+    let mut s = spend_book(true, VenueModel::default());
+    let o = spend_place(&mut s, "10", "0.50", Tif::Ioc, spend);
+    s.run_to(ms(200));
+    assert_eq!(
+        s.fills_of(A9, o),
+        vec![(px("0.40"), q("5")), (px("0.45"), q("6"))],
+        "SIM-241.1"
+    );
+    assert_eq!(s.whats(A9, o), vec![Ack, PartialFill, Fill], "SIM-241.1");
+    // .2 liquidity ends first: 5 @ 0.40, the rest expires.
+    let mut s = spend_book(false, VenueModel::default());
+    let o = spend_place(&mut s, "10", "0.50", Tif::Ioc, spend);
+    s.run_to(ms(200));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.40"), q("5"))], "SIM-241.2");
+    assert_eq!(s.whats(A9, o), vec![Ack, PartialFill, Expired], "SIM-241.2");
+    // .3 FOK on the thin book: nothing.
+    let mut s = spend_book(false, VenueModel::default());
+    let o = spend_place(&mut s, "10", "0.50", Tif::Fok, spend);
+    s.run_to(ms(200));
+    assert_eq!(s.whats(A9, o), vec![Ack, Expired], "SIM-241.3");
+    // .4 FOK on the deep book: as .1.
+    let mut s = spend_book(true, VenueModel::default());
+    let o = spend_place(&mut s, "10", "0.50", Tif::Fok, spend);
+    s.run_to(ms(200));
+    assert_eq!(
+        s.fills_of(A9, o),
+        vec![(px("0.40"), q("5")), (px("0.45"), q("6"))],
+        "SIM-241.4"
+    );
+    // .5 without the flag: 10 shares (5 @ 0.40, 5 @ 0.45); on a sell the flag changes nothing.
+    let mut s = spend_book(true, VenueModel::default());
+    let o = spend_place(&mut s, "10", "0.50", Tif::Ioc, 0);
+    s.run_to(ms(200));
+    assert_eq!(
+        s.fills_of(A9, o),
+        vec![(px("0.40"), q("5")), (px("0.45"), q("5"))],
+        "SIM-241.5"
+    );
+    assert_eq!(s.whats(A9, o), vec![Ack, PartialFill, Fill], "SIM-241.5");
+    let o = s.place_flags(
+        A9,
+        UP_B5,
+        Side::Sell,
+        q("10"),
+        px("0.30"),
+        Tif::Ioc,
+        spend,
+        ms(300),
+    );
+    s.run_to(ms(400));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.35"), q("10"))], "SIM-241.5");
+}
+
+#[test]
+fn sim_242_taker_nofill_reject() {
+    use OrderEventKind::{Ack, Expired, PartialFill, Reject};
+    let on = || VenueModel {
+        taker_nofill_reject: true,
+        ..VenueModel::default()
+    };
+    // .1 an IOC below the ask: only a Reject (NoMatch), no Ack.
+    let mut s = binary(MakerFill::QueueCap, on());
+    let o = s.place(A9, UP_B5, Buy, "10", "0.46", Tif::Ioc, ms(100));
+    s.run_to(ms(200));
+    assert_eq!(s.whats(A9, o), vec![Reject], "SIM-242.1");
+    assert_eq!(
+        s.events_of(A9, o)[0].reject_code,
+        hft_sim::RejectReason::NoMatch.code(),
+        "SIM-242.1"
+    );
+    // .2 a FOK that cannot fill completely: Reject.
+    let mut s = binary(MakerFill::QueueCap, on());
+    let o = s.place(A9, UP_B5, Buy, "60", "0.47", Tif::Fok, ms(100));
+    s.run_to(ms(200));
+    assert_eq!(s.whats(A9, o), vec![Reject], "SIM-242.2");
+    // .3 a partial IOC fill is unchanged.
+    let mut s = binary(MakerFill::QueueCap, on());
+    let o = s.place(A9, UP_B5, Buy, "60", "0.47", Tif::Ioc, ms(100));
+    s.run_to(ms(200));
+    assert_eq!(s.whats(A9, o), vec![Ack, PartialFill, Expired], "SIM-242.3");
+    // .4 option off: Ack + Expired.
+    let mut s = binary(MakerFill::QueueCap, VenueModel::default());
+    let o = s.place(A9, UP_B5, Buy, "10", "0.46", Tif::Ioc, ms(100));
+    s.run_to(ms(200));
+    assert_eq!(s.whats(A9, o), vec![Ack, Expired], "SIM-242.4");
+}

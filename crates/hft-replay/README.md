@@ -110,7 +110,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | 校准表字段 | 含义 |
 |---|---|
 | `maker_fill` | `queue_cap` \| `queue` \| `through` |
-| `tombstone`、`cancel_us: [entry, resp]`、`fill_resp_us`、`gtd_ms` | 同名 `VenueModel` 字段 |
+| `tombstone`、`cancel_us: [entry, resp]`、`fill_resp_us`、`gtd_ms`、`taker_nofill_reject` | 同名 `VenueModel` 字段 |
 | `taker: {base_us, slow_us, slow_ppm, resp_us}` | `TakerDelay` |
 | `fee_k` | `FeeModel::BinaryTaker`(0.07 = 7 %) |
 | `pools: {"leg\|load\|move\|phase": [秒, …], "leg\|load": …, "leg": …}`、`split_us`(缺省 5 000)、`min_n`(缺省 20) | 条件延迟池;leg `ack`/`place`、`cxl`/`cancel`、`take`/`taker`,其他 leg 忽略(研究侧 `latc.json` 可直接读) |

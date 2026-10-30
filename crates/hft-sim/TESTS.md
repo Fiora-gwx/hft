@@ -18,7 +18,7 @@ spec: README.md
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
 | 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226、SIM-231 |
 | journal 衔接(`glue` 模块) | SIM-230 |
-| 场所行为选项(`VenueModel`) | SIM-232–SIM-239、SIM-240 |
+| 场所行为选项(`VenueModel`) | SIM-232–SIM-239、SIM-240、SIM-242 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -31,7 +31,7 @@ spec: README.md
 | 实现说明 | 不适用:见子节 |
 | 1. 时间 | SIM-010–SIM-012 |
 | 2. 簿副本 | SIM-020–SIM-023 |
-| 3. 吃单撮合 | SIM-030–SIM-036、SIM-125 |
+| 3. 吃单撮合 | SIM-030–SIM-036、SIM-125、SIM-241 |
 | 4. 挂单(预留给 MakerFirst) | SIM-228、SIM-229、SIM-040、SIM-041、SIM-162 |
 | 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125、SIM-223 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
@@ -1925,3 +1925,34 @@ spec: README.md
 | SIM-240.1 | 无样本;分钟 0 延迟 10 ms;分钟 1 延迟 0.5 ms;分钟 2 延迟 3 ms;venue 2 的 50 ms 样本 | `load` 依次为 1、1(分钟 0 未结束)、2、0;未跟踪 venue 的样本不改变 `load` |
 | SIM-240.2 | 参考 inst 9 的报价(bid + ask 2 000 000)在 0.5 s 内变 0.2 bp、0.8 bp、2 bp;另一 inst 8 的报价;1.85 s 时只剩最后一条在 1 s 内 | `mv` 依次 0、1、2;inst 8 不改变结果;最后为 0 |
 | SIM-240.3 | `utc_ns` 在窗口第 4 s、第 5 s | `phase` 0、1 |
+
+### SIM-241 按金额买入:逐档按未花预算成交,预算先用完才是 Fill
+
+- 规则:[3. 吃单撮合](README.md#3-吃单撮合)第 6 步
+- 级别:table
+- 里程碑:M3
+- 前置:`rd_binary()`,`VenueModel::default()`;Up 簿卖 0.40 × 5、0.45 × 50(浅簿:只有 0.40 × 5),买 0.35 × 50;`A9` 在 100 ms 下单,`SPEND` = `OrderFlags::SPEND`;每行从前置重新开始
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_241_spend_buy_fills_by_spend`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-241.1 | IOC 买 10 @ 0.50,`SPEND`(预算 5.00) | 成交 5 @ 0.40、6 @ 0.45(共 11 份);回报 `Ack`、`PartialFill`、`Fill` |
+| SIM-241.2 | 浅簿,同上 | 成交 5 @ 0.40;`Ack`、`PartialFill`、`Expired` |
+| SIM-241.3 | 浅簿,FOK,`SPEND` | `Ack`、`Expired`,无成交 |
+| SIM-241.4 | FOK,`SPEND` | 同 .1 的成交 |
+| SIM-241.5 | IOC 买 10 @ 0.50 不带 `SPEND`;之后 300 ms 带 `SPEND` 的 IOC 卖 10 @ 0.30 | 成交 5 @ 0.40、5 @ 0.45,`Ack`、`PartialFill`、`Fill`;卖单成交 10 @ 0.35(按普通单) |
+
+### SIM-242 吃单无成交即拒单(`taker_nofill_reject`)
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)、[拒单规则](README.md#拒单规则)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿(卖 0.47 × 50);每行从前置重新开始
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_242_taker_nofill_reject`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-242.1 | 开;IOC 买 10 @ 0.46 | 只有 `Reject`,`reject_code = SIM_CODE_BASE + 13`(`NoMatch`) |
+| SIM-242.2 | 开;FOK 买 60 @ 0.47 | 只有 `Reject` |
+| SIM-242.3 | 开;IOC 买 60 @ 0.47 | `Ack`、`PartialFill`、`Expired`(有成交不受影响) |
+| SIM-242.4 | 关;IOC 买 10 @ 0.46 | `Ack`、`Expired` |
