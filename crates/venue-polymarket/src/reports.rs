@@ -1060,8 +1060,12 @@ fn taker_finish(
     w.cum = cum;
     w.px = avg;
     let side = if t.spec.sell { Side::Sell } else { Side::Buy };
+    // A buy is a spend order (hft-oms "按金额买入"): done when its USDC is used, whatever the
+    // shares; a sell is done at its size.
+    let spend = !t.spec.sell;
+    let done = if spend { full } else { cum >= t.spec.qty };
     if m > prev {
-        e.what = if cum >= t.spec.qty {
+        e.what = if done {
             OrderEventKind::Fill
         } else {
             OrderEventKind::PartialFill
@@ -1074,7 +1078,14 @@ fn taker_finish(
         out.order(&e);
         o.events += 1;
     }
-    if cum < t.spec.qty {
+    // The end, unless the fill above already said it: `QueryResult{Filled}` when the maker amount
+    // was used, else `Expired` (the rest killed). A sell below its size only.
+    let end_owed = if spend {
+        !(done && m > prev)
+    } else {
+        cum < t.spec.qty
+    };
+    if end_owed {
         if full {
             e.what = OrderEventKind::QueryResult;
             e.detail = status::FILLED;
@@ -1160,7 +1171,9 @@ fn trade_event(
     }
     let (epoch, slot, r#gen) = resolve(out, key, owner).unwrap_or((0, SlotId::UNRESOLVED, 0));
     let mut e = blank(rx.account, rx);
-    e.what = if cum >= t.spec.qty {
+    // A buy (spend order) is never done by a trade: only its place answer knows whether the
+    // whole maker amount was used.
+    e.what = if t.spec.sell && cum >= t.spec.qty {
         OrderEventKind::Fill
     } else {
         OrderEventKind::PartialFill

@@ -285,6 +285,7 @@ pub(crate) fn amounts(
 
 /// What the gw remembers of a FAK / FOK order it signed (README "吃单"): the order quantity
 /// (inst qty units), the signed maker amount (1e-6: USDC of a buy, shares of a sell) and the side.
+/// Every taker buy is a spend order (`OrderFlags::SPEND`): it ends when its maker amount is used.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub(crate) struct TakerSpec {
     pub qty: i64,
@@ -421,6 +422,12 @@ fn place(
     }
     let flags = OrderFlags(c.oflags);
     if flags.contains(OrderFlags::REDUCE_ONLY) || flags.contains(OrderFlags::POSITION_CLOSE) {
+        return Err(EncodeErr::Unsupported(c.op));
+    }
+    // A taker buy spends USDC and may receive more shares than its size: only a spend order
+    // (`OrderFlags::SPEND`) may be one; the flag means nothing on any other order (README "吃单").
+    let taker_buy = matches!(c.tif, Tif::Ioc | Tif::Fok) && c.side == Side::Buy;
+    if taker_buy != flags.contains(OrderFlags::SPEND) {
         return Err(EncodeErr::Unsupported(c.op));
     }
     // Resting: post-only (rejected if it would match) or a plain GTD bid/ask. Taker (README

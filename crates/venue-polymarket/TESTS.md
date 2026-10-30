@@ -574,7 +574,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 - 规则:[吃单](README.md#吃单)、[下单](README.md#下单)
 - 级别:table
 - 里程碑:M3
-- 前置:同 PMK-023;签名相符 = 请求体的 `signature` 等于测试私钥对体内各字段的存款钱包签名;金额对照 2026-10-30 实盘探针(仓外证据 `fak_probe_20261030_clean.json`,官方客户端 `create_market_order` 的请求体);`btc-up-1` 绑定探针窗口的 Up 代币
+- 前置:同 PMK-023;吃单买入都带 `OrderFlags::SPEND`(另注的除外);签名相符 = 请求体的 `signature` 等于测试私钥对体内各字段的存款钱包签名;金额对照 2026-10-30 实盘探针(仓外证据 `fak_probe_20261030_clean.json`,官方客户端 `create_market_order` 的请求体);`btc-up-1` 绑定探针窗口的 Up 代币
 - 实现:`crates/venue-polymarket/tests/orders.rs::pmk_038_fak_and_fok_bodies`
 
 | 行 | 输入 | 期望 |
@@ -586,6 +586,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-038.5 | `btc-up-1`(tick 0.001):买 0.355 × 3 份;卖 0.355 × 3.005 份 | 1060000 / 2985910(份数 5 位小数);3000000 / 1065000 |
 | PMK-038.6 | `UP` 价 0.355(不在 tick 上);买 0.35 × 0.02 份(0.007 USDC);卖 0.35 × 0.009 份 | 均 `FieldOverflow` |
 | PMK-038.7 | 预签名开启:`Gtc` 0.35 × 3 份下单、空闲到底;同价同量 FAK;新 `GwCtx` 只下 FAK 后空闲 | 预签 3 张;FAK 当场签名(`timestamp` = 当时时钟、`salt` 低 20 位 = 7),`presigned()` 仍为 3;`gw_idle` 返回 `false`(FAK 不设锚) |
+| PMK-038.8 | 不带 `SPEND` 的 FAK 买;带 `SPEND` 的 FAK 卖;带 `SPEND` 的 `Gtc` 买;不带 `SPEND` 的 FOK 买 | 均 `Unsupported(Place)` |
 
 ### PMK-039 FAK/FOK 下单应答
 
@@ -600,7 +601,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-039.1 | 买 0.35 × 2.914286 份;200 `matched`,`takingAmount` 2.914286、`makingAmount` 1.02;再 `trade` `MATCHED`、`MINED` | `Ack{H 键}`,再 `Fill{qty 2 914 286, cum 2 914 286, px = avg_px 0.35, detail Buy}`,`events 2`,非 `outcome_unknown`;两条 `trade` 无事件、`skip = Listed` |
 | PMK-039.2 | FAK:400 `no orders found to match with FAK order. …`;FOK:400 `order couldn't be fully filled. …`;各再送一条该单的 `trade` `MATCHED` | 各一条 `Reject{slot 7, gen 3, reject_code = raw_code_str(消息)}`,`raw_code` 相同、非 `outcome_unknown`,两者码不同;`trade` 无事件 |
 | PMK-039.3 | 200 `success` true、`status` `unmatched` | `Ack`,再 `Expired{cum 0}` |
-| PMK-039.4 | 200 `delayed`;再 `trade` `MATCHED` 2.914286 @ 0.35 | 只有 `Ack`;`trade` 产出 `Fill{slot 7, epoch 5, cum 2 914 286, avg_px 0.35}`,`ex_ts_ns` = 帧 `timestamp` |
+| PMK-039.4 | 200 `delayed`;再 `trade` `MATCHED` 2.914286 @ 0.35 | 只有 `Ack`;`trade` 产出 `PartialFill{slot 7, epoch 5, cum 2 914 286, avg_px 0.35}`(买单的 `trade` 不终结订单),`ex_ts_ns` = 帧 `timestamp` |
 
 ### PMK-040 FAK 成交:`trade` 事件与应答按累计量收敛
 
@@ -615,8 +616,9 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-040.1 | 先应答 `matched`(3、1.2),再 `trade` `MATCHED` 3 @ 0.40 | `Ack`、`PartialFill{qty 3 000 000, cum 3 000 000, avg_px 0.40}`、`Expired{cum 3 000 000, avg_px 0.40}`(`events 3`);`trade` 无事件 |
 | PMK-040.2 | 先 `trade` `MATCHED`、`MINED`、同一 `id` 的 `MATCHED`,再应答 | `PartialFill{slot 7, epoch 5, cum 3 000 000}`(`ex_ts_ns` = 帧时间),其后两条无事件;应答:`Ack`、`Expired{cum 3 000 000}`,无成交 |
 | PMK-040.3 | 两笔 `trade`(不同 `id`):2 @ 0.39、1 @ 0.40;再应答(3、1.18) | `PartialFill{2, cum 2, avg 0.39}`、`PartialFill{1, cum 3, avg 0.393}`;`Ack`、`Expired{cum 3, avg 0.393}` |
-| PMK-040.4 | 买 0.35 × 2.91 份(签 1.01 USDC);应答(2.885714、1.01) | `Ack`、`PartialFill{cum 2 885 714, avg 0.35}`、`QueryResult{Filled(3), cum 2 885 714}`(金额用完、低于订单量) |
+| PMK-040.4 | 买 0.35 × 2.91 份(签 1.01 USDC);应答(2.885714、1.01) | `Ack`、`Fill{cum 2 885 714, avg 0.35}`(金额用完即成交完,低于订单量) |
 | PMK-040.5 | 卖 0.40 × 3 份;应答 `takingAmount` 1.26、`makingAmount` 3 | `Ack`、`Fill{qty 3 000 000, cum 3 000 000, avg_px 0.42, detail Sell}` |
 | PMK-040.6 | 买 0.40 × 3 份;应答(3.157894、1.2) | `Ack`、`Fill{cum 3 157 894, avg_px 0.38}`(多于订单量) |
 | PMK-040.7 | 买 0.35 × 2.914286 份,应答未到;查单 200 `MATCHED`,`original_size` 2.9142、`size_matched` 2.914286;再 `trade` `MATCHED` | `Ack`、`QueryResult{Filled(3), cum 2 914 286, avg_px 0.35}`(不按形状错误);`trade` 无事件 |
 | PMK-040.8 | 该 FAK 单的 `order` `UPDATE`;`taker_order_id` 不是本进程 FAK 单的 `trade` | 无事件;后者 `skip = Listed` |
+| PMK-040.9 | 2026-10-30 探针:买 0.13 × 7.7 份(签 1.00 USDC、最少 7.6923 份);`trade` 5 @ 0.11、4.09091 @ 0.11(不同 `id`);再应答(9.09091、1) | `PartialFill{cum 5}`、`PartialFill{cum 9 090 910}`(超过订单量仍是 `PartialFill`);`Ack`、`QueryResult{Filled(3), cum 9 090 910, avg 0.11}` |
