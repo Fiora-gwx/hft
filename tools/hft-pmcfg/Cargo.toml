@@ -1,0 +1,41 @@
+[package]
+name = "hft-pmcfg"
+description = "Polymarket hft-core configuration generator (book-observer sim, binary-maker sim, live maker with one or more Live accounts): refdata, engine, risk and strategy blobs plus core.toml and principals.toml; spec: tools/hft-pmcfg/README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "hft-pmcfg"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-strategy-sdk.workspace = true
+# The strategy descriptors (`kinds()`: book-observer, binary-maker) of the one strategy list.
+hft-strategy-registry = { path = "../../strategies/registry" }
+hft-risk.workspace = true
+hft-ledger.workspace = true
+hft-oms.workspace = true
+hft-exec.workspace = true
+# EngineSetup and its ECF1 encoder (default features: no journal writer, no test hooks).
+hft-sequencer.workspace = true
+hft-venue-proto.workspace = true
+venue-binance.workspace = true
+venue-polymarket.workspace = true
+toml.workspace = true
+zerocopy.workspace = true
+# Blob SHA-256 in core.toml (not `workspace = true`: that entry enables `asm`).
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+# PMC-006: the engine base equals the SeqRig's `engine_setup` the generator was built on.
+hft-testkit = { workspace = true, features = ["seq"] }

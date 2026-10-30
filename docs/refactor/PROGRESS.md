@@ -84,7 +84,7 @@
 | 工作项 | 状态 | 提交 | 验收 |
 |---|---|---|---|
 | `feat/run-mode-enum`:`config::Assembly{Live{prod_orders}, Sim}` 启动时解析一次,配置校验、日志预算、`runtime::run`、venue 装配都读它 | done | 9ce2b6b3 | CORE-448;`--check` 新旧二进制对仓内 3 份配置与生成的 PM sim/maker/live/双账户配置结果相同(含拒绝路径的错误码与退出码);回放装配属于 replayer 的 driver,不进此枚举 |
-| `feat/hft-pmcfg` | todo | | |
+| `feat/hft-pmcfg`:Polymarket 配置生成器从 `apps/hft-core/tests/support` 移到 `tools/hft-pmcfg`(lib + bin `hft-pmcfg`);`--account LABEL:UID:ROLE KEYS_DIR`(可重复,ROLE 目前只收 `any`),`--live-account` 保留为简写;hft-core `tests/support` 为薄包装、`pm_sim_config` example 为同一命令行的薄壳;hft-pmcfg 成为 registry 第三个使用方;scaffold-gate 复制全部 registry 使用方的清单 | done | 37331170(scaffold-gate)、475e93a8 | PMC-001–006 6/6;hft-core(`--features polymarket`)全绿;迁移前 `pm_sim_config` 与迁移后 `hft-pmcfg`/shim 7 组命令行 42 个文件 `cmp` 全同;`xtask deps`/`hot-check`/`test-trace`/`doc-check` PASS(doc-check 问题数 0、警告数与改动前相同);本地 `scaffold-gate --keep` 构建/DST/`--check` 各步通过(只因工作区未提交而在第 4 步报 FAIL) |
 | `docs/baseline-v2` | todo | | |
 
 ## 回归 journal 集
@@ -112,6 +112,7 @@
 | CORE-448 | M6 | 运行装配 |
 | CORE-446、VEN-412、VEN-413、PMK-037(新增);CORE-441.5/.6、REF-075.6、REF-009.23(改写) | M4 | 多 Live 账户 gw 装配、撤单限速桶 |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
+| PMC-001–PMC-006(新增);TOOL-021(期望扩展:hft-pmcfg 清单副本) | M6 | hft-pmcfg 命令行、`--account`、多账户输出、工具 = 库逐字节、引擎基底 = SeqRig |
 
 ## 执行中的技术决定
 

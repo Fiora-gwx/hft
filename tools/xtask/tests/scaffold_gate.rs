@@ -124,6 +124,7 @@ fn tool_021_registry_copy_and_shared_target() {
         "strategies/ci-probe",
         "apps/hft-core",
         "apps/replayer",
+        "tools/hft-pmcfg",
     ] {
         assert!(members.contains(&m), "{m} not in {members:?}");
     }
@@ -146,6 +147,19 @@ fn tool_021_registry_copy_and_shared_target() {
     assert_eq!(
         core["dependencies"]["hft-strategy-registry"]["workspace"].as_bool(),
         Some(true)
+    );
+    // The third registry user: its registry dependency and hft-core's path to it go to the copies.
+    let pmcfg: toml::Table = f
+        .read(&format!("{DEC}/tools/hft-pmcfg/Cargo.toml"))
+        .parse()
+        .unwrap();
+    assert_eq!(
+        pmcfg["dependencies"]["hft-strategy-registry"]["path"].as_str(),
+        Some("../../registry")
+    );
+    assert_eq!(
+        core["dev-dependencies"]["hft-pmcfg"]["path"].as_str(),
+        Some("../../tools/hft-pmcfg")
     );
     // Every build and test runs on the main target directory; none under target/decoupling/.
     let calls = log(&s);

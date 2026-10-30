@@ -325,7 +325,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   1. 运行 `cargo xtask scaffold-gate --keep`
 - 期望:
   - `target/decoupling/registry/src/lib.rs` 的 `strategy_set!` 调用最后一项是 `CiProbe`,其余各行与仓库中的 registry 逐字节相同
-  - 临时 workspace 清单 `target/decoupling/Cargo.toml` 的 `members` 含 `registry`、`strategies/ci-probe`、`apps/hft-core`、`apps/replayer`,其 `[workspace.dependencies]` 的 `hft-strategy-registry` 指向 `registry`;`apps/replayer` 清单副本中直接写路径的 registry 依赖改为 `../../registry`
+  - 临时 workspace 清单 `target/decoupling/Cargo.toml` 的 `members` 含 `registry`、`strategies/ci-probe`、`apps/hft-core`、`apps/replayer`、`tools/hft-pmcfg`,其 `[workspace.dependencies]` 的 `hft-strategy-registry` 指向 `registry`;`apps/replayer` 与 `tools/hft-pmcfg` 清单副本中直接写路径的 registry 依赖改为 `../../registry`;`apps/hft-core` 副本对 `hft-pmcfg` 的 dev 依赖改为 `../../tools/hft-pmcfg`(副本)
   - 每次构建调用的环境 `CARGO_TARGET_DIR = /w/target`;运行结束后 `target/decoupling/` 下没有 `target/` 子目录
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_021_registry_copy_and_shared_target`
 

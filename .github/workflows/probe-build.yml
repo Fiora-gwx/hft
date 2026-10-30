@@ -1,5 +1,5 @@
 # M1.5 latency probe binaries (tools/latency-slice/README.md, design/11 §3.1).
-# latency-slice, hostprobe, pm-md-probe and the Polymarket hft-core (with pm_sim_config) are not part of any production release archive; this manual workflow
+# latency-slice, hostprobe, pm-md-probe and the Polymarket hft-core (with hft-pmcfg and its shim pm_sim_config) are not part of any production release archive; this manual workflow
 # builds them for the rented probe host (aarch64, release profile, target-cpu neoverse-v1) from a
 # commit whose ci.yml is green, and keeps them as a short-lived workflow artifact. Never runs on
 # servers; the probe host only runs the downloaded binaries.
@@ -42,15 +42,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: probe-arm64
-      - name: Build latency-slice, hostprobe, pm-md-probe and the Polymarket hft-core
+      - name: Build latency-slice, hostprobe, pm-md-probe, hft-pmcfg and the Polymarket hft-core
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo build --locked --release -p latency-slice -p hostprobe -p pm-md-probe
+          cargo build --locked --release -p latency-slice -p hostprobe -p pm-md-probe -p hft-pmcfg
           cargo build --locked --release -p hft-core --features polymarket --bin hft-core --example pm_sim_config
           mkdir -p out/bin
-          cp target/release/latency-slice target/release/hostprobe target/release/pm-md-probe out/bin/
+          cp target/release/latency-slice target/release/hostprobe target/release/pm-md-probe target/release/hft-pmcfg out/bin/
           cp target/release/hft-core target/release/examples/pm_sim_config out/bin/
           cp -r tools/pm-md-probe/scripts out/
           git rev-parse HEAD > out/SHA

@@ -97,12 +97,12 @@ L2 策略构件  hft-strat-lib(L0 + hft-strategy-sdk)  hft-feature(hft-strategy-
 L3 运行时    hft-rt  hft-journal  hft-net  hft-venue(依赖 hft-venue-proto,不依赖具体 venue)
 L4 装配核    hft-sequencer(hft-strategy-sdk + L1 + hft-journal + hft-rt;对 StrategySet 泛型,不依赖任何策略包)
 L5 冷/工具   hft-ctl  hft-telemetry  hft-sim  hft-replay(研究回放,只被 replayer 依赖)  hft-py(reader + ledger + SDK params 编解码)  hft-testkit(共用 hft-sim 撮合器;不依赖 registry)
-应用装配    hft-core → hft-venue-proto;dev: hft-testkit + hft-ctl-proto
+应用装配    hft-core → hft-venue-proto;dev: hft-testkit + hft-ctl-proto + hft-pmcfg
 测试装配    hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional     hft-ext-proto  hft-amm  hft-chain-evm  hft-chain-solana(冻结)
 strategies   strategies/<name>:只依赖 hft-strategy-sdk + hft-strat-lib + hft-feature(Python pipeline 插件随包在 strategies/<name>/pipeline/);strategies/registry(hft-strategy-registry):唯一策略清单,依赖各策略包;dev: hft-ctl + hft-ctl-proto
 apps         hft-core、replayer(二者经 hft-strategy-registry 取得同一 StrategySet)journal-archiver watchtower reconciler kill-switch;optional:chain-core chain-grpc-relay mock-exchange
-tools        hft-cfg(按 schema 通用编码) xtask hft-verify hostprobe az-probe hft-secrets latency-slice(M1.5 探针专用)
+tools        hft-cfg(按 schema 通用编码) xtask hft-verify hostprobe az-probe hft-secrets latency-slice(M1.5 探针专用) hft-pmcfg(Polymarket 配置生成,经 hft-strategy-registry 取策略描述符)
 python       框架包 ops_bot  pipeline  treasury;optional:research
 ```
 

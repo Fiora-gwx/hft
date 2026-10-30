@@ -1,5 +1,5 @@
 ---
-description: "全仓唯一列出真实策略的地方:一次 strategy_set! 调用生成 StrategySet,外加 export_schemas();hft-core 与 replayer 依赖它而不直接依赖任何策略 crate;需要真实策略的引擎级测试也放在这里"
+description: "全仓唯一列出真实策略的地方:一次 strategy_set! 调用生成 StrategySet,外加 export_schemas();hft-core、replayer 与配置生成器 hft-pmcfg 依赖它而不直接依赖任何策略 crate;需要真实策略的引擎级测试也放在这里"
 kind: crate
 tier: hot
 scope: core
@@ -10,7 +10,7 @@ status: impl
 
 ## 概要
 
-`hft-strategy-registry`(目录 `strategies/registry`)是**全仓唯一列出真实策略的地方**:它包含唯一一次列出真实策略的 `strategy_set!` 调用(生成 `Strategies: StrategySet`)与冷路径函数 `export_schemas()`。只有 [apps/hft-core](../../apps/hft-core/README.md) 与 [apps/replayer](../../apps/replayer/README.md) 依赖本 crate,不直接依赖任何 `strategies/*`,所以实盘、模拟与回放天然使用同一列表。[hft-testkit](../../crates/hft-testkit/README.md) **不依赖**本 crate:它只带 CI 测试策略;需要真实策略的引擎级测试(场景、DST、恢复)放在本 crate 的 `tests/`(或 `apps/hft-core/tests/`),以 `Strategies` 为类型参数驱动 hft-testkit 的通用场景。它没有自己的逻辑:生成的分派代码在 sequencer 线程的热路径上运行(故 tier 为 `hot`),分派规则与预算归 [hft-strategy-sdk](../../crates/hft-strategy-sdk/README.md#装配strategyset-与-strategy_set)。新增策略 = 新 crate + 本 crate 里一行;app 与引擎 crate 都不改。
+`hft-strategy-registry`(目录 `strategies/registry`)是**全仓唯一列出真实策略的地方**:它包含唯一一次列出真实策略的 `strategy_set!` 调用(生成 `Strategies: StrategySet`)与冷路径函数 `export_schemas()`。只有 [apps/hft-core](../../apps/hft-core/README.md)、[apps/replayer](../../apps/replayer/README.md) 与配置生成器 [tools/hft-pmcfg](../../tools/hft-pmcfg/README.md) 依赖本 crate,不直接依赖任何 `strategies/*`,所以实盘、模拟、回放与生成的配置天然使用同一列表。[hft-testkit](../../crates/hft-testkit/README.md) **不依赖**本 crate:它只带 CI 测试策略;需要真实策略的引擎级测试(场景、DST、恢复)放在本 crate 的 `tests/`(或 `apps/hft-core/tests/`),以 `Strategies` 为类型参数驱动 hft-testkit 的通用场景。它没有自己的逻辑:生成的分派代码在 sequencer 线程的热路径上运行(故 tier 为 `hot`),分派规则与预算归 [hft-strategy-sdk](../../crates/hft-strategy-sdk/README.md#装配strategyset-与-strategy_set)。新增策略 = 新 crate + 本 crate 里一行;app 与引擎 crate 都不改。
 
 ## 目录
 
@@ -47,7 +47,7 @@ hft_strategy_sdk::strategy_set! {
 pub fn export_schemas() -> Vec<(String, String)>;
 ```
 
-- **使用方**:`Sequencer<Strategies>`、`Advisor<Strategies>`、ctl-gateway(`Strategies::decode_params`/`validate_params`、`model_mem_bytes` 预算、`kinds()` 的 `non_prod_only`、`cmds`、`GetSchema`)在 hft-core;replayer 用同一类型做 `replay verify` 与模拟重演。没有第三个使用方。
+- **使用方**:`Sequencer<Strategies>`、`Advisor<Strategies>`、ctl-gateway(`Strategies::decode_params`/`validate_params`、`model_mem_bytes` 预算、`kinds()` 的 `non_prod_only`、`cmds`、`GetSchema`)在 hft-core;replayer 用同一类型做 `replay verify` 与模拟重演;hft-pmcfg 只读 `kinds()` 的描述符与 schema,为它生成的实例配置编码策略参数 blob。没有其他使用方。
 - **测试**:hft-testkit 的 `TestStrategies` 只含测试策略(kind_id 0xFF00–0xFFFF,由 hft-testkit 自己的一次 `strategy_set!` 调用生成),供引擎 crate 的测试使用,不含真实策略。[解耦门槛](../../docs/testing.md#8-上线门槛) ⑧ 在本 crate 的**补丁副本**(CI 临时生成,列表末尾加一行 CI 测试策略)上构建 hft-core,检查引擎 crate 与 app 的 diff 为零;补丁副本不提交。**真实策略的引擎级测试**(各策略 README 列出的引擎场景、DST、恢复与 `replay verify` 夹具)放在本 crate 的 `tests/`:`[dev-dependencies]` 为 hft-testkit 与引擎 crate,用 `Strategies` 实例化 hft-testkit 的通用场景与 DST 驱动(对 `S: StrategySet` 泛型);依赖方向是本 crate(dev)→ hft-testkit,反向不允许。
 - **schema 导出**(全仓唯一方式):`hft-core schemas --out <dir>` 把 `export_schemas()` 返回的每一项原样写成 `<dir>/<文件名>`,即各策略的 `<kind_id>-<name>.schema.json`(kind_id 十进制)与 `<dir>/index.json`。**`index.json` 的格式唯一归属本节**,由 `export_schemas()` 生成:顶层是 JSON 数组,每个元素 `{"kind_id", "name", "file", "schema_id", "schema_version", "schema_digest"}`(按 kind_id 升序,键按此顺序;`name` = `StrategyDesc.name`,`file` = 该策略的文件名,`schema_digest` = SDK `params::schema_digest(&DESC, schema.version)` 的 u64 值写成 16 位小写十六进制字符串、高位在前、补零),没有包装对象,写法与 SDK 规范 schema JSON 相同(无多余空白、数值为十进制整数);[tools](../../tools/README.md) 与 [hft-py](../../crates/hft-py/README.md) 按此读取。发布制品附带该目录。`hft-cfg`、`hft-ctl`、hft-py(pipeline、ops_bot)、watchtower、journal-archiver 只读这些 JSON,参数与策略命令的编解码只经 SDK 的 `params` 模块(Python 侧经 hft-py),不链接本 crate,也没有第二个编码器。
 

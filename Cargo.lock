@@ -1501,6 +1501,7 @@ dependencies = [
  "hft-ledger",
  "hft-net",
  "hft-oms",
+ "hft-pmcfg",
  "hft-refdata",
  "hft-risk",
  "hft-rt",
@@ -1677,6 +1678,30 @@ dependencies = [
  "hft-testkit",
  "hft-types",
  "proptest",
+ "zerocopy",
+]
+
+[[package]]
+name = "hft-pmcfg"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-exec",
+ "hft-ledger",
+ "hft-oms",
+ "hft-refdata",
+ "hft-risk",
+ "hft-sequencer",
+ "hft-strategy-registry",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "hft-venue-proto",
+ "sha2 0.10.9",
+ "tempfile",
+ "toml 0.8.23",
+ "venue-binance",
+ "venue-polymarket",
  "zerocopy",
 ]
 

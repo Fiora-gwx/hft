@@ -41,6 +41,7 @@ members = [
     "tools/hft-secrets",
     "tools/latency-slice",
     "tools/pm-md-probe",
+    "tools/hft-pmcfg",
     "strategies/book-observer",
     "strategies/binary-maker",
 ]
@@ -143,6 +144,9 @@ opt-level = 0
 opt-level = 0
 
 [profile.ci.package.latency-slice]
+opt-level = 0
+
+[profile.ci.package.hft-pmcfg]
 opt-level = 0
 
 # Leaf crates whose tests run in under ~6 s even at 0 (nothing in the workspace runs their code in
