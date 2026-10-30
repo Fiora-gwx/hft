@@ -182,6 +182,8 @@ fn pmc_005_tool_output_equals_library() {
         ],
     );
     let params = vec![("clip_shares".to_string(), 7)];
+    let probe_params = vec![("spend_usdc".to_string(), 1_500_000)];
+    let probe = live(d.path(), vec![]);
     type Lib<'a> = Box<dyn Fn(&Path) -> Result<PathBuf, String> + 'a>;
     let rows: Vec<(&str, Vec<String>, Lib<'_>)> = vec![
         (
@@ -233,6 +235,29 @@ fn pmc_005_tool_output_equals_library() {
             Box::new(|o: &Path| {
                 hft_pmcfg::write_polymarket_maker_live_with(
                     o, &hot, None, None, "10.0.0.5", "ens5", &multi, &params,
+                )
+            }),
+        ),
+        (
+            "PMC-005.6",
+            vec![
+                "--live".into(),
+                "12345".into(),
+                s(&p("k1")),
+                "--taker-probe".into(),
+                "--param".into(),
+                "spend_usdc=1500000".into(),
+            ],
+            Box::new(|o: &Path| {
+                hft_pmcfg::write_polymarket_taker_probe_live(
+                    o,
+                    &hot,
+                    None,
+                    None,
+                    "10.0.0.5",
+                    "ens5",
+                    &probe,
+                    &probe_params,
                 )
             }),
         ),
@@ -318,4 +343,96 @@ fn pmc_006_engine_base_equals_seq_rig_setup() {
             hft_pmcfg::engine_base(&rd, &caps, ledger, venues).encode_blob(1, hft_types::HostClass::Dev2, 0);
         assert_eq!(got, want, "{row}");
     }
+}
+
+#[test]
+fn pmc_007_taker_probe_live_output() {
+    use hft_strategy_sdk::StrategySet;
+    let d = tempfile::tempdir().unwrap();
+    let hot = d.path().join("hot");
+    let l = live(d.path(), vec![LiveAccount::shorthand("777", d.path().join("k2"))]);
+    let (probe, maker) = (d.path().join("probe"), d.path().join("maker"));
+    let params = vec![("spend_usdc".to_string(), 1_500_000)];
+    hft_pmcfg::write_polymarket_taker_probe_live(&probe, &hot, None, None, "10.0.0.5", "ens5", &l, &params)
+        .unwrap();
+    hft_pmcfg::write_polymarket_maker_live(&maker, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
+    // .1 the same core.toml but the blob digests, the same engine; same accounts and slots.
+    let strip = |dir: &Path| -> Vec<String> {
+        std::fs::read_to_string(dir.join("core.toml"))
+            .unwrap()
+            .lines()
+            .filter(|x| !x.starts_with("sha256"))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(strip(&probe), strip(&maker), "PMC-007.1");
+    assert_eq!(
+        std::fs::read(probe.join("engine.bin")).unwrap(),
+        std::fs::read(maker.join("engine.bin")).unwrap(),
+        "PMC-007.1"
+    );
+    let (rp, rm) = (rd_of(&probe), rd_of(&maker));
+    assert_eq!(rp.inst_count(), rm.inst_count(), "PMC-007.1");
+    assert_eq!(
+        rp.accounts_of(StrategyId(1)),
+        rm.accounts_of(StrategyId(1)),
+        "PMC-007.1"
+    );
+    // .2 the instance is pm-taker-probe (kind 8).
+    let i = rp.instances_in_order();
+    assert_eq!(
+        (i.len(), i[0].kind_id, &*i[0].name),
+        (1, 8, "pm-taker-probe"),
+        "PMC-007.2"
+    );
+    // .3 the parameter blob: kind 8, one group (slot InstId 1, open allowed), spend 1.5, enabled 0.
+    let blob = std::fs::read(probe.join("strategy_params.bin")).unwrap();
+    let spb = hft_event::parse_spb1(&blob).unwrap();
+    let (h, body) = (spb.hdr, spb.body);
+    assert_eq!(
+        (h.kind_id, h.n_groups, h.account),
+        (8, 1, AccountId(1)),
+        "PMC-007.3"
+    );
+    assert_eq!(spb.groups.len(), 1, "PMC-007.3");
+    let g = spb.groups[0];
+    assert_eq!(
+        (g.n_legs, g.open_allowed, g.legs[0].inst, g.legs[0].venue),
+        (1, 1, hft_types::InstId(1), VenueId::POLYMARKET_CLOB),
+        "PMC-007.3"
+    );
+    let desc = hft_strategy_registry::Strategies::kinds()
+        .iter()
+        .find(|k| k.kind_id == 8)
+        .unwrap();
+    let raw = hft_strategy_sdk::params::decode_body(desc.schema, h.schema_ver, 1, body).unwrap();
+    assert_eq!(raw.defaults, vec![0, 1_500_000, 1], "PMC-007.3");
+    // .4 risk: the maker's limits with rr_max_cross 0.5 in the price band.
+    let risk = |dir: &Path, rd: &RefData| {
+        hft_risk::RiskParams::decode_blob(&std::fs::read(dir.join("risk_params.bin")).unwrap(), rd).unwrap()
+    };
+    let (kp, km) = (risk(&probe, &rp), risk(&maker, &rm));
+    let rr = |k: &hft_risk::RiskParams| k.classes.iter().map(|c| c.rr_max_cross.0).collect::<Vec<_>>();
+    assert!(
+        rr(&kp).contains(&hft_pmcfg::PM_PROBE_RR_MAX_CROSS),
+        "PMC-007.4 {:?}",
+        rr(&kp)
+    );
+    assert!(!rr(&km).contains(&hft_pmcfg::PM_PROBE_RR_MAX_CROSS), "PMC-007.4");
+    assert_eq!(kp.accounts.as_slice(), km.accounts.as_slice(), "PMC-007.4");
+    assert_eq!(kp.venues.as_slice(), km.venues.as_slice(), "PMC-007.4");
+    // .5 a parameter of another strategy, or without a live account, is refused.
+    let bad = vec![("clip_shares".to_string(), 5)];
+    let e = hft_pmcfg::write_polymarket_taker_probe_live(
+        &d.path().join("x"),
+        &hot,
+        None,
+        None,
+        "1",
+        "lo",
+        &l,
+        &bad,
+    )
+    .unwrap_err();
+    assert!(e.contains("not a pm-taker-probe parameter"), "PMC-007.5 {e}");
 }

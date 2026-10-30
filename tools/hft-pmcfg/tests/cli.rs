@@ -113,12 +113,22 @@ fn pmc_001_valid_command_lines() {
         ["pm-live", "acct-b", "pm-live-3", "acct-c"],
         "PMC-001.5"
     );
+    // .6 --taker-probe: the live configuration with pm-taker-probe; --param of its schema.
+    let c = parse(&args(&format!(
+        "--taker-probe --live 12345 k1 --param spend_usdc=1500000 {POS}"
+    )))
+    .unwrap();
+    let Mode::LiveProbe(l) = c.mode else {
+        panic!("PMC-001.6")
+    };
+    assert_eq!((l.uid.as_str(), l.presign), ("12345", true), "PMC-001.6");
+    assert_eq!(c.params, [("spend_usdc".to_string(), 1_500_000)], "PMC-001.6");
 }
 
 #[test]
 fn pmc_002_invalid_command_lines() {
     let live = format!("--live 12345 k1 {POS}");
-    let rows: [(&str, String, &str); 20] = [
+    let rows: [(&str, String, &str); 24] = [
         ("PMC-002.1", "out hot 10.0.0.5".into(), "expected OUTPUT_DIR"),
         (
             "PMC-002.2",
@@ -194,6 +204,26 @@ fn pmc_002_invalid_command_lines() {
             "PMC-002.20",
             format!("--day-loss-carry 2026-10-29 -1 {POS}"),
             "--day-loss-carry needs --live",
+        ),
+        (
+            "PMC-002.21",
+            format!("--taker-probe {POS}"),
+            "--taker-probe needs --live",
+        ),
+        (
+            "PMC-002.22",
+            format!("--taker-probe --param clip_shares=5 {live}"),
+            "not a pm-taker-probe parameter",
+        ),
+        (
+            "PMC-002.23",
+            format!("--taker-probe --param spend_usdc=2000001 {live}"),
+            "outside",
+        ),
+        (
+            "PMC-002.24",
+            format!("--taker-probe --taker-probe {live}"),
+            "given twice",
         ),
     ];
     for (row, line, want) in rows {
