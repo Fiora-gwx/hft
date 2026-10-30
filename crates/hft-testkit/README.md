@@ -225,7 +225,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 `RunRecord.journal_verification` 保存已验证末 seq、逻辑记录数、段数、运行数及 Input、Output、快照比较数;未完成、失败或关闭时为空。显式场景的 run/repro JSON 保留同一对象。检查使用内存 journal 原件,不生成新序号,不读实时配置或线程局部缓存;它不代替 RPL-012 的物理文件、Model 重算和日期种子验收。
 
-`WorldSpec.physical_journal` 默认 false。文件夹具可在启动前设为 true,由真实引擎的内存写者直接预留物理片序号;导出后不得重编号。`JRec.seq` 是首片,`end_seq` 是末片,默认逻辑模式两者相同。快照、资金观察与发布边界按末片校验,落在分片中间的前缀不包含该记录。全量回放、滚段、重启及检查器开关使用同一原件(TK-150/151)。启用时 `RunRecord.physical_journal` 保留完整已提交段、时钟和分片索引,包括完整事件之后已发布的测量 Meta;缺少适配器或尾部仍有未完成的 Input/Output 直接失败。
+`WorldSpec.role_prod` 默认 false(EngineSetup `role_prod`;true = 世界是 `prod` 实例,其 Sim 账户即 Shadow 变体,用于 RPL-309)。`WorldSpec.physical_journal` 默认 false。文件夹具可在启动前设为 true,由真实引擎的内存写者直接预留物理片序号;导出后不得重编号。`JRec.seq` 是首片,`end_seq` 是末片,默认逻辑模式两者相同。快照、资金观察与发布边界按末片校验,落在分片中间的前缀不包含该记录。全量回放、滚段、重启及检查器开关使用同一原件(TK-150/151)。启用时 `RunRecord.physical_journal` 保留完整已提交段、时钟和分片索引,包括完整事件之后已发布的测量 Meta;缺少适配器或尾部仍有未完成的 Input/Output 直接失败。
 
 `WorldSpec.model_advice` 默认 false。启用时 `SeqSut` 在首个引导快照启动真实 `Advisor`,不加载检查点,先将其启动注记在时刻 0 记录,再开放行情和启动报告,保证空起步声明早于 Model 样本;启动过程保留快照观察,交给世界首步检查。随后逐条消费 journal 并跨已记录重启保留 Model 来源;世界循环调用 `Sut::advisor_inputs`,运行中的 Advice 和 Meta Note 原样进入交付队列,故障只改变交付时刻。不得回退为合成载荷。消费者仅看到已提交的完整 EVENT_END 前缀,恢复可裁掉的尾部测量 Meta 不提前投递;已见前缀改变、Fatal、追赶未完成或输出缓冲满均失败。每次追赶的输出上限为 4096 条且不超过 8 MiB,轮数上限为当前逻辑记录数的两倍加 64(TK-152–154)。`scenarios::replay_config` 复用普通套件的故障率、步数与种子选择,只装配一个 Live taker 和一个 Sim target,开启真实 Model 与物理编号;文件写出、子进程及种子验收归 [RPL-012](../../apps/replayer/TESTS.md#rpl-012-dst-生成的种子-journal-全部回放一致)。
 
