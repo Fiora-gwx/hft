@@ -3198,13 +3198,13 @@ spec: README.md
 - 规则:[Ctx 与订单意图](README.md#ctx-与订单意图)(按金额买入)
 - 级别:table
 - 里程碑:M3
-- 前置:`e = AssetExp{px_exp −3, qty_exp −6}`(二元结果代币,价 0.001、量 1e-6)
+- 前置:`hot` = 一行 `InstHot{px_exp −3, qty_exp −6, lot 10 000}`(二元结果代币,价 0.001、量 1e-6、lot 0.01)
 - 实现:`crates/hft-strategy-sdk/tests/ctx.rs::sdk_216_spend_buy_and_spend_qty`
 
 | 行 | 操作 | 期望 |
 |---|---|---|
 | SDK-216.1 | `OrderIntent::SPEND`;`spend_buy(V1, A1, G1, I1, Ioc, Px(110), Qty(9_090_000), 7)` | `0x80`(= hft-event `OrderFlags::SPEND`);`side Buy`、`class Open`、`flags = SPEND`、`spend()` 真、`reduce_only()` 假、无链接、`max_rest_ms 0`、`tag 7` |
-| SDK-216.2 | `spend_qty(Notional(1_000_000), Px(110), e, 10_000)`(1 USDC、0.11、lot 0.01) | `Qty(9_090_000)`(9.09) |
+| SDK-216.2 | `spend_qty(Notional(1_000_000), Px(110), &hot)`(1 USDC、0.11) | `Qty(9_090_000)`(9.09) |
 | SDK-216.3 | 同上,`lot 1` | `Qty(9_090_909)` |
 | SDK-216.4 | `Px(0)`;`Notional(0)`;`px_exp 40` | 都为 `Qty(0)` |
 

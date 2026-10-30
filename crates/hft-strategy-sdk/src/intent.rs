@@ -10,9 +10,8 @@
 
 use core::mem::{align_of, offset_of, size_of};
 
-use hft_types::{
-    AccountId, AssetExp, GroupId, InstId, Notional, Px, Qty, Rate, RejectBits, Side, Tif, VenueId,
-};
+use hft_refdata::InstHot;
+use hft_types::{AccountId, GroupId, InstId, Notional, Px, Qty, Rate, RejectBits, Side, Tif, VenueId};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 /// Category the strategy declares for an order intent; the final classification is hft-risk
@@ -284,16 +283,17 @@ impl OrderIntent {
         }
     }
 
-    /// The quantity whose cost at `px` is at most `quote` (a [`Notional`], exponent −6, in the
-    /// inst's quote asset): `quote / px` rounded down to a multiple of `lot` (`lot ≤ 1` = no
-    /// rounding). `Qty(0)` when `px ≤ 0`, `quote ≤ 0`, an exponent is out of range or the result
-    /// does not fit.
-    pub fn spend_qty(quote: Notional, px: Px, e: AssetExp, lot: i64) -> Qty {
+    /// The quantity of inst `hot` whose cost at `px` is at most `quote` (a [`Notional`], exponent
+    /// −6, in the inst's quote asset): `quote / px` rounded down to a multiple of `hot.lot`
+    /// (`lot ≤ 1` = no rounding). `Qty(0)` when `px ≤ 0`, `quote ≤ 0`, an exponent is out of range
+    /// or the result does not fit.
+    pub fn spend_qty(quote: Notional, px: Px, hot: &InstHot) -> Qty {
+        let lot = hot.lot;
         if px.0 <= 0 || quote.0 <= 0 {
             return Qty(0);
         }
         // qty = quote · 10^t / px with t = −6 − px_exp − qty_exp.
-        let t = -6 - i32::from(e.px_exp) - i32::from(e.qty_exp);
+        let t = -6 - i32::from(hot.px_exp) - i32::from(hot.qty_exp);
         let Some(p) = 10i128.checked_pow(t.unsigned_abs()) else {
             return Qty(0);
         };

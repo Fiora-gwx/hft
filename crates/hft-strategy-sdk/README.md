@@ -1013,8 +1013,8 @@ impl OrderIntent {
     pub const fn spend(&self) -> bool;
     /// 单腿 Open 买入,flags = SPEND,max_rest_ms = 0;tif 须为 Ioc 或 Fok。
     pub const fn spend_buy(venue: VenueId, account: AccountId, group: GroupId, inst: InstId, tif: Tif, px: Px, qty: Qty, tag: u32) -> OrderIntent;
-    /// quote(Notional,指数 −6,inst 的计价资产)在 px 下至多买到的数量:quote / px 向下取整到 lot 的整数倍(lot ≤ 1 不取整);px ≤ 0、quote ≤ 0、指数越界或溢出 → Qty(0)。
-    pub fn spend_qty(quote: Notional, px: Px, e: AssetExp, lot: i64) -> Qty;
+    /// quote(Notional,指数 −6,inst 的计价资产)在 px 下至多买到的 inst 数量(指数取 hot.px_exp/qty_exp):quote / px 向下取整到 hot.lot 的整数倍(lot ≤ 1 不取整);px ≤ 0、quote ≤ 0、指数越界或溢出 → Qty(0)。
+    pub fn spend_qty(quote: Notional, px: Px, hot: &InstHot) -> Qty;
 }
 ```
 
