@@ -202,7 +202,7 @@ impl Fast {
     /// Composite score on (`comp_skip` or `comp_dir` set).
     pub fn comp_on(&self) -> bool {
         let d = self.p.defaults();
-        d.comp_skip.0 > 0 || d.comp_dir.0 > 0
+        d.comp_skip.0 != 0 || d.comp_dir.0 > 0
     }
 
     /// Venue-load gates on.
@@ -596,7 +596,13 @@ impl Fast {
             // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
             // floored to a whole cent.
             let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
-            let lim = (other_q > own_q).then(|| {
+            // Composite score (README "规则" 10): skip the token it is against; the one it favours
+            // may hold up to dir_cap_shares net and, with dir_pair_free, pairs without the limit.
+            let z = (comp.ok && comp.win == start && i / 2 == up / 2)
+                .then(|| comp.z.get(i % 2).copied())
+                .flatten();
+            let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
+            let lim = (other_q > own_q && !(d.dir_pair_free && favoured)).then(|| {
                 let margin = (i128::from(d.pair_margin.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
                 let cent = (unit_px / 100).max(1);
                 (unit_px - other_c - margin).div_euclid(cent) * cent
@@ -609,13 +615,9 @@ impl Fast {
             });
             let cent = (unit_px / 100).max(1);
             let fv_cap = fv_px.map(|f| f.div_euclid(cent) * cent);
-            // Composite score (README "规则" 10): skip the token it is against; the one it favours
-            // may hold up to dir_cap_shares net.
-            let z = (comp.ok && comp.win == start && i / 2 == up / 2)
-                .then(|| comp.z.get(i % 2).copied())
-                .flatten();
-            let skip = d.comp_skip.0 > 0 && z.is_some_and(|z| z < -d.comp_skip.0);
-            let cap_shares = if d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0) {
+            // A negative comp_skip skips every token not favoured by more than −comp_skip.
+            let skip = d.comp_skip.0 != 0 && z.is_some_and(|z| z < -d.comp_skip.0);
+            let cap_shares = if favoured {
                 d.dir_cap_shares
             } else {
                 d.inv_max_shares

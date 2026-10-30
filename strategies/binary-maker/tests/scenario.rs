@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 6, "BMK-024.1");
+    assert_eq!(schema.version(), 7, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -997,6 +997,10 @@ fn bmk_024_schema_v6() {
         let f = schema.field(32 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 6, *default), "BMK-024.2");
     }
+    // .3 schema v7 appends dir_pair_free (default 0).
+    assert_eq!(n_fields_at(schema, 7), Some(57), "BMK-024.3");
+    let f = schema.field(56).unwrap();
+    assert_eq!((f.name, f.since, f.default), ("dir_pair_free", 7, 0), "BMK-024.3");
 }
 
 #[test]
@@ -1274,6 +1278,35 @@ fn bmk_027_score_skips_the_token_it_is_against() {
     h.views_mut().at_engine_ns(399_600_000_000);
     let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
     assert_eq!(cancels(&out), vec![11], "BMK-027.6");
+    // .7 comp_skip −0.5 (directional maker): balanced books, both scores within ±0.5: nothing.
+    let mut h = harness(&comp_params(&[("comp_skip", -500_000_000)]));
+    let out = warm_sized(&mut h, 100, 100);
+    let c = h.strategy().fast.comp;
+    assert!(
+        c.ok && c.z[0].abs() <= 500_000_000 && c.z[1].abs() <= 500_000_000,
+        "BMK-027.7 {c:?}"
+    );
+    assert_eq!(placed(&out), vec![], "BMK-027.7");
+    // .8 comp_skip −0.5, 10 / 190 shares: only the favoured Down quoted.
+    let mut h = harness(&comp_params(&[("comp_skip", -500_000_000)]));
+    let out = warm_sized(&mut h, 10, 190);
+    assert_eq!(placed(&out), vec![(SLOTS[3], Px(450))], "BMK-027.8");
+    // .9 continuing .8 with live quotes on both legs (slots 11, 12): at 399.8 s the score is
+    // recomputed; the Up bid (score not above 0.5) is cancelled, the Down bid stays.
+    for (i, slot) in [(2usize, 11u32), (3, 12)] {
+        set_quote(
+            &mut h,
+            i,
+            binary_maker::fast::QState::Live,
+            slot,
+            300,
+            399_500_000_000,
+        );
+    }
+    h.views_mut().at_engine_ns(399_800_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-027.9");
+    assert_eq!(out.places().count(), 0, "BMK-027.9");
 }
 
 #[test]
@@ -1873,4 +1906,31 @@ fn bmk_035_feature_export_row() {
     let mut row = FeatureRow::new(&mut short);
     f.export(&mut row);
     assert_eq!((row.len(), short), (7, [20_001_000, 0, sigma]), "BMK-035 short");
+}
+
+#[test]
+fn bmk_036_favoured_side_pairs_without_the_limit() {
+    // Long 10 Down at 0.600; the score favours Up (Up bid 190 shares vs Down 10): Down skipped.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![("clip_shares", 5), ("inv_max_shares", 10)];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, 10, 600);
+        let out = warm_sized(&mut h, 190, 10);
+        placed(&out)
+    };
+    // .1 dir_pair_free 0: the Up bid rests at the pair limit 1 − 0.600 − 0.01 = 0.390.
+    assert_eq!(run(&[]), vec![(SLOTS[2], Px(390))], "BMK-036.1");
+    // .2 dir_pair_free 1: at the best bid 0.450.
+    assert_eq!(
+        run(&[("dir_pair_free", 1)]),
+        vec![(SLOTS[2], Px(450))],
+        "BMK-036.2"
+    );
+    // .3 comp_dir 0 (no favoured token): the limit applies.
+    assert_eq!(
+        run(&[("dir_pair_free", 1), ("comp_dir", 0)]),
+        vec![(SLOTS[2], Px(390))],
+        "BMK-036.3"
+    );
 }

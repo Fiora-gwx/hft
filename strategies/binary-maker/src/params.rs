@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 6, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 7, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -73,8 +73,9 @@ hft_strategy_sdk::define_params! {
         /// forecast weight of the 15 s signed efficiency, sum / sum of absolute one-second returns (1e-9)
         pred_w_ser: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 187_200_000, since = 5, relax = None],
         /// a token whose composite direction score is below −comp_skip is not quoted (its resting
-        /// bid is cancelled); score in standard deviations (1e-9); 0 = off
-        comp_skip: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
+        /// bid is cancelled); score in standard deviations (1e-9); 0 = off; negative: only a token
+        /// whose score is above −comp_skip is quoted (directional maker)
+        comp_skip: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 6, relax = None],
         /// a token whose composite direction score is above comp_dir may hold up to
         /// dir_cap_shares net (instead of inv_max_shares); 1e-9 standard deviations; 0 = off
         comp_dir: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
@@ -125,6 +126,9 @@ hft_strategy_sdk::define_params! {
         /// no quoting while the previous UTC minute's median of the per-second median feed lag is
         /// above this (ns); 0 = off
         mdslow_gate_ns: Count [min = 0, max = 1_000_000_000, default = 0, since = 6, relax = None],
+        /// true: a token whose composite score is above comp_dir completes pairs without the pair-cost
+        /// limit (two-mode rule: the favoured side pairs off inventory left on the other side)
+        dir_pair_free: Bool [default = 0, since = 7, relax = None],
     }
 }
 

@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,7 +382,8 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 6;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 7;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
 ### BMK-025 定点对数
@@ -432,6 +433,9 @@ spec: README.md
 | BMK-027.4 | 399.8 s 再一条 `U1` 簿事件 | 分数重算;撤 `U1`(槽 11),不挂单 |
 | BMK-027.5 | `comp_skip` 0;10 / 190 份 | 两腿都挂 |
 | BMK-027.6 | `comp_every_ms` 0;同 .3 | 399.6 s 即撤槽 11 |
+| BMK-027.7 | `comp_skip` −0.5(方向 maker);两边各 100 份 | 两个分数都在 ±0.5 内;不挂单 |
+| BMK-027.8 | `comp_skip` −0.5;10 / 190 份 | 只有 `D1` 在 0.450 挂单 |
+| BMK-027.9 | 接 .8,两腿各有一张存活挂单(槽 11、12),399.8 s 一条 `U1` 簿事件 | 分数重算;撤 `U1`(槽 11),`D1` 保留,不挂单 |
 
 ### BMK-028 方向分数放宽有利一侧的库存上限
 
@@ -534,3 +538,17 @@ spec: README.md
 - 步骤:`MakerFeatures::export` 写入 7 列的缓冲;另以 9 列的缓冲与 3 列的缓冲各写一次
 - 期望:列名与 `features::COLUMNS` 一致;值依次为 `ref_mid_x2` 20 001 000、`ref_imb` 0、`ref_sigma` = `RealizedVol::sigma(1)`、`ref_samples` 399、三个延迟列 `NA`(延迟闸门关闭);较长的缓冲多出的两格不被写,较短的缓冲只写前三列且写出计数仍为 7;`Strategy::FEATURES` 等于 `COLUMNS`,`Strategy::export_features` 写出的 9 格缓冲与 `MakerFeatures::export` 的相同
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_035_feature_export_row`
+
+### BMK-036 被看好的一侧凑对不受对价上限
+
+- 规则:[规则](README.md#规则) 3、10;参数 `dir_pair_free`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_skip` = `comp_dir` = 0.5、`comp_imb1_sd` 0.1、`clip_shares` 5、`inv_max_shares` 10;持有 10 份 Down(均价 0.600);`warm(400, 399, 1)`,`U1` 买一 190 份、`D1` 10 份(分数看好 Up,Down 被跳过)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_036_favoured_side_pairs_without_the_limit`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-036.1 | `dir_pair_free` 0 | `U1` 在对价上限 0.390(1 − 0.600 − 0.01)挂单 |
+| BMK-036.2 | `dir_pair_free` 1 | `U1` 在买一 0.450 挂单 |
+| BMK-036.3 | `dir_pair_free` 1、`comp_dir` 0 | 没有被看好的代币:`U1` 在 0.390 |
