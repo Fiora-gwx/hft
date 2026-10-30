@@ -272,8 +272,7 @@ impl Gateway {
                     match EventKind(r.hdr.kind) {
                         EventKind::ORDER_DECISION => {
                             if let Ok(d) = r.read::<OrderDecision>()
-                                && d.reject == 0
-                                && r.hdr.flags & RecordFlags::SHADOW.0 == 0
+                                && barrier(self.rd, &d, RecordFlags(r.hdr.flags))
                             {
                                 self.awaiting = Some((r.hdr.seq, d.venue));
                             }
@@ -356,6 +355,15 @@ impl Gateway {
         }
         Ok(busy)
     }
+}
+
+/// Whether a journalled `OrderDecision` is a decision barrier of the simulated exchange: accepted,
+/// not SHADOW, and of a Sim account — its command comes on `out-sim`. A prod instance's Live
+/// accounts' decisions go to their gw rings and never hold the simulation (sim-venue).
+pub fn barrier(rd: &RefData, d: &OrderDecision, flags: RecordFlags) -> bool {
+    d.reject == 0
+        && flags.0 & RecordFlags::SHADOW.0 == 0
+        && matches!(rd.account(d.account).kind, AccountKind::Sim(_))
 }
 
 /// Opens the seq tail reader at a sequence number.

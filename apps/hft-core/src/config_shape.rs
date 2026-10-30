@@ -92,6 +92,19 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ],
             &["quotes", "maker_fill", "calib"],
         ),
+        // A prod instance's `[sim]` (the sim-venue of its Sim accounts) has no paper venue.
+        "sim_prod" => (
+            &[
+                "seed",
+                "entry_us",
+                "resp_us",
+                "leverage",
+                "mmr_raw",
+                "liq_fee_raw",
+                "liq_slippage_bp",
+            ],
+            &["quote_interval_ms", "quotes", "maker_fill", "calib"],
+        ),
         "quote" => (&["inst", "bid_raw", "ask_raw", "qty_raw"], &[]),
         _ => return Err(Error::config("ConfigParse", "unknown configuration section")),
     };
@@ -133,8 +146,13 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             (
                 "config",
                 "instance" | "paths" | "blobs" | "shutdown" | "journal" | "clock" | "watchdog" | "rings"
-                | "sim" | "startup",
+                | "startup",
             ) => Some(key.as_str()),
+            // `instance.order_env` marks a prod instance (load refuses it on the sim instance).
+            ("config", "sim") if value.get("instance").and_then(|i| i.get("order_env")).is_some() => {
+                Some("sim_prod")
+            }
+            ("config", "sim") => Some("sim"),
             ("blobs", "refdata" | "engine" | "risk_params") => Some("blob"),
             ("venue", "account_io") => Some("account_io"),
             ("venue", "feed") => Some("venue_feed"),
@@ -152,7 +170,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ("config", "threads") => Some("thread"),
             ("blobs", "strategy_params") => Some("blob"),
             ("venue", "accounts") => Some("keys"),
-            ("sim", "quotes") => Some("quote"),
+            ("sim" | "sim_prod", "quotes") => Some("quote"),
             _ => None,
         };
         if let Some(array_shape) = array_shape {

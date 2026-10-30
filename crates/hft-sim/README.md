@@ -43,7 +43,7 @@ status: impl
 - 一个 Sim 账户与 Live 账户一样跨多个交易所,**每个交易所至多一个 venue**(同一账户在同一交易所只用一个市场,refdata `SameExchangeMarkets`,`SimExchange::new` 再查一次);它在 venue V 上的订单对 **V 的真实行情**撮合(行情由所在 hft-core 实例的 feed 订阅提供,不为模拟另开连接)。
 - 回报是与实盘**同一组事件**(`OrderEvent`、`FundingSettle`、`MarginReport`、`ExternalFill`…,不加新 kind),经 `rep-sim` 环进入 sequencer 并记为 journal 的 Input——回放确定,`replayer verify` 对含 Sim 账户的 journal 同样逐字节成立。`rep-sim` 是 sequencer 输入环中**优先级最低**的一个,每轮至多 `sim_max_per_round` 条,同一事件派发时实盘实例先于模拟实例(优先级、规则与该参数的取值都归 [hft-sequencer](../hft-sequencer/README.md),参数在 EngineConfig 的 ECF1 段 5);实盘繁忙时模拟回报晚于其 `due_tsc` 交付,滞后计入 `sim_tail_lag_ms`。
 - kill 对 Sim 账户与实盘相同,经 [hft-risk](../hft-risk/README.md) 的检查链生效(Sim 账户不占 kill 字位,没有 gw);本 crate 不做 kill 判定。
-- **放在哪个实例**([hft-core](../../apps/hft-core/README.md#实例角色prod-与-sim)):Sim 账户只出现在 `sim` 实例(配置 `instance.name = "sim"`:只含 Sim 账户、不持任何交易所 key、自己的行情连接与 journal,同一二进制),sim-gw 是其中一个 warm 任务;`prod` 实例从不含 Sim 账户。dev2 上常驻的就是 `sim` 实例;统一升级后 `sim` 实例与 `prod` 实例同机运行,只用非隔离核、在自己的 slice、网卡(ENI-C)与出口 IP 下(隔离规则归 hft-core)。
+- **放在哪个实例**([hft-core](../../apps/hft-core/README.md#实例角色prod-与-sim)):Sim 账户出现在 `sim` 实例(配置 `instance.name = "sim"`:只含 Sim 账户、不持任何交易所 key、自己的行情连接与 journal,同一二进制),sim-gw 是其中一个 warm 任务;`prod` 实例可含 Sim 账户作为 Shadow 变体,由同一实现的 `sim-venue` 任务撮合(只有 Sim 账户的决定是决策屏障)。dev2 上常驻的就是 `sim` 实例;统一升级后 `sim` 实例与 `prod` 实例同机运行,只用非隔离核、在自己的 slice、网卡(ENI-C)与出口 IP 下(隔离规则归 hft-core)。
 - Sim 账户不持有交易所 key;[reconciler](../../apps/reconciler/README.md) 与 [kill-switch](../../apps/kill-switch/README.md) 跳过它;ledger 与模拟真值的一致性由 sim-gw 周期推送的真值报告与 watchtower 的 `SimDrift` 规则检查。
 - 可同时开多个 Sim 账户(不同策略参数各绑一个账户,一个账户只绑定一个策略实例);账户之间互不影响:各自的余额、仓位、已吃流动性记忆与随机数子流,只共享只读的簿副本。
 
@@ -579,7 +579,7 @@ pub struct StressVerdict {
 |---|---|---|
 | `on_record(L2Batch)`(含簿副本更新) | ≤ 1 µs 均摊/档 | `sim/on_l2` |
 | `on_command(Place)` + 吃单撮合(≤ 10 档) | ≤ 2 µs | `sim/place_match` |
-| `SimGwTask::poll_once` | 单次工作量 ≤ 200 µs;sim-gw 落后 journal 末尾只记录(sim-gw 只在 `sim` 实例里运行,不设延迟验收;同机时 `sim` 实例只用非隔离核,滞后进日报) | `sim/poll_once`;指标 `sim_tail_lag_ms` |
+| `SimGwTask::poll_once` | 单次工作量 ≤ 200 µs;sim-gw 落后 journal 末尾只记录(sim-gw 与 `prod` 实例的 sim-venue 都不设延迟验收;同机时 `sim` 实例只用非隔离核,sim-venue 在非隔离核上以最低优先级运行,滞后进日报) | `sim/poll_once`;指标 `sim_tail_lag_ms` |
 | `replayer sim` 吞吐 | ≥ `replayer verify` 吞吐的 50% | `sim/replay_day` |
 
 - 分配:`SimExchange::new` 之后零分配(全部定容:`MAX_SIM_ACCOUNTS`、每账户订单表 1,024、记忆环 64 项、待交付堆 16,384)。每账户的定容内存随被跟踪 inst 数增长(记忆环约 4 KiB × inst、订单表 1,024 项),账户数接近 64 时按主机类内存表复核。

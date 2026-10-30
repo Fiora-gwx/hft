@@ -34,7 +34,8 @@ pub struct Config {
 /// reads it. Replay assemblies are replayer's drivers (`verify`, `research`), not hft-core runs.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Assembly {
-    /// Network mode: instance `prod`, `order_env` testnet or prod; Live accounts, gw per venue.
+    /// Network mode: instance `prod`, `order_env` testnet or prod; Live accounts, gw per venue, and
+    /// optionally Sim accounts (Shadow variants) on the `sim-venue` task when `[sim]` is present.
     Live { prod_orders: bool },
     /// `--dry-run`: instance `sim` without `order_env`; Sim accounts, sim-gw, paper or
     /// `live_feed` venues.
@@ -58,14 +59,24 @@ impl Assembly {
     }
 }
 impl Config {
-    /// The assembly of a loaded configuration (`[sim]` is present exactly in `Sim`, checked at load).
+    /// The assembly of a loaded configuration (load accepts `sim` only without `order_env` and
+    /// `prod` only with it).
     pub fn assembly(&self) -> Assembly {
-        if self.sim.is_some() {
+        if self.instance.order_env.is_none() {
             Assembly::Sim
         } else {
             Assembly::Live {
                 prod_orders: self.instance.prod_orders(),
             }
+        }
+    }
+    /// The task of the in-process simulated exchange: the sim instance's `sim-gw`, or the
+    /// `sim-venue` of a prod instance with Sim accounts (`[sim]` present; README "实例角色").
+    pub fn sim_task(&self) -> Option<&'static str> {
+        match (self.assembly(), &self.sim) {
+            (Assembly::Sim, _) => Some(SIM_GW),
+            (Assembly::Live { .. }, Some(_)) => Some(SIM_VENUE),
+            (Assembly::Live { .. }, None) => None,
         }
     }
 }
@@ -94,6 +105,12 @@ impl Instance {
         }
     }
 }
+
+/// The sim instance's simulated-exchange task.
+pub const SIM_GW: &str = "sim-gw";
+/// The simulated-exchange task of a prod instance's Sim accounts (Shadow variants): warm, on a
+/// non-isolated core, at the lowest priority of the plan (README "线程计划").
+pub const SIM_VENUE: &str = "sim-venue";
 
 /// Protocols whose accounts may trade on production endpoints (`order_env = "prod"`).
 pub const PROD_ORDER_PROTOCOLS: &[&str] = &["polymarket-clob"];
@@ -424,8 +441,11 @@ pub struct Paper {
     pub mmr_raw: i64,
     pub liq_fee_raw: i64,
     pub liq_slippage_bp: u16,
+    /// Synthetic quote period of the `--dry-run` paper venues (positive there); absent or 0 in a
+    /// prod instance, which has no paper venue.
+    #[serde(default)]
     pub quote_interval_ms: u32,
-    /// Required while any venue is a paper venue (not `live_feed`).
+    /// Required while any venue is a paper venue (not `live_feed`); empty in a prod instance.
     #[serde(default)]
     pub quotes: Vec<Quote>,
     /// hft-sim `maker_fill` (resting-order fill model); absent = `trade_through`.
@@ -541,6 +561,31 @@ pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
     Ok(c)
 }
 
+/// `sim-venue` placement (README "线程计划", rule 14): the lowest priority of the plan (`nice` ≥
+/// every other thread's) and no core shared with a hot task (`sequencer`, `feed:`/`feed-`, `gw:`,
+/// `ext:`) or a spinning thread. Whether its core is isolated is checked when the thread starts.
+pub fn sim_venue_placement(threads: &[Thread]) -> Option<Error> {
+    let (ix, t) = threads.iter().enumerate().find(|(_, t)| t.task == SIM_VENUE)?;
+    let hot = |o: &Thread| {
+        o.idle == Idle::Spin
+            || o.task == "sequencer"
+            || ["feed:", "feed-bbo:", "feed-md:", "gw:", "ext:"]
+                .iter()
+                .any(|p| o.task.starts_with(p))
+    };
+    threads
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != ix)
+        .any(|(_, o)| o.nice > t.nice || (t.core.is_some() && o.core == t.core && hot(o)))
+        .then(|| {
+            Error::config(
+                "ThreadPlan",
+                format!("{}: sim-venue takes the lowest nice and no hot core", t.name),
+            )
+        })
+}
+
 /// `SharedAccountIp` (README "多账户"): two Live accounts of venue `venue` on one egress IP,
 /// unless its protocol declares `SHARED_EGRESS_IP` (`shared_ok`). `accounts` = (account, src_ip).
 pub fn shared_account_ip(
@@ -622,11 +667,9 @@ pub fn load_timed(
             }
         }
     }
-    if sim != c.sim.is_some() {
-        bad!(
-            "SimConfig",
-            "sim section must be present exactly in --dry-run mode".into()
-        );
+    // A prod instance has `[sim]` exactly when its refdata has Sim accounts (checked below).
+    if sim && c.sim.is_none() {
+        bad!("SimConfig", "--dry-run requires the sim section".into());
     }
     if c.rings.elements < 256
         || c.rings.elements > 65536
@@ -677,8 +720,10 @@ pub fn load_timed(
         "ctl-gateway".into(),
     ];
     if sim {
-        tasks.push("sim-gw".into());
+        tasks.push(SIM_GW.into());
         tasks.push("paper-feed".into());
+    } else if c.sim.is_some() {
+        tasks.push(SIM_VENUE.into());
     }
     let mut vids = Vec::new();
     for (name, v) in &c.venues {
@@ -817,6 +862,9 @@ pub fn load_timed(
         if c.threads.iter().filter(|t| t.task == task).count() != 1 {
             errors.push(Error::config("ThreadPlan", task));
         }
+    }
+    if let Some(e) = sim_venue_placement(&c.threads) {
+        errors.push(e);
     }
     // Independent file failures are reported together.
     let mut read = |b: &Blob| match read_blob(b) {
@@ -999,8 +1047,33 @@ pub fn load_timed(
         if m.id.0 == 0 {
             continue;
         }
-        if matches!(m.kind, AccountKind::Sim(_)) != sim || m.is_prod != c.instance.prod_orders() {
+        let sim_account = matches!(m.kind, AccountKind::Sim(_));
+        // The sim instance has Sim accounts only; a prod instance has Live accounts whose
+        // `is_prod` follows `order_env`, and may have Sim accounts (Shadow variants; refdata
+        // refuses `is_prod` on them, `SimIsProd`).
+        if (sim && !sim_account) || (!sim_account && m.is_prod != c.instance.prod_orders()) {
             errors.push(Error::config("EnvAccountMismatch", format!("account {a}")));
+        }
+        if !sim && sim_account {
+            // AccountNamePrefix: a prod instance's Sim account is named `sim-…`, as hft-cfg
+            // requires of every Sim account.
+            if !m.label.starts_with("sim-") {
+                errors.push(Error::config("AccountNamePrefix", format!("account {a}")));
+            }
+            // A strategy instance trades Live accounts or Sim accounts, never both.
+            if rd
+                .accounts_of(m.bound_instance)
+                .iter()
+                .any(|x| !matches!(rd.account(*x).kind, AccountKind::Sim(_)))
+            {
+                errors.push(Error::config(
+                    "EnvAccountMismatch",
+                    format!(
+                        "account {a}: instance {} mixes Live and Sim accounts",
+                        m.bound_instance.0
+                    ),
+                ));
+            }
         }
         // One parameter blob per instance, under its primary account (the lowest id of its account
         // set; with one account per instance, the account itself).
@@ -1024,11 +1097,16 @@ pub fn load_timed(
             if m.venues & (1u64 << v) != 0 {
                 match c.venues.values().find(|x| x.id == v) {
                     None => errors.push(Error::config("UnknownVenue", format!("account {a}, venue {v}"))),
-                    Some(vc) if !sim && vc.accounts.iter().filter(|k| k.account == a).count() != 1 => errors
-                        .push(Error::config(
+                    Some(vc)
+                        if !sim
+                            && !sim_account
+                            && vc.accounts.iter().filter(|k| k.account == a).count() != 1 =>
+                    {
+                        errors.push(Error::config(
                             "MissingCredential",
                             format!("account {a}, venue {v}"),
-                        )),
+                        ))
+                    }
                     _ => {}
                 }
             }
@@ -1068,7 +1146,31 @@ pub fn load_timed(
             ));
         }
     }
-    if let Some(paper) = &c.sim {
+    if !sim {
+        // Shadow variants: the sim-venue settings (`[sim]`) exactly with Sim accounts.
+        let sim_accounts = (1..=u8::MAX)
+            .map(|a| rd.account(AccountId(a)))
+            .any(|m| m.id.0 != 0 && matches!(m.kind, AccountKind::Sim(_)));
+        if sim_accounts != c.sim.is_some() {
+            errors.push(Error::config(
+                "SimConfig",
+                "a prod instance has the sim section exactly when its refdata has Sim accounts",
+            ));
+        }
+        if let Some(paper) = &c.sim {
+            if paper.quote_interval_ms != 0 || !paper.quotes.is_empty() || paper.leverage == 0 {
+                errors.push(Error::config(
+                    "SimConfig",
+                    "prod instance: leverage required, no quotes or quote_interval_ms",
+                ));
+            }
+            // The SimExchange the sim-venue task builds (README 启动步 2: dry validation).
+            if sim_accounts && let Err(e) = crate::paper::exchange(paper, &rd, 1_000_000_000_000) {
+                errors.push(e);
+            }
+        }
+    }
+    if let Some(paper) = c.sim.as_ref().filter(|_| sim) {
         let paper_venues = c.venues.values().any(|v| !v.live_feed);
         if paper.quote_interval_ms == 0 || (paper_venues && paper.quotes.is_empty()) || paper.leverage == 0 {
             errors.push(Error::config(
