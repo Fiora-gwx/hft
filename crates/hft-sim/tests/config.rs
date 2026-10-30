@@ -35,7 +35,7 @@ fn sim_001_tuning_defaults() {
 
 #[test]
 fn sim_002_constants() {
-    assert_eq!(MAX_SIM_ACCOUNTS, 16);
+    assert_eq!(MAX_SIM_ACCOUNTS, 64);
     assert_eq!(MAX_LATENCY_MODELS, 16);
     assert_eq!(MAX_MARGIN_MODELS, 16);
     assert_eq!(SIM_CODE_BASE, 0x1000_0000);
@@ -124,8 +124,8 @@ fn sim_003_config_errors() {
         s.accounts = (1..=n).map(|a| (AccountId(a), cfg_a9())).collect();
         s
     };
-    assert_eq!(new(&many(16), &rd), Ok(()), "SIM-003.17");
-    assert_eq!(new(&many(17), &rd), Err(SimCfgErr::TooManyAccounts), "SIM-003.18");
+    assert_eq!(new(&many(64), &rd), Ok(()), "SIM-003.17");
+    assert_eq!(new(&many(65), &rd), Err(SimCfgErr::TooManyAccounts), "SIM-003.18");
 }
 
 /// `due_tsc` of every `A9` order event of one run.

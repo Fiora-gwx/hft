@@ -104,7 +104,7 @@ pub enum SimInput<'a> {
 /// [LeverageItem; n_lev] 字节(与 rep-sim-bulk 同一拆分)。
 pub struct SimReply<'a> { pub account: AccountId, pub due_tsc: Tsc, pub gen_seq: u64, pub msg: RepMsg, pub bulk: &'a [u8] }
 pub const SIM_CODE_BASE: u32 = 0x1000_0000;   // 模拟拒单的 OrderEvent.reject_code = SIM_CODE_BASE + n(n 见"拒单规则")
-pub const MAX_SIM_ACCOUNTS: usize = 16;
+pub const MAX_SIM_ACCOUNTS: usize = 64;    // prod 实例的 Shadow 变体 × 账户(原 16)
 pub const MAX_LATENCY_MODELS: usize = 16;
 pub const MAX_MARGIN_MODELS: usize = 16;
 pub const CMDS_PER_POLL: usize = 256;          // sim-gw
@@ -582,7 +582,7 @@ pub struct StressVerdict {
 | `SimGwTask::poll_once` | 单次工作量 ≤ 200 µs;sim-gw 落后 journal 末尾只记录(sim-gw 只在 `sim` 实例里运行,不设延迟验收;同机时 `sim` 实例只用非隔离核,滞后进日报) | `sim/poll_once`;指标 `sim_tail_lag_ms` |
 | `replayer sim` 吞吐 | ≥ `replayer verify` 吞吐的 50% | `sim/replay_day` |
 
-- 分配:`SimExchange::new` 之后零分配(全部定容:`MAX_SIM_ACCOUNTS`、每账户订单表 1,024、记忆环 64 项、待交付堆 16,384)。
+- 分配:`SimExchange::new` 之后零分配(全部定容:`MAX_SIM_ACCOUNTS`、每账户订单表 1,024、记忆环 64 项、待交付堆 16,384)。每账户的定容内存随被跟踪 inst 数增长(记忆环约 4 KiB × inst、订单表 1,024 项),账户数接近 64 时按主机类内存表复核。
 - 内存:簿副本与 hft-book 容量相同,只为 Sim 账户实际交易的 (venue, inst) 建;sim-gw 总内存上限按主机类见 [hft-core 内存预算](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属)。
 - 系统调用:`SimGwTask` 只有环与 journal 读者的共享内存访问,无系统调用。
 

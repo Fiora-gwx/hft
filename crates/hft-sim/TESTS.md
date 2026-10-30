@@ -87,7 +87,7 @@ spec: README.md
 - 步骤:
   1. 读常量
 - 期望:
-  - `MAX_SIM_ACCOUNTS == 16`,`MAX_LATENCY_MODELS == 16`,`MAX_MARGIN_MODELS == 16`,`SIM_CODE_BASE == 0x1000_0000`;`CMDS_PER_POLL == 256`,`REPLY_RESERVE == 4 096`
+  - `MAX_SIM_ACCOUNTS == 64`,`MAX_LATENCY_MODELS == 16`,`MAX_MARGIN_MODELS == 16`,`SIM_CODE_BASE == 0x1000_0000`;`CMDS_PER_POLL == 256`,`REPLY_RESERVE == 4 096`
 - 实现:`crates/hft-sim/tests/config.rs::sim_002_constants`
 
 ### SIM-003 SimExchange::new 对每个配置错误返回对应的 SimCfgErr
@@ -116,8 +116,8 @@ spec: README.md
 | SIM-003.14 | `n = 65` | `Err(BadDist)` |
 | SIM-003.15 | `P2.required_margin_mode = Isolated` | `Err(MarginMode)` |
 | SIM-003.16 | `A9.initial_balances` 另含 `(S4, USDT, 1)`(venue 集合 {S1, P2, S4} 中 P2 与 S4 同为交易所 E2) | `Err(SameExchangeMarkets)` |
-| SIM-003.17 | 16 个 Sim 账户 | `Ok` |
-| SIM-003.18 | 17 个 Sim 账户 | `Err(TooManyAccounts)` |
+| SIM-003.17 | 64 个 Sim 账户 | `Ok` |
+| SIM-003.18 | 65 个 Sim 账户 | `Err(TooManyAccounts)` |
 
 ### SIM-004 两个账户引用同一延迟模型时抽样子流互不影响
 
