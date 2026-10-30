@@ -488,18 +488,6 @@ impl<'a> Tables<'a> {
                 push(e, C::DanglingRef, sec::ACCOUNTS, i);
             }
         }
-        let mut bound_by: Vec<bool> = vec![false; 256];
-        for (i, r) in self.accounts.iter().enumerate() {
-            if r.bound_instance == 0 {
-                continue;
-            }
-            if let Some(b) = bound_by.get_mut(usize::from(r.bound_instance)) {
-                if *b {
-                    push(e, C::InstanceMultiBound, sec::ACCOUNTS, i);
-                }
-                *b = true;
-            }
-        }
         for (i, r) in self.account_venues.iter().enumerate() {
             if !account_ok(r.account) || !venue_ok(r.venue) {
                 push(e, C::DanglingRef, sec::ACCOUNT_VENUES, i);
@@ -1199,14 +1187,22 @@ impl<'a> Tables<'a> {
                 name: st(r.name),
             })
             .collect();
-        let mut instance_account = vec![0u8; self.instances.len() + 1];
+        // Every account bound to an instance, ascending; the first is the instance's primary account.
+        let mut instance_accounts: Vec<Vec<AccountId>> = vec![Vec::new(); self.instances.len() + 1];
         for a in &self.accounts {
-            if let Some(s) = instance_account.get_mut(usize::from(a.bound_instance))
+            if let Some(s) = instance_accounts.get_mut(usize::from(a.bound_instance))
                 && a.bound_instance != 0
             {
-                *s = a.id;
+                s.push(AccountId(a.id));
             }
         }
+        for s in &mut instance_accounts {
+            s.sort_unstable();
+        }
+        let instance_account: Vec<u8> = instance_accounts
+            .iter()
+            .map(|s| s.first().map_or(0, |a| a.0))
+            .collect();
         let fees = FeeTable::build(&FeeRows::new(&self.fees, &self.fee_overrides), &tiers);
         let mut rate_limits: Vec<Vec<RateLimit>> = vec![Vec::new(); VENUE_SLOTS];
         for r in &self.limits {
@@ -1300,6 +1296,7 @@ impl<'a> Tables<'a> {
             accounts: accounts.into(),
             instances,
             instance_account: instance_account.into(),
+            instance_accounts: instance_accounts.into_iter().map(Vec::into_boxed_slice).collect(),
             fees,
             insts_of_asset: insts_of_asset.into_iter().map(Into::into).collect(),
             insts_of_venue: insts_of_venue.into_iter().map(Into::into).collect(),

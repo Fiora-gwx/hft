@@ -312,6 +312,27 @@ impl Oms {
         let (ti, i) = self.locate(s)?;
         self.tables.get(ti)?.as_ref()?.slots.get(i as usize)
     }
+    /// Calls `f` with the handle of every open order (neither Free nor terminal) of
+    /// `(venue, account)` on `inst`, in slot order. One pass over that table's slots.
+    pub fn each_open(&self, v: VenueId, a: AccountId, inst: hft_types::InstId, mut f: impl FnMut(OrderRef)) {
+        let Some(t) = self.tix(v, a).and_then(|ti| self.t(ti)) else {
+            return;
+        };
+        for s in 1..=t.n {
+            if let Some(sl) = t.slot(s)
+                && sl.state.open()
+                && sl.inst == inst
+            {
+                f(OrderRef {
+                    venue: v,
+                    account: a,
+                    _pad: [0; 2],
+                    slot: s,
+                    r#gen: sl.r#gen,
+                });
+            }
+        }
+    }
     /// `SlotExt` of a live handle.
     pub fn slot_ext(&self, s: OrderRef) -> Option<&SlotExt> {
         let (ti, i) = self.locate(s)?;

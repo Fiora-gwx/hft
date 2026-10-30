@@ -587,6 +587,9 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     let applied = !(out.contains(hft_book::TopOutcome::DUPLICATE)
         || out.contains(hft_book::TopOutcome::OLDER)
         || out.contains(hft_book::TopOutcome::INVALID));
+    if applied {
+        e.market.put_bbo(i, &b.h, e.cur_seq);
+    }
     // Liveness.
     let venue = b.h.venue;
     let conn = b.h.conn.0;
@@ -1360,9 +1363,8 @@ fn conn_state<D: Driver<S>, S: StrategySet>(
         if s.inst.is_none() {
             continue;
         }
-        let a = s.account;
         let subscribed = s.subs.iter().any(|x| e.rd.inst(x.inst).venue == c.venue);
-        if subscribed && (c.account.0 == 0 || c.account == a) {
+        if subscribed && (c.account.0 == 0 || s.has_account(c.account)) {
             e.notify.push(
                 ix as u16,
                 Notif::Conn {
@@ -1536,7 +1538,7 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
     e.feeds_dirty = false;
     for ix in 0..inst.slots.len() {
         let Some(s) = inst.slots.get(ix) else { continue };
-        let a = s.account;
+        let (accounts, n) = (s.accounts, usize::from(s.n_accounts));
         let Some(g) = s.groups() else { continue };
         let mut ok = true;
         for (_, sp) in g.iter() {
@@ -1551,13 +1553,21 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
                 }
             }
         }
-        let last = e.cmd.feeds_last.get(usize::from(a.0)).copied().unwrap_or(false);
-        if ok != last {
-            if let Some(x) = e.cmd.feeds_last.get_mut(usize::from(a.0)) {
-                *x = ok;
+        // The legs are the instance's: every account of the instance has the same feed gate.
+        for a in accounts.iter().take(n).copied() {
+            let last = e.cmd.feeds_last.get(usize::from(a.0)).copied().unwrap_or(false);
+            if ok != last {
+                if let Some(x) = e.cmd.feeds_last.get_mut(usize::from(a.0)) {
+                    *x = ok;
+                }
+                e.trace.rec("gate.feeds", u64::from(a.0), u64::from(ok));
+                crate::mode_glue::apply_mode(
+                    e,
+                    inst,
+                    drv,
+                    ModeInput::Gate(GateEvent::Feeds { account: a, ok }),
+                )?;
             }
-            e.trace.rec("gate.feeds", u64::from(a.0), u64::from(ok));
-            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Feeds { account: a, ok }))?;
         }
     }
     Ok(())

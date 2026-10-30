@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | PMP-001 |
 | 命令行 | PMP-001 |
-| 产出 | PMP-001、PMP-004 |
+| 产出 | PMP-001、PMP-004、PMP-005 |
 | 验收步骤 | PMP-001 |
 | hft-core 验收 | PMP-002、PMP-004 |
 | 存储 | PMP-003 |
@@ -69,6 +69,16 @@ spec: README.md
 - 步骤:同一批段各解码一次:完整解码、`--orders-only`;另取后一半的段单独以 `--orders-only` 解码
 - 期望:`--orders-only` 的输出没有 `snap`/`batch`/`trade` 行,其 `dec`/`oev`/`ext`/`settle`/`cmdres`/`conn` 行与完整解码逐行相同;`bind` 行数等于完整解码打印的 binds 数;只解码后一半段时,用前一半的 `bind` 行把 `inst` 映射回窗口,标签与完整解码一致
 - 实现:手动运行
+
+### PMP-005 `journal` 的引擎 UTC 与 sequencer 的 UTC 线一致
+
+- 规则:[产出](README.md#产出)
+- 级别:unit
+- 里程碑:M3
+- 前置:1 GHz 计数器,段校准对 (0, 10^12)
+- 步骤:`EngineClock` 后依次施加落后 2 ms、超前 1 ms、频率超出与未超出 1000 ppm 的 `UtcAnchor`,再施加新的 `EngineClock`
+- 期望:落后时步进到目标线(lead 0);超前时保值并以 500 ppm 消除;超出容差的频率不用;新运行清空 UTC 线、回到段校准对;每步的值都由 hft-sequencer `clock::UtcLineRow` 计算
+- 实现:`tools/pm-md-probe/src/journal.rs::pmp_005_engine_utc_steps_forward_and_slews_back`
 
 ## 验收
 

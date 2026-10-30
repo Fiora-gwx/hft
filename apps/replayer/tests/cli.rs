@@ -8,6 +8,7 @@ mod receipt;
 mod recompute;
 mod recovery;
 mod recovery_gap;
+mod research;
 mod tail;
 mod toolcases;
 mod verify;

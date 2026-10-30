@@ -25,18 +25,18 @@ hft-types ← hft-refdata ← hft-event                      (L0,被所有人依
 hft-strategy-sdk → L0                                     (策略接口,只依赖 L0)
 hft-venue-proto ← venue-<x>                               (L1:trait 与纯协议)
 hft-book  hft-oms  hft-risk  hft-ledger  hft-exec         (L1,彼此不依赖;oms/risk/ledger/exec 可依赖 hft-strategy-sdk 的视图与意图类型,book 只用其快照读写类型;RejectBits 在 hft-types;hft-risk 只输出 KillBits)
-hft-strat-lib → L0 + hft-strategy-sdk
+hft-strat-lib → L0 + hft-strategy-sdk ;  hft-feature → hft-strategy-sdk
 hft-rt ;  hft-journal → hft-rt ;  hft-net → hft-rt + hft-event(只用 `ConnRole`);  hft-venue → hft-venue-proto + hft-net + hft-journal + hft-rt
 hft-sequencer → hft-strategy-sdk + L1 + hft-journal + hft-rt(对 StrategySet 泛型;LiveDriver 写 KillWord = AtomicU32)
-hft-ctl / hft-telemetry / hft-sim / hft-py / hft-testkit → 按需(各 README 的依赖节;都不依赖 hft-strategy-registry)
+hft-ctl / hft-telemetry / hft-sim / hft-replay / hft-py / hft-testkit → 按需(各 README 的依赖节;都不依赖 hft-strategy-registry)
 hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional 链上:hft-ext-proto → L0 ;  hft-amm → hft-types ;  hft-chain-evm → 以其 README 依赖节为准
-strategies/<name> → hft-strategy-sdk + hft-strat-lib(细则见 strategies/AGENTS.md)
-strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer 依赖);dev: hft-ctl + hft-ctl-proto
+strategies/<name> → hft-strategy-sdk + hft-strat-lib + hft-feature(细则见 strategies/AGENTS.md)
+strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer、tools/hft-pmcfg 依赖);dev: hft-ctl + hft-ctl-proto
 ```
 
-- `apps/hft-core` 依赖 `hft-venue-proto` 作泛型协议装配；其 dev 依赖 `hft-testkit` + `hft-ctl-proto`。
-- **任何引擎 crate 都不依赖 `strategies/*` 与 `hft-strategy-registry`**(含 `[dev-dependencies]`,`hft-testkit` 也不例外):引擎 crate 的测试用 `hft-testkit` 的测试策略;唯一的策略清单是 `strategies/registry`,依赖它的只有 `apps/hft-core` 与 `apps/replayer`;需要真实策略的集成测试放 `strategies/registry/tests/` 或 `apps/hft-core/tests/`。
+- `apps/hft-core` 依赖 `hft-venue-proto` 作泛型协议装配；其 dev 依赖 `hft-testkit` + `hft-ctl-proto` + `hft-pmcfg`。
+- **任何引擎 crate 都不依赖 `strategies/*` 与 `hft-strategy-registry`**(含 `[dev-dependencies]`,`hft-testkit` 也不例外):引擎 crate 的测试用 `hft-testkit` 的测试策略;唯一的策略清单是 `strategies/registry`,依赖它的只有 `apps/hft-core`、`apps/replayer` 与 `tools/hft-pmcfg`;需要真实策略的集成测试放 `strategies/registry/tests/` 或 `apps/hft-core/tests/`。
 - `venue-<x>` 只依赖 `hft-types/hft-refdata/hft-event/hft-venue-proto` 与编解码库;不依赖 `hft-net`、`hft-venue`、`hft-sequencer`。
 - `pure`/`hot` crate 不依赖 `cold` crate;`tokio` 不进 hot crate 的依赖闭包。
 - `hft-journal` 的 `writer` 特性只由 apps/hft-core、apps/replayer(以及 optional 的 apps/chain-core)启用;其余 app 与 hft-py 只用读者([hft-journal](hft-journal/README.md#cargo-feature))。

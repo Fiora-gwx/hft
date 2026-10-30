@@ -1376,6 +1376,7 @@ spec: README.md
 | RSK-101.15 | 不投递 `KillSelfTest{1}` | `IDENTITY` 未置位 |
 | RSK-101.16 | Sim 账户 3 复位后只投递 `Feeds`、sim-gw 的 `OrderConns`(A、B,`standby_up = true`)、`Unknown`、`Clock`,不投递 `KillSelfTest` | 复位那次 apply 的 `gate_changes` 为 `{3, 127, 104, false}`(`RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 直接置位);最后一次 apply `released = [3]` |
 | RSK-101.17 | Sim 账户 3 复位后只投递 A 的 `OrderConns{true, true}` | 该 apply 的 `hedge_gate_open` 与 `venue_gate_open` 都为 `[(3, A)]`(模拟账户的子集只看连接) |
+| RSK-101.18 | 同 .16,但 A、B 的 `OrderConns{primary_up: true, standby_up: false}`,`allow_missing_standby = false` | 账户 3 的 `ORDER_CONNS` 置位;最后一次 apply `released = [3]`(模拟场所没有热备) |
 
 ### RSK-102 venue 位图反映最近一次输入,放行后不再变假
 

@@ -55,7 +55,7 @@ sequencer 线程内的 OMS 对每次新单、撤单与改单,在该操作的首�
 | `ingest` | `proc_tsc − rx_tsc` | TLS 解密 + WS 解帧 + 解码 + 定点归一化 + 入环(`bbo` 环或 `md` 环,见 §2.3)+ 在环中排队 + sequencer 取出 | — |
 | `feed_host` | `proc_tsc − hw_rx` = `kernel_rx + ingest` | 行情主机内部分 | — |
 | `decide` | `decided_tsc − proc_tsc` | 赋 seq + 写 seq journal + 簿更新 + 策略快速部分 + 执行层 + 风控 + OMS 分配槽与 client id + `OrderDecision` 写 journal。**唯一的纯计算分段**;组成部分的分配见 [hft-sequencer](../crates/hft-sequencer/README.md)、[hft-strategy-sdk](../crates/hft-strategy-sdk/README.md)、[hft-exec](../crates/hft-exec/README.md) | D4 的一部分 |
-| `egress` | `sent_tsc − decided_tsc` | `OutMsg`(`GwCmd`)入 out 环 + 环跳 + gw 取 `OutMsg` + **gw 填帧模板** + WS 掩码 + TLS 加密 + `writev` 返回 | D4 的一部分 |
+| `egress` | `sent_tsc − decided_tsc` | `OutMsg`(`GwCmd`)入 out 环 + 环跳 + gw 取 `OutMsg` + **gw 填帧模板**(REST 通道:编码与请求签名)+ WS 掩码 + TLS 加密 + `writev` 返回 | D4 的一部分 |
 | `kernel_tx` | `tx_sw − sent_tsc` | 内核 TX 路径(仅在 TX 时间戳打开时) | D5 |
 | `tick_to_trade` | `sent_tsc − hw_rx` = `kernel_rx + ingest + decide + egress` | **主机内 tick-to-trade**:触发事件是行情事件的订单样本 | — |
 | `rep_to_order` | 由某条回报帧(`OrderEvent`:Ack/Fill/Cancel 等)触发的下一笔订单操作(新单、撤单或改单,三者都计入)的 `sent_tsc` − 该回报帧的 `hw_rx`;计算同 `tick_to_trade`:`kernel_rx + (sent_tsc − rx_tsc)` | **回报路径主机内部分**:回报帧收包、gw 解码、rep 环与 gw 内等待、sequencer 处理、下一单出环与写出——对冲路径走的就是这条路。样本 = 触发事件是回报帧的订单样本,不计入 `tick_to_trade`;主网行情负载下由 latency-probe `quote` 模式(Ack 后同一事件内撤单)产生 | — |

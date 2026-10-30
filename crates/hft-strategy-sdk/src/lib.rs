@@ -5,8 +5,8 @@
 //! (`views`, `view_types`), the events delivered to strategies (`event`), order and target intents
 //! (`intent`, `target`), the intent collector `Ctx` and `SubsBuilder` (`ctx`), Advice payloads
 //! (`advice`), `GroupTable` and the group fingerprint (`group`), the checkpoint layout
-//! description (`layout`), the snapshot read/write types (`snapshot`) and the assembly trait
-//! `StrategySet` (`set`).
+//! description (`layout`), the snapshot read/write types (`snapshot`), the exported feature columns
+//! (`features`) and the assembly trait `StrategySet` (`set`).
 //!
 //! No I/O, no threads, no clock; nothing panics on any input. Specification:
 //! `crates/hft-strategy-sdk/README.md`.
@@ -30,6 +30,7 @@ pub mod check;
 pub mod ctx;
 pub mod desc;
 pub mod event;
+pub mod features;
 pub mod group;
 pub mod intent;
 pub mod layout;
@@ -52,6 +53,7 @@ pub use advice::{
 pub use ctx::{Ctx, CtxBufs, CtxFull, EvMask, OwnEvMask, Part, SubsBuilder, SubsErr, SubsLimits, TimerId};
 pub use desc::{CmdDesc, CmdError, CmdView, NoteDesc, ReportAgg, ReportFieldDesc, ReportScope};
 pub use event::{EventRef, ExecUpdate, ExecUpdateKind, GIX_NONE, MODEL_TICK, OrderUpdate, OrderUpdateKind};
+pub use features::{ColumnDesc, FeatureRow};
 pub use group::{GroupSpecExt, GroupTable};
 pub use intent::{
     HedgeKind, HedgePlan, IntentClass, IntentHandle, IntentOutcome, LegLink, LegLinkOpt, LinkRole, OnFail,
@@ -75,8 +77,8 @@ pub use view_types::{
     BboView, BrokenReason, CapBits, CapScopeView, CashView, EngineOrigin, ExternalCause, ExternalFillView,
     FeeView, FundingView, GroupPosView, InstRiskView, InventoryView, LegPos, LegTrack, LegView,
     LiquidationView, MarginLevel, MarginView, MdStampView, NoticeKind, OrderStateView, OrderView,
-    PerpPosView, PnlSummary, PortfolioRead, RiskEvent, RiskStateView, RxTsSrc, StuckReason, TargetOrigin,
-    TargetState, TargetView, TradeView, VenueEquityView, VenueNoticeView, VenueSet,
+    PerpPosView, PnlSummary, PortfolioRead, RiskEvent, RiskStateView, RxTsSrc, Stamps, StuckReason,
+    TargetOrigin, TargetState, TargetView, TradeView, VenueEquityView, VenueNoticeView, VenueSet,
 };
 pub use views::{
     BookRead, BookStatus, EngineClockAnchor, MD_STAMPS_KEPT, ModelViews, Now, RefView, Views, time,

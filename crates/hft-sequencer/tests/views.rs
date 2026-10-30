@@ -505,3 +505,172 @@ fn seq_447_md_stamps() {
     );
     assert_eq!(m.md_stamp(A1, 20), None, "SEQ-447.3 still hidden");
 }
+
+/// SEQ-448: `Views::bbo_stamp` keeps the stamps of the last applied Bbo (duplicates do not
+/// replace it; a keyframe hides it); `Views::stamps` gives the delivered Input's venue and
+/// receive stamps with its engine clock.
+#[test]
+fn seq_448_bbo_stamp_and_input_stamps() {
+    use hft_strategy_sdk::{MdStampView, Stamps};
+    reset_script();
+    let mut h = b0().boot();
+    h.steady();
+    let c: Cap<(Option<MdStampView>, Stamps, i64)> = cap();
+    let c2 = c.clone();
+    set_hook(move |hx, ev, _| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            c2.borrow_mut()
+                .push((hx.v.bbo_stamp(A1), hx.v.stamps(), hx.v.now().engine_ns));
+        }
+    });
+    let mut b = bbo(A1, A, 0, "50000", "50002", 900, h.now());
+    b.h.ex_ts_ns = 7_000_000_000;
+    b.h.sw_rx_ns = 7_011_000_000;
+    h.push(RingId::Bbo(0), &b);
+    h.run();
+    // .1 the applied Bbo: its stamps in both views, the engine clock of the Input.
+    let (s, st, ens) = c.borrow().last().copied().expect("delivered");
+    assert_eq!(
+        s.map(|m| (m.kind, m.ex_ts_ns, m.sw_rx_ns, m.rx_tsc)),
+        Some((MdStampView::MD_BBO, 7_000_000_000, 7_011_000_000, Tsc(b.h.rx_tsc))),
+        "SEQ-448.1"
+    );
+    assert_eq!(
+        (st.kind, st.venue_ns, st.sw_rx_ns, st.rx_tsc, st.engine_ns),
+        (
+            EventKind::BBO.0,
+            7_000_000_000,
+            7_011_000_000,
+            Tsc(b.h.rx_tsc),
+            ens
+        ),
+        "SEQ-448.1"
+    );
+    // .2 the same update from the second member connection: not applied, the stamp stays.
+    let mut d = bbo(A1, A, 1, "50000", "50002", 900, h.now());
+    d.h.ex_ts_ns = 7_000_000_000;
+    d.h.sw_rx_ns = 7_020_000_000;
+    h.push(RingId::Bbo(0), &d);
+    h.run();
+    clear_hook();
+    let m = &h.s.engine().market;
+    assert_eq!(
+        m.bbo_stamp(A1).map(|x| x.sw_rx_ns),
+        Some(7_011_000_000),
+        "SEQ-448.2"
+    );
+    assert_eq!(
+        m.bbo_stamp(B1).map(|x| x.kind),
+        Some(MdStampView::MD_BBO),
+        "SEQ-448.2 b1"
+    );
+    // .3 a keyframe hides it until the next applied Bbo.
+    h.keyframe();
+    assert_eq!(h.s.engine().market.bbo_stamp(A1), None, "SEQ-448.3");
+    let n = bbo(A1, A, 0, "50001", "50003", 901, h.now());
+    h.push(RingId::Bbo(0), &n);
+    h.run();
+    assert!(h.s.engine().market.bbo_stamp(A1).is_some(), "SEQ-448.3");
+}
+
+/// SEQ-449: `Views::open_orders` lists the account's open orders on an inst in slot order until
+/// they are terminal.
+#[test]
+fn seq_449_open_orders() {
+    use hft_strategy_sdk::OrderView;
+    reset_script();
+    let mut h = b0().boot();
+    h.steady();
+    let m = h.mark();
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            for p in ["49990", "49991"] {
+                let _ = ctx.place(intent(
+                    hx,
+                    A1,
+                    Side::Buy,
+                    hft_types::Tif::Gtc,
+                    hft_strategy_sdk::IntentClass::Open,
+                    px(p),
+                    q("0.001"),
+                ));
+            }
+        }
+    });
+    h.quote(A1, "50000", "50003");
+    h.run();
+    clear_hook();
+    let ds = decisions(&h.since(m));
+    assert_eq!(ds.len(), 2, "{ds:?}");
+    for (_, d) in &ds {
+        assert_eq!(d.reject, 0, "{d:?}");
+        h.ack(d);
+    }
+    let c: Cap<(usize, Vec<OrderView>)> = cap();
+    let c2 = c.clone();
+    set_hook(move |hx, ev, _| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let mut one = [free_view()];
+            let n = hx.v.open_orders(hx.s.account, A1, &mut one);
+            let mut all = vec![free_view(); 4];
+            let k = hx.v.open_orders(hx.s.account, A1, &mut all);
+            all.truncate(k);
+            assert!(n <= 1 || one[0] == all[0], "SEQ-449.1 first of a short buffer");
+            c2.borrow_mut().push((n, all));
+        }
+    });
+    // .1 both acked orders, in slot order; a 1-element buffer still reports 2.
+    h.quote(A1, "50000", "50004");
+    h.run();
+    let (n, all) = c.borrow().last().cloned().unwrap();
+    assert_eq!(n, 2, "SEQ-449.1");
+    assert_eq!(
+        all.iter().map(|o| o.px).collect::<Vec<_>>(),
+        vec![px("49990"), px("49991")],
+        "SEQ-449.1"
+    );
+    assert!(all.windows(2).all(|w| w[0].r.slot < w[1].r.slot), "SEQ-449.1");
+    assert_eq!(hx_open_on_b1(&mut h), 0, "SEQ-449.1 other inst");
+    // .2 the first one cancelled by the exchange: one left.
+    let ev = order_event(&ds[0].1, hft_event::OrderEventKind::CancelAck, h.epoch());
+    let r = h.rep_ring(ds[0].1.account);
+    h.push(r, &ev);
+    h.run();
+    h.quote(A1, "50000", "50005");
+    h.run();
+    clear_hook();
+    let (n, all) = c.borrow().last().cloned().unwrap();
+    assert_eq!((n, all[0].px), (1, px("49991")), "SEQ-449.2");
+}
+
+/// An `OrderView` placeholder for output buffers.
+fn free_view() -> hft_strategy_sdk::OrderView {
+    hft_strategy_sdk::OrderView {
+        r: hft_strategy_sdk::OrderRef::new(A, AC1, 0, 0),
+        group: hft_types::GroupId(0),
+        inst: hft_types::InstId(0),
+        side: Side::Buy,
+        tif: hft_types::Tif::Gtc,
+        class: hft_strategy_sdk::IntentClass::Open,
+        px: hft_types::Px(0),
+        qty: hft_types::Qty(0),
+        filled: hft_types::Qty(0),
+        state: hft_strategy_sdk::OrderStateView::Live,
+        tag: 0,
+    }
+}
+
+/// Open orders of the strategy's account on `b1` (read in the engine views).
+fn hx_open_on_b1(h: &mut H) -> usize {
+    let v = h.s.engine().oms.inflight();
+    usize::from(v.open_buy(AC1, B1).0 != 0) + usize::from(v.open_sell(AC1, B1).0 != 0)
+}

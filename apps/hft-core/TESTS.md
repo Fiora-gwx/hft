@@ -44,8 +44,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 使用本组件 | 不适用:见子节 |
 | 命令行与退出码 | CORE-001–CORE-017、CORE-299、CORE-412 |
 | 策略装配 | CORE-030–CORE-035 |
-| 实例角色(prod 与 sim) | CORE-040–CORE-050、CORE-432 |
-| 线程计划 | CORE-060–CORE-090 |
+| 实例角色(prod 与 sim) | CORE-040–CORE-050、CORE-432、CORE-448、CORE-449、CORE-450 |
+| 线程计划 | CORE-060–CORE-090、CORE-449 |
 | 内存与 journal 段(按主机类唯一归属) | CORE-100–CORE-122、CORE-130–CORE-148、CORE-412 |
 | 主机资源隔离(slice、核与出口 IP) | CORE-160–CORE-177 |
 | dev2 护栏 | CORE-180–CORE-217 |
@@ -53,10 +53,10 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
 | 优雅退出与 kill 语义 | CORE-300–CORE-314、CORE-429 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
-| 多账户 | CORE-330、CORE-168、CORE-441、CORE-247、CORE-313、CORE-427、CORE-428 |
+| 多账户 | CORE-330、CORE-168、CORE-441、CORE-446、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445、CORE-447 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -404,8 +404,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 |---|---|---|
 | CORE-040.1 | `dev2_sim()` 不改 | 空 |
 | CORE-040.2 | `dev2_sim()` 的 `instance.name = "prod2"` | 含 `BadValue`(`instance.name`) |
-| CORE-040.3 | `dev2_prod()` 的 refdata 加一个 Sim 账户 `sim-x` | 含 `SimAccountInProdInstance` |
-| CORE-040.4 | `c32_prod()` 的 refdata 加一个 Sim 账户 `sim-x` | 含 `SimAccountInProdInstance` |
+| CORE-040.3 | `dev2_prod()` 的 refdata 加一个 Sim 账户 `sim-x`(绑定自己的策略实例),不加 `[sim]` 与 `sim-venue` | 含 `SimConfig` |
+| CORE-040.4 | `c32_prod()` 的 refdata 加一个 Sim 账户 `sim-x`,加 `[sim]`(无 `quotes`)与 `sim-venue` 线程(nice 19) | 空(Shadow 变体,CORE-449) |
 | CORE-040.5 | `dev2_sim()` 的 refdata 加一个 Live 账户 `sim-live`(`is_prod = false`) | 含 `LiveAccountInSimInstance` |
 | CORE-040.6 | `c32_sim()` 的 refdata 加一个 Live 账户 `sim-live` | 含 `LiveAccountInSimInstance` |
 
@@ -486,7 +486,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-044.5 | `dev2_prod()` 的 `okx-1` 的 `keys.okx-swap = {session = "okx-1.key", rest = "okx-1.key"}`(同一把) | 空 |
 | CORE-044.6 | `dev2_prod()` 的 `bn-1` 去掉 `keys.binance-usdm.session` | 恰好 {`MissingCredential`} |
 
-### CORE-045 `[sim]` 只属于 `sim` 实例,`endpoint_override` 只属于测试网配置
+### CORE-045 `[sim]` 只属于 `sim` 实例与有 Sim 账户的 `prod` 实例,`endpoint_override` 只属于测试网配置
 
 可执行子集 `tests/config.rs::core_045_rejects_live_accounts_in_paper_and_unbuilt_venues` 同时解析单 venue 与双 venue 测试网模板，检查每项协议/VenueId 能由当前构建注册；双 venue 使用永续与现货。
 
@@ -498,8 +498,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 | 行 | 配置 | 期望错误列表 |
 |---|---|---|
-| CORE-045.1 | `dev2_prod()` 加 `[sim] seed = 1` | 恰好 {`SimSectionInProd`} |
-| CORE-045.2 | `dev2_prod()` 加一项 `[[sim.latency_models]]` | 恰好 {`SimSectionInProd`} |
+| CORE-045.1 | `dev2_prod()`(无 Sim 账户)加 `[sim] seed = 1` | 含 `ThreadPlan`(缺 `sim-venue`);再加 `sim-venue` 线程 → 恰好 {`SimConfig`} |
+| CORE-045.2 | `dev2_prod()`(无 Sim 账户)加一项 `[[sim.latency_models]]` | 同 .1 |
 | CORE-045.3 | `dev2_sim()` 去掉 `sim.seed` | 恰好 {`MissingField`(`sim.seed`)} |
 | CORE-045.4 | `dev2_sim()` 去掉全部 `[[sim.latency_models]]` | 恰好 {`MissingField`(`sim.latency_models`)} |
 | CORE-045.5 | `c32_prod()`,`order_env = "prod"`,加 `venues.binance-usdm.endpoint_override` | 恰好 {`EndpointOverrideInProd`} |
@@ -1833,8 +1833,22 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-441.2 | `shared_ok = false`,账户 2 改为 10.0.1.11;只有账户 1 | 都是 `None` |
 | CORE-441.3 | `shared_ok = true`,账户 1、2 都是 10.0.1.10 | `None` |
 | CORE-441.4 | `venues::shared_egress_ip` | `binance-spot`、`binance-usdm` 为 `false`;`polymarket-clob` 为 `true` |
-| CORE-441.5 | `public` 改为网络模式的两个 Live 账户(同一 `src_ip`),`load(…, false)` | 含 `AccountCapacity` 与 `SharedAccountIp` |
-| CORE-441.6 | Polymarket 实盘配置再加一个账户 2,`load(…, false)` | 含 `AccountCapacity`,不含 `SharedAccountIp` |
+| CORE-441.5 | `public` 改为网络模式的两个 Live 账户(同一 `src_ip`),`load(…, false)` | 含 `SharedAccountIp`,不含 `AccountCapacity` |
+| CORE-441.6 | Polymarket 实盘配置再加一个账户 2,`load(…, false)` | 不含 `AccountCapacity` 与 `SharedAccountIp` |
+
+### CORE-446 一个 venue 的多个 Live 账户:每账户出口 IP、gw 账户容量与实盘配置生成
+
+- 规则:[多账户](README.md#多账户)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:table
+- 里程碑:M4
+- 前置:`support::write` 的配置(venue `public` = `binance-spot`)改为网络模式的 N 个 Live 账户;Polymarket 实盘做市配置(Cargo feature `polymarket`)带 `PmLive.extra_accounts`(`pm_sim_config --live-account`)
+- 实现:`apps/hft-core/tests/config.rs::core_446_live_accounts_of_one_venue`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-446.1 | Polymarket 实盘配置另加两个账户(UID、`keys2`/`keys3`),`load(…, false)` | 成功;实例 1 的账户集合 = {1, 2, 3};账户 2、3 的 label 为 `pm-live-2`、`pm-live-3`,`is_prod`,绑定实例 1;`venues.pm.accounts` 的账户为 1、2、3,凭据路径在各自目录下;`keys_required` 含三个账户 |
+| CORE-446.2 | `public` 两个 Live 账户,账户 2 写 `src_ip = 127.0.1.2` | 不含 `SharedAccountIp`、`AccountCapacity`、`ConfigParse`;`accounts[].src_ip` = [无, 127.0.1.2] |
+| CORE-446.3 | `public` 12 个、13 个 Live 账户(各自 `src_ip`) | 12 个不含 `AccountCapacity`;13 个含 |
 
 ### CORE-169 snap-fetch 复用第一条 `stream = md` 的 `src_ip`,acct-fetch 复用该账户的 `gw.src_ip`
 
@@ -4438,6 +4452,69 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-425.2 | `maker_fill = "queue"` | `Queue` |
 | CORE-425.3 | `maker_fill = "prob"` | `ConfigParse` |
 
+### CORE-448 运行装配 `Assembly`
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)(运行装配)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置(`sim`);`support::write_live(…, false)` 的测试网配置(`prod`、`order_env = "testnet"`)及其 `order_env = "prod"` 副本
+- 实现:`apps/hft-core/tests/config.rs::core_448_run_assembly`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-448.1 | `Assembly::resolve`:(dry, sim)、(非 dry, sim)、(非 dry, 测试网 prod)、(dry, 测试网 prod)、(非 dry, 正式 prod) | `Sim`、`None`、`Live{prod_orders: false}`、`None`、`Live{prod_orders: true}`(`prod_orders()` 真、`is_sim()` 假) |
+| CORE-448.2 | `load(sim, true)`;`load(测试网, false)` | `Loaded.assembly` 分别为 `Sim`、`Live{false}`,且等于 `cfg.assembly()` |
+| CORE-448.3 | `load(sim, false)` | `EnvCombo` |
+
+### CORE-449 `prod` 实例内的 Sim 账户(Shadow 变体)
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)(Shadow 变体)、[线程计划](README.md#线程计划)加载校验第 1、14 条、[配置文件字段](README.md#配置文件字段)(`sim.*`)
+- 级别:table
+- 里程碑:M4
+- 前置:`support::write_live_shadow`:`write_live(…, false)` 的测试网 `prod` 配置,refdata 另有 Sim 账户 2 `sim-shadow`(绑定同 kind 的策略实例 2,自己的参数 blob 与风控行),`[sim]` 去掉 `quotes` 与 `quote_interval_ms`,线程 `sim-venue`(nice 19);`support::write_live_shadow_with` 改 Sim 账户的名字或绑定
+- 实现:`apps/hft-core/tests/prod_sim.rs::core_449_prod_instance_with_sim_accounts`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-449.1 | 原样 `load(…, false)`;另取无 Sim 账户的 `write_live(…, false)` | `Live{prod_orders: false}` = `cfg.assembly()`,`sim_task() = Some("sim-venue")`,`role_prod`,账户 2 为 Sim,两份参数,`keys_required` 只有账户 1,journal 集合 `seq`、`raw-feed-public`、`raw-gw-public`;无 Sim 账户的配置 `sim_task() = None` |
+| CORE-449.2 | 去掉 `[sim]`;再去掉 `sim-venue` 线程 | 含 `ThreadPlan`;随后恰好 {`SimConfig`} |
+| CORE-449.3 | 只去掉 `sim-venue` 线程 | 恰好 {`ThreadPlan`} |
+| CORE-449.4 | `sim-venue` 的 nice 9(低于 persist 的 10);`gw:public` 与 `sim-venue` 都绑核 3;`sim-venue` 改绑核 4 | `ThreadPlan`;`ThreadPlan`;通过(`sim_venue_placement` 为 `None`);`in_cpu_list("2-5,7")` 含 4 不含 6 |
+| CORE-449.5 | `[sim]` 加 `quote_interval_ms = 20`;`leverage = 0`;一条 `quotes` | 各恰好 {`SimConfig`} |
+| CORE-449.6 | `[sim] calib` 指向不存在的文件 | 恰好 {`SimConfig`}(步 2 干建 `SimExchange`) |
+| CORE-449.7 | 无 Sim 账户的配置加 `[sim]` 与 `sim-venue` 线程 | 恰好 {`SimConfig`} |
+| CORE-449.8 | venue `public` 的 `accounts` 加账户 2 的 key(另一 `src_ip`) | 含 `AccountMismatch` |
+| CORE-449.9 | Sim 账户名 `shadow` | 恰好 {`AccountNamePrefix`} |
+| CORE-449.10 | Sim 账户绑定 Live 账户的策略实例 1 | 含 `EnvAccountMismatch` |
+
+### CORE-450 模拟交易所的决策屏障只对 Sim 账户
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)(Shadow 变体:Live 账户的决定不阻塞模拟)
+- 级别:table
+- 里程碑:M4
+- 前置:CORE-449 的配置的 refdata;`OrderDecision` 只改 `account`、`reject` 与记录标志
+- 实现:`apps/hft-core/tests/prod_sim.rs::core_450_decision_barrier_only_for_sim_accounts`
+
+| 行 | 输入 | 期望 `paper::barrier` |
+|---|---|---|
+| CORE-450.1 | Sim 账户 2,`reject = 0`,无标志 | 真 |
+| CORE-450.2 | Live 账户 1,`reject = 0` | 假 |
+| CORE-450.3 | Sim 账户 2,`reject = 1`;`SHADOW` 标志 | 假;假 |
+
+### CORE-447 `[sim] calib` 校准表
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`[sim] calib`)、[hft-sim 条件跟踪与校准表](../../crates/hft-sim/README.md#条件跟踪与校准表)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置;临时目录里的 `calib.json` = `maker_fill = "queue_cap"`、`tombstone`、`gtd_ms = 900`、`thr = [3.5]`、两个池(`ack`、`cxl|1`)、`min_n = 1`
+- 实现:`apps/hft-core/tests/config.rs::core_447_sim_calibration_table`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-447.1 | 未配置 `calib` | `paper::model`:`TradeThrough`、`VenueModel::default()`、无哈希 |
+| CORE-447.2 | `calib = '<calib.json>'` | `QueueCap`;墓碑开、GTD 900 ms、2 个池、负载阈值 3.5 ms;64 位 SHA-256;`paper::exchange` 成功 |
+| CORE-447.3 | 文件不存在;未知字段 | 都是 `SimConfig` |
+
 ### CORE-426 Polymarket 挂单模拟配置可加载
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)、[配置文件字段](README.md#配置文件字段)
@@ -4662,4 +4739,5 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 |---|---|---|
 | CORE-445.1 | `step` 文本 `0.01`、`1`、`.5`、`0`、`0.0000001`、`-1`、空、`0.0a` | 10 000、1 000 000、500 000(1e-6 USDC),其余无效 |
 | CORE-445.2 | 离线配置的 `venues.public.presign`(3, 1, `0.01`, 30 000) | 含 `BadValue` |
-| CORE-445.3 | Polymarket 实盘配置加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
+| CORE-445.3 | 不带默认表的 Polymarket 实盘配置(`presign: false`)加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
+| CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000);后者的配置文本不含 `presign` |

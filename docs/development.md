@@ -234,6 +234,10 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
 
 手动 `workflow_dispatch(sha)`:在 `ubuntu-24.04-arm`(容器 `ubuntu:24.04`)上以 `release` 剖面构建 M1.5 探针程序 `latency-slice` 与 `hostprobe`,打包 `probe-aarch64.tar.zst`(含 `SHA` 与 `SHA256SUMS`)作为 workflow artifact(保留 3 天),供按需租用的探针主机下载运行;不进任何 Release 与生产归档,`timeout-minutes: 40`。
 
+### 研究工具构建(`research-build.yml`)
+
+手动 `workflow_dispatch(sha)`:在 `ubuntu-latest`(容器 `ubuntu:22.04`,glibc 2.35)上以 `release` 剖面构建 x86_64 的 `replayer`(含 `research`、`parity`)与 `hft_py` wheel(maturin),构建时设 `HFT_GIT_SHA` 使 `run.json` 记下代码 SHA;打包 `research-x86_64.tar.zst`(含 `SHA` 与 `SHA256SUMS`)作为 workflow artifact(保留 7 天),供研究机下载;不进任何 Release 与生产归档,交易服务器不安装,`timeout-minutes: 60`。
+
 ### 免费额度
 
 本节是 CI 资源规则的唯一归属。`Fiora-gwx/hft` 为公开仓库,GitHub 标准托管 runner(`ubuntu-latest`、`ubuntu-24.04-arm`)的运行分钟免费,不占 Trading 私有仓库的月度分钟额度。PR、每夜任务与开发构建不设月度分钟门槛,也不需要 `hotfix` 标签来启动完整质量门。规则依据 [GitHub Actions 计费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)与[标准托管 runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。

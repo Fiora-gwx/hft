@@ -24,6 +24,12 @@ xxhash-rust.workspace = true
 zerocopy.workspace = true
 # Deterministic per-account latency sub-streams (README "9. 确定性").
 rand_chacha = { version = "0.9", default-features = false }
+# `calib` feature: the calibration-table JSON (README "校准表").
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+calib = ["dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
 hft-testkit.workspace = true

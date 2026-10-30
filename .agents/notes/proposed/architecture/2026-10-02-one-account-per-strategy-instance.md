@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> **重构修订(2026-10-29)**:放宽第 1 条——一个账户仍只被一个实例交易,但一个实例可交易多个账户(账户集合,重构 M4 落地);第 3–6 条保留;见 [account-set-per-instance](2026-10-29-account-set-per-instance.md)。
+
 > **第八轮补充(2026-10-03)**:补充——一个账户在每个交易所只用一个市场(现货或永续),refdata 以 `SameExchangeMarkets` 拒绝;见 [no-same-exchange-spot-perp](2026-10-03-no-same-exchange-spot-perp.md)。
 
 > **第八轮第四次修订(2026-10-03)**:第 5 条"原测试账户的角色由模拟账户与小额实盘承担"改为由测试网账户与模拟账户承担(没有小额实盘阶段);见 [no-small-live](2026-10-03-no-small-live.md)。

@@ -19,6 +19,8 @@ hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
 hft-rt.workspace = true
+hft-strategy-sdk.workspace = true
+hft-sequencer.workspace = true
 hft-journal = { workspace = true, features = ["writer"] }
 hft-net.workspace = true
 hft-venue-proto.workspace = true

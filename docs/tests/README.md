@@ -42,8 +42,8 @@
 | venue-okx | OKX | hft-telemetry | TEL | ops_bot | OPS |
 | venue-bitget | BGT | hft-testkit | TK | pipeline | PIP |
 | hft-py | PY | book-observer | OBS | treasury | TRS |
-| latency-slice | SLC | binary-maker | BMK | | |
-| portfolio-carry | CARRY | | | | |
+| latency-slice | SLC | binary-maker | BMK | hft-pmcfg | PMC |
+| portfolio-carry | CARRY | hft-replay | RSR | hft-feature | FEA |
 
 ## 4. 用例格式
 

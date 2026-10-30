@@ -8,9 +8,9 @@
 
 mod common;
 
-use binary_maker::vol::{Vol, isqrt};
 use binary_maker::{BinaryMaker, BinaryMakerParams};
 use common::*;
+use hft_feature::{RealizedVol as Vol, isqrt};
 use hft_strategy_sdk::params::{RawParams, SchemaView};
 use hft_strategy_sdk::prelude::*;
 use hft_strategy_sdk::testing::{MockViews, ev};
@@ -433,7 +433,7 @@ fn bmk_011_pair_cost_limit() {
 
 #[test]
 fn bmk_012_normal_cdf() {
-    use binary_maker::norm::{cdf, inv_cdf};
+    use hft_feature::{cdf, inv_cdf};
     let near = |a: i64, b: i64, tol: i64| (a - b).abs() <= tol;
     // .1 Φ at 0, ±1, 1.96 and beyond the table (1e-9; tolerance 2e-5).
     for (z, want) in [
@@ -845,8 +845,8 @@ fn bmk_021_forecast() {
     let b = h.views_mut().bbo_of(R);
     h.feed(&ev::bbo(R, 6, b).as_ref());
     let f = &h.strategy().fast;
-    assert_eq!(f.ref_imb, 500_000_000, "BMK-021.1");
-    let sigma = f.vol.sigma(60).unwrap();
+    assert_eq!(f.feat.top.imb, 500_000_000, "BMK-021.1");
+    let sigma = f.feat.vol.sigma(60).unwrap();
     assert_eq!(f.forecast(sigma), 686_245_000, "BMK-021.1");
     // .2 returns only: the last five one-second returns +1, −1, +1, −1, +1 bp sum to ~1 bp;
     // / (σ √5) ≈ 0.447.
@@ -857,8 +857,8 @@ fn bmk_021_forecast() {
     ]));
     warm(&mut h, 400, 399, 1);
     let f = &h.strategy().fast;
-    let sigma = f.vol.sigma(60).unwrap();
-    assert_eq!(f.vol.recent(5), (100_020, 499_980), "BMK-021.2");
+    let sigma = f.feat.vol.sigma(60).unwrap();
+    assert_eq!(f.feat.vol.recent(5), (100_020, 499_980), "BMK-021.2");
     assert!(
         near(f.forecast(sigma), 447_300_000, 1_000_000),
         "BMK-021.2 {}",
@@ -872,7 +872,7 @@ fn bmk_021_forecast() {
     ]));
     warm(&mut h, 400, 399, 1);
     let f = &h.strategy().fast;
-    let sigma = f.vol.sigma(60).unwrap();
+    let sigma = f.feat.vol.sigma(60).unwrap();
     assert!(
         near(f.forecast(sigma), 66_717_000, 100_000),
         "BMK-021.3 {}",
@@ -885,9 +885,13 @@ fn bmk_021_forecast() {
         ("pred_w_ser", 0),
     ]));
     warm(&mut h, 400, 399, 1);
-    h.strategy_mut().fast.ref_imb = 1_000_000_000;
+    h.strategy_mut().fast.feat.top.imb = 1_000_000_000;
     let f = &h.strategy().fast;
-    assert_eq!(f.forecast(f.vol.sigma(60).unwrap()), 6_000_000_000, "BMK-021.4");
+    assert_eq!(
+        f.forecast(f.feat.vol.sigma(60).unwrap()),
+        6_000_000_000,
+        "BMK-021.4"
+    );
 }
 
 #[test]
@@ -997,7 +1001,7 @@ fn bmk_024_schema_v6() {
 
 #[test]
 fn bmk_025_integer_logarithm() {
-    use binary_maker::fast::comp::{atanh2, ln_rate, ln_ratio};
+    use hft_feature::{atanh2, ln_rate, ln_ratio};
     // Exact values (the README's arithmetic; the offline port reproduces them).
     assert_eq!(ln_rate(1_000_000_000), 0, "BMK-025.1");
     assert_eq!(ln_rate(2_000_000_000), 693_147_181, "BMK-025.1");
@@ -1026,7 +1030,7 @@ fn lv(px: i64, shares: i64) -> Level {
 
 #[test]
 fn bmk_026_composite_score() {
-    use binary_maker::fast::comp::{self, BidSide, ScoreIn, SecHist, SlotHist, Trades};
+    use binary_maker::features::{self as comp, BidSide, ScoreIn, SecHist, SlotHist, Trades};
     let mut v = MockViews::new(fixture());
     let (x, o) = (SLOTS[2], SLOTS[3]);
     MockViews::book(
@@ -1042,15 +1046,15 @@ fn bmk_026_composite_score() {
         &[lv(560, 100)],
     );
     // Our 30 shares at 0.453 are the whole level: the best bid as the score sees it is 0.450.
-    let bx = BidSide::read(&Views::book(&v, x), Some((453, 30_000_000)));
-    let bo = BidSide::read(&Views::book(&v, o), None);
+    let bx = BidSide::read(&Views::book(&v, x), Side::Buy, Some((453, 30_000_000)));
+    let bo = BidSide::read(&Views::book(&v, o), Side::Buy, None);
     assert_eq!(
-        (bx.best(), bx.top_size(), bx.depth5(10)),
+        (bx.best(), bx.top_size(), bx.depth(10, 5)),
         (Some(450), 120_000_000, 380_000_000),
         "BMK-026.1"
     );
     assert_eq!(
-        (bo.best(), bo.top_size(), bo.depth5(10)),
+        (bo.best(), bo.top_size(), bo.depth(10, 5)),
         (Some(540), 80_000_000, 230_000_000),
         "BMK-026.1"
     );
@@ -1150,11 +1154,15 @@ fn bmk_026_composite_score() {
         trade(&mut h, 11_000_000_000, SLOTS[2], 50, Side::Buy);
         trade(&mut h, 12_000_000_000, SLOTS[3], 80, Side::Buy);
         trade(&mut h, 13_000_000_000, SLOTS[2], 60, Side::Sell);
-        let net = h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 0);
+        let net = h.strategy().fast.feat.trades.net(SLOTS[2], SLOTS[3], 0);
         let want = if row == "on" { -90_000_000 } else { 0 };
         assert_eq!(net, want, "BMK-026.5 {row}");
         assert_eq!(
-            h.strategy().fast.trades.net(SLOTS[2], SLOTS[3], 12_000_000_001),
+            h.strategy()
+                .fast
+                .feat
+                .trades
+                .net(SLOTS[2], SLOTS[3], 12_000_000_001),
             if row == "on" { -60_000_000 } else { 0 },
             "BMK-026.5 {row} window"
         );
@@ -1340,7 +1348,7 @@ fn bmk_029_own_bid_left_out_of_the_imbalance() {
 
 #[test]
 fn bmk_030_lag_quantiles() {
-    use binary_maker::fast::lag::{LagGate, quantile_x10};
+    use hft_feature::{LagQuantiles as LagGate, quantile_x10};
     assert_eq!(
         quantile_x10(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9),
         Some(91),
@@ -1567,4 +1575,302 @@ fn bmk_033_v7_off_is_v6() {
         "BMK-033 script places"
     );
     assert_eq!(v6, off, "BMK-033.1");
+}
+
+/// xorshift64* stream of the decision trace (BMK-034).
+struct TraceRng(u64);
+
+impl TraceRng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    fn below(&mut self, n: u64) -> i64 {
+        (self.next() % n.max(1)) as i64
+    }
+}
+
+fn fnv(h: &mut u64, bytes: &[u8]) {
+    for b in bytes {
+        *h ^= u64::from(*b);
+        *h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+}
+
+/// Decision trace of a generated stream over seven windows (reference quotes, slot books including
+/// locked and crossed ones, large and small prints, market-data stamps with a load episode, fills,
+/// cancels and ageing of the live quotes, a parameter change at 1 100 s): FNV-1a over every
+/// captured operation, the quote states, the score cache and the fair-value anchor after every
+/// event and the final snapshot; and (places, cancels, events with a valid score, fills).
+fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (u64, [u32; 4]) {
+    use binary_maker::fast::QState;
+    let mut h = harness(p);
+    let mut rng = TraceRng(seed);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut n = [0u32; 4];
+    let mut mid: i64 = 10_000_000;
+    let mut tok_mid: i64 = 500;
+    let mut next_slot = 100u32;
+    let mut pos = [(0i64, 0i64); 6];
+    let mut win = 0i64;
+    let mut t: i64 = 1_000_000_000;
+    let mut switched = false;
+    let s = 1_000_000_000i64;
+    while t < 2_400 * s {
+        t += 20_000_000 + rng.below(280) * 1_000_000;
+        h.views_mut().at_engine_ns(t);
+        if !switched && t >= 1_100 * s {
+            h.on_params(p2).unwrap();
+            switched = true;
+        }
+        let w = t.div_euclid(300 * s) * 300;
+        if w != win {
+            win = w;
+            pos = [(0, 0); 6];
+            for k in 0..6u32 {
+                h.views_mut().group_pos(A1, gid(k), GroupPosView::EMPTY);
+            }
+        }
+        let cur = (w / 300).rem_euclid(3) as usize;
+        let r = rng.below(100);
+        let out = if r < 30 {
+            mid += (rng.below(5) - 2) * 600;
+            let (bq, aq) = (1 + rng.below(5_000_000), 1 + rng.below(5_000_000));
+            h.views_mut()
+                .bbo(R, (Px(mid - 1), Qty(bq)), (Px(mid + 1), Qty(aq)));
+            let b = h.views_mut().bbo_of(R);
+            h.feed(&ev::bbo(R, 6, b).as_ref())
+        } else if r < 72 {
+            let k = if rng.below(4) == 0 {
+                rng.below(6) as usize
+            } else {
+                cur * 2 + rng.below(2) as usize
+            };
+            tok_mid = (tok_mid + rng.below(11) - 5).clamp(60, 940);
+            let m = if k % 2 == 0 { tok_mid } else { 1_000 - tok_mid };
+            let half = 1 + rng.below(8);
+            let (mut bid, mut ask) = (m - half, m + half);
+            if rng.below(20) == 0 {
+                ask = bid - rng.below(2);
+            }
+            let mut bids = Vec::new();
+            let mut asks = Vec::new();
+            for _ in 0..1 + rng.below(5) {
+                bids.push(lv(bid, 1 + rng.below(300)));
+                asks.push(lv(ask, 1 + rng.below(300)));
+                bid -= 1 + rng.below(10);
+                ask += 1 + rng.below(10);
+            }
+            h.views_mut().book(SLOTS[k], &bids, &asks);
+            if r < 40 {
+                // Market-data stamps of this inst: normal lag, or a load episode (300 to 900 s).
+                let slow = (300 * s..900 * s).contains(&t);
+                for j in 0..1 + rng.below(4) {
+                    let lag = if slow {
+                        100 + rng.below(300)
+                    } else {
+                        1 + rng.below(80)
+                    };
+                    let rx = t - 30_000_000 + j * 1_000_000;
+                    h.views_mut().md_push(
+                        SLOTS[k],
+                        MdStampView {
+                            kind: MdStampView::MD_BATCH,
+                            ex_ts_ns: rx - lag * 1_000_000,
+                            sw_rx_ns: rx,
+                            rx_tsc: Tsc(0),
+                        },
+                    );
+                }
+            }
+            h.feed(&ev::book(SLOTS[k], k as u16).as_ref())
+        } else if r < 84 {
+            let k = cur * 2 + rng.below(2) as usize;
+            let tv = TradeView {
+                px: Px(tok_mid),
+                qty: Qty((1 + rng.below(150)) * 1_000_000),
+                side: if rng.below(2) == 0 { Side::Buy } else { Side::Sell },
+                ex_ts_ns: t,
+            };
+            h.feed(&ev::trade(SLOTS[k], k as u16, tv).as_ref())
+        } else if r < 97 {
+            let live: Vec<usize> = (0..6)
+                .filter(|i| {
+                    let q = h.strategy().fast.quotes[*i];
+                    q.r.is_some() && matches!(q.state, QState::Live | QState::Cancelling)
+                })
+                .collect();
+            if live.is_empty() {
+                h.feed(&ev::timer(1, gid(0), 0).as_ref())
+            } else {
+                let i = live[rng.below(live.len() as u64) as usize];
+                let q = h.strategy().fast.quotes[i];
+                let o = q.r.unwrap();
+                let kind = match rng.below(10) {
+                    0..=4 => {
+                        let d = (1 + rng.below(10)) * 1_000_000;
+                        let (qty, cost) = pos[i];
+                        pos[i] = (qty + d, cost + d * q.px);
+                        let mut gp = GroupPosView::EMPTY;
+                        gp.n_legs = 1;
+                        gp.legs[0].qty = Qty(pos[i].0);
+                        gp.legs[0].entry_px = Px(pos[i].1 / pos[i].0.max(1));
+                        h.views_mut().group_pos(A1, gid(i as u32), gp);
+                        n[3] += 1;
+                        OrderUpdateKind::Filled {
+                            d: Qty(d),
+                            px: Px(q.px),
+                            fee: 0,
+                            fee_asset: USDC,
+                            cum: Qty(d),
+                            done: rng.below(3) == 0,
+                        }
+                    }
+                    5..=7 => OrderUpdateKind::Cancelled,
+                    8 => OrderUpdateKind::Aged,
+                    _ => OrderUpdateKind::Acked,
+                };
+                h.feed(
+                    &ev::order(
+                        i as u16,
+                        OrderUpdate {
+                            r: o,
+                            group: gid(i as u32),
+                            tag: binary_maker::fast::tag_of(i as u16),
+                            kind,
+                        },
+                    )
+                    .as_ref(),
+                )
+            }
+        } else {
+            h.feed(&ev::timer(1, gid(0), 0).as_ref())
+        };
+        for c in &out.items {
+            match c {
+                hft_testkit::sdk_mock::Captured::Place(_) => n[0] += 1,
+                hft_testkit::sdk_mock::Captured::Cancel(_) => n[1] += 1,
+                _ => {}
+            }
+            fnv(&mut hash, format!("{c:?}").as_bytes());
+        }
+        // Most places are acknowledged: the quote becomes Live with a resting order.
+        for (i, &inst) in SLOTS.iter().enumerate() {
+            let q = h.strategy().fast.quotes[i];
+            if q.state == QState::Placing && rng.below(5) != 0 {
+                next_slot += 1;
+                let r = OrderRef {
+                    venue: VB,
+                    account: A1,
+                    _pad: [0; 2],
+                    slot: next_slot,
+                    r#gen: 1,
+                };
+                let m = &mut h.strategy_mut().fast.quotes[i];
+                m.state = QState::Live;
+                m.r = Some(r);
+                h.views_mut().set_order(OrderView {
+                    r,
+                    group: gid(i as u32),
+                    inst,
+                    side: Side::Buy,
+                    tif: Tif::PostOnly,
+                    class: IntentClass::Open,
+                    px: Px(q.px),
+                    qty: Qty(10_000_000),
+                    filled: Qty(0),
+                    state: OrderStateView::Live,
+                    tag: binary_maker::fast::tag_of(i as u16),
+                });
+            }
+        }
+        let f = &h.strategy().fast;
+        if f.comp.ok {
+            n[2] += 1;
+        }
+        fnv(
+            &mut hash,
+            format!("{:?}{:?}{:?}", f.quotes, f.comp, f.fv).as_bytes(),
+        );
+    }
+    fnv(&mut hash, &h.snapshot());
+    (hash, n)
+}
+
+#[test]
+fn bmk_034_decision_trace_is_stable() {
+    let base = params(|_| {});
+    let fv = params_with(&[
+        ("fv_limit", 1),
+        ("nochase_ms", 500),
+        ("streak_k", 2),
+        ("max_window_cost", 30_000_000),
+    ]);
+    let comp = comp_params(&[("fv_limit", 1), ("comp_imb1_sd", 674_103_869)]);
+    let lag = comp_params(&[
+        ("load_gate_ns", 150_000_000),
+        ("mdslow_gate_ns", 90_000_000),
+        ("comp_imb1_sd", 674_103_869),
+    ]);
+    let got = [
+        decision_trace(&base, &fv, 1),
+        decision_trace(&fv, &comp, 2),
+        decision_trace(&comp, &lag, 3),
+        decision_trace(&lag, &base, 4),
+    ];
+    // Recorded with the v7 inline implementation (before the features moved to hft-feature).
+    let want: [(u64, [u32; 4]); 4] = [
+        (0x154a_b946_f140_8d49, [626, 533, 0, 417]),
+        (0xeaeb_f288_1178_f3ae, [631, 552, 6253, 382]),
+        (0x8f25_fd82_3dd8_f9a4, [1119, 977, 11589, 646]),
+        (0xa5fc_cf6a_5c2b_8311, [797, 704, 2335, 536]),
+    ];
+    assert_eq!(got, want, "BMK-034");
+}
+
+#[test]
+fn bmk_035_feature_export_row() {
+    use binary_maker::features::COLUMNS;
+    use hft_feature::{FeatureRow, NA};
+    let mut h = harness(&params(|_| {}));
+    warm(&mut h, 400, 399, 1);
+    let f = &h.strategy().fast.feat;
+    let names: Vec<&str> = COLUMNS.iter().map(|c| c.name).collect();
+    assert_eq!(
+        names,
+        [
+            "ref_mid_x2",
+            "ref_imb",
+            "ref_sigma",
+            "ref_samples",
+            "lag_minute",
+            "lag_p90",
+            "lag_p50"
+        ],
+        "BMK-035"
+    );
+    let sigma = f.vol.sigma(1).unwrap();
+    let mut buf = [7i64; 9];
+    let mut row = FeatureRow::new(&mut buf);
+    f.export(&mut row);
+    assert_eq!(row.len(), 7, "BMK-035");
+    assert_eq!(buf, [20_001_000, 0, sigma, 399, NA, NA, NA, 7, 7], "BMK-035");
+    // .3 the Strategy hooks (research export) are the same columns and values.
+    assert_eq!(
+        <binary_maker::BinaryMaker as hft_strategy_sdk::Strategy>::FEATURES,
+        COLUMNS,
+        "BMK-035.3"
+    );
+    let mut via = [7i64; 9];
+    let mut row = FeatureRow::new(&mut via);
+    hft_strategy_sdk::Strategy::export_features(h.strategy(), &mut row);
+    assert_eq!(via, buf, "BMK-035.3");
+    let mut short = [0i64; 3];
+    let mut row = FeatureRow::new(&mut short);
+    f.export(&mut row);
+    assert_eq!((row.len(), short), (7, [20_001_000, 0, sigma]), "BMK-035 short");
 }

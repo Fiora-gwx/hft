@@ -209,7 +209,7 @@ spec: README.md
 | REF-009.20 | VenueCaps 0 `testnet` | 4 | `[{Structure, 13, 0}]` |
 | REF-009.21 | VenueCaps 0 `fee_asset_rule` 判别 | 5 | `[{Structure, 13, 0}]` |
 | REF-009.22 | RateLimits 0 `scope` | 6 | `[{Structure, 7, 0}]` |
-| REF-009.23 | RateLimits 0 `bucket` | 6 | `[{Structure, 7, 0}]` |
+| REF-009.23 | RateLimits 0 `bucket` | 7 | `[{Structure, 7, 0}]` |
 | REF-009.24 | Endpoints 0 `role` | 7 | `[{Structure, 8, 0}]` |
 | REF-009.25 | Endpoints 0 `env` | 4 | `[{Structure, 8, 0}]` |
 | REF-009.26 | F0 + Maint 行 `kind` | 4 | `[{Structure, 9, 0}]` |
@@ -376,17 +376,17 @@ spec: README.md
 | REF-018.2 | inst 2 的 quote = USDC(`Stable`) | `Ok` |
 | REF-018.3 | USDT 的 `class = Equity` | `[{QuoteNotStable, 3, 0}, {QuoteNotStable, 3, 1}, {QuoteNotStable, 3, 2}, {QuoteNotStable, 3, 3}, {QuoteNotStable, 3, 4}]` |
 
-### REF-019 一个实例至多被一个账户绑定
+### REF-019 一个实例可被多个账户绑定(账户集合)
 
 - 规则:[实现说明](README.md#实现说明)、[数据结构](README.md#数据结构)
 - 级别:table
 - 里程碑:M1
 - 前置:F0
-- 实现:`crates/hft-refdata/tests/refs.rs::ref_019_instance_multi_bound`
+- 实现:`crates/hft-refdata/tests/refs.rs::ref_019_instance_account_set`
 
 | 行 | 改动 | 期望 |
 |---|---|---|
-| REF-019.1 | 账户 2 的 `bound_instance = 1`(与账户 1 相同) | `[{InstanceMultiBound, 4, 1}]` |
+| REF-019.1 | 账户 2 的 `bound_instance = 1`(与账户 1 相同) | `Ok`;`accounts_of(1) = [1, 2]`,`account_of(1) = 1`,账户 2 的 `bound_instance` 仍为 1 |
 | REF-019.2 | 账户 1、2 的 `bound_instance` 都为 0 | `Ok` |
 
 ### REF-020 有 inst 的 venue 缺 VenueCaps 行报 MissingCaps,无 inst 的 venue 不要求
@@ -1325,7 +1325,7 @@ spec: README.md
 | REF-075.3 | `MaintKind` | VenueMaintenance 1、MarketClosed 2、Delisting 3 |
 | REF-075.4 | `AssetClass` | Crypto 1、Stable 2、Equity 3、Commodity 4 |
 | REF-075.5 | `LimitScope` | Ip 1、Uid 2、Account 3、Conn 4、Inst 5 |
-| REF-075.6 | `LimitBucket` | Orders 1、Weight 2、WsInMsgs 3、NewConns 4、Amends 5 |
+| REF-075.6 | `LimitBucket` | Orders 1、Weight 2、WsInMsgs 3、NewConns 4、Amends 5、Cancels 6 |
 | REF-075.7 | `EndpointRole` | MdPublic 1、MdMarket 2、UserData 3、OrderWs 4、Rest 5、RestBackup 6 |
 | REF-075.8 | `EndpointEnv`、`TsUnit` | Prod 1、Testnet 2、Demo 3;Ms 1、Us 2、Ns 3 |
 | REF-075.9 | `StaleGuardKind` | None 1、RecvWindow 2、ExpireAt 3 |

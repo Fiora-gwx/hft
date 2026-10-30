@@ -10,17 +10,11 @@
 //! allocation after `new`/`on_params`; snapshots are keyed by `GroupId`.
 #![deny(clippy::float_arithmetic)]
 
-pub mod comp;
-pub mod lag;
-
+use hft_feature::{ONE, Own, cdf, inv_cdf, isqrt};
 use hft_strategy_sdk::prelude::*;
 
-use comp::{BidSide, Own, ScoreIn, SecHist, SlotHist, Trades};
-use lag::LagGate;
-
-use crate::norm::{cdf, inv_cdf};
+use crate::features::{self, BidSide, MakerFeatures, PlanCfg, ScoreIn};
 use crate::params::BinaryMakerParams;
-use crate::vol::{ONE, Vol, isqrt};
 
 /// The settlement averages the reference over the last 60 s of the window: the variance left
 /// `t` seconds before the end (t ≥ 60 s) is that of `t − 40` seconds of the spot.
@@ -46,8 +40,7 @@ pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
     }
 }
 
-/// √5 and √30 × 1e6 (forecast return scale and drift horizon, README "规则" 9).
-const SQRT5_MICRO: i128 = 2_236_068;
+/// √30 × 1e6 (drift horizon, README "规则" 9).
 const SQRT30_MICRO: i128 = 5_477_226;
 
 /// Fair-value state of the current window (README "规则" 9): the reference 2 × mid at the window's
@@ -132,22 +125,11 @@ pub struct Fast {
     pub quotes: Vec<Quote>,
     scratch: Vec<Quote>,
     pub reference: InstId,
-    pub vol: Vol,
-    /// Last reference 2 × mid (0 = none yet).
-    pub ref_mid_x2: i64,
-    /// Level-1 imbalance of the last reference quote, (bid − ask quantity) / (bid + ask) (`Rate`).
-    pub ref_imb: i64,
+    /// Features the rules read (`crate::features`; not in the snapshot).
+    pub feat: MakerFeatures,
     /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
     pub fv: FvAnchor,
-    /// Per slot leg (quote order): per-second mid and best bid, consumed market-data stamps.
-    pub hist: Vec<SlotHist>,
-    /// Reference 2 × mid per second (score).
-    pub ref_x2: Box<SecHist>,
-    /// Large prints of the slot legs (score).
-    pub trades: Box<Trades>,
     pub comp: CompCache,
-    /// Feed-lag statistics (venue-load gates).
-    pub lag: LagGate,
 }
 
 impl Fast {
@@ -159,18 +141,12 @@ impl Fast {
             quotes: Vec::with_capacity(cap),
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
-            vol: Vol::new(p.defaults().vol_window_s as usize),
-            ref_mid_x2: 0,
-            ref_imb: 0,
+            feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
                 win: i64::MIN,
                 ..FvAnchor::default()
             },
-            hist: Vec::with_capacity(cap),
-            ref_x2: Box::default(),
-            trades: Box::default(),
             comp: CompCache::default(),
-            lag: LagGate::new(),
         };
         f.on_params(p, groups);
         f
@@ -179,10 +155,6 @@ impl Fast {
     /// New parameters: slot groups keep their quote state by `GroupId` and leg; the volatility
     /// ring restarts when its length changes.
     pub fn on_params(&mut self, p: &BinaryMakerParams, groups: &GroupTable) {
-        let w = p.defaults().vol_window_s as usize;
-        if w != self.vol.capacity() {
-            self.vol = Vol::new(w);
-        }
         self.p = p.clone();
         self.scratch.clear();
         self.scratch.extend_from_slice(&self.quotes);
@@ -219,17 +191,11 @@ impl Fast {
                 .unwrap_or(fresh);
             self.quotes.push(kept);
         }
-        // Score histories follow the slot insts (rebuilt when they change).
-        if !self
-            .hist
-            .iter()
-            .map(|h| h.inst)
-            .eq(self.quotes.iter().map(|q| q.inst))
-        {
-            self.hist.clear();
-            self.hist
-                .extend(self.quotes.iter().map(|q| SlotHist::new(q.inst)));
-        }
+        // The volatility ring follows `vol_window_s`; score histories follow the slot insts.
+        self.feat.on_params(
+            p.defaults().vol_window_s as usize,
+            self.quotes.iter().map(|q| q.inst),
+        );
         self.comp.ok = false;
     }
 
@@ -245,75 +211,12 @@ impl Fast {
         d.load_gate_ns > 0 || d.mdslow_gate_ns > 0
     }
 
-    /// Before the rules (README "规则" 10, 11): the reference 2 × mid of the second, every slot
-    /// book's 2 × mid and best bid of the second, large prints; the slot insts' new market-data
-    /// stamps into the lag statistics.
-    fn observe<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, utc_ns: i64) {
-        let sec = utc_ns.div_euclid(1_000_000_000);
-        if self.comp_on() {
-            match *ev {
-                EventRef::Bbo { inst, b, .. } if inst == self.reference => {
-                    if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
-                        self.ref_x2.put(sec, b.bid_px.0.saturating_add(b.ask_px.0));
-                    }
-                }
-                EventRef::Trade { inst, t, .. } => {
-                    let unit_qty = 10i64.saturating_pow(u32::from(v.inst(inst).qty_exp.unsigned_abs()));
-                    let min = i64::from(self.p.defaults().comp_flow_min_shares).saturating_mul(unit_qty);
-                    if t.qty.0 >= min && self.hist.iter().any(|h| h.inst == inst) {
-                        let q = if t.side == Side::Buy { t.qty.0 } else { -t.qty.0 };
-                        self.trades.push(utc_ns, inst, q);
-                    }
-                }
-                _ => {}
-            }
-            for h in self.hist.iter_mut() {
-                let b = v.book(h.inst);
-                if b.status() != BookStatus::Live {
-                    continue;
-                }
-                if let (Some(x), Some(y)) = (b.best(Side::Buy), b.best(Side::Sell))
-                    && x.px.0 < y.px.0
-                {
-                    h.mid_x2.put(sec, x.px.0.saturating_add(y.px.0));
-                    h.bid.put(sec, x.px.0);
-                }
-            }
-        }
-        if self.lag_on() {
-            // New stamps of all slot insts, in receive order (at most MD_STAMPS_KEPT per inst).
-            const MAX: usize = MD_STAMPS_KEPT as usize * 16;
-            let mut new = [(0i64, 0i64); MAX];
-            let mut n = 0usize;
-            for h in self.hist.iter_mut() {
-                let count = v.md_count(h.inst);
-                let from = h
-                    .md_seen
-                    .saturating_add(1)
-                    .max(count.saturating_sub(MD_STAMPS_KEPT - 1));
-                for k in from..=count {
-                    let Some(m) = v.md_stamp(h.inst, k) else { continue };
-                    let ex_ms = m.ex_ts_ns / 1_000_000;
-                    if ex_ms == 0 || m.sw_rx_ns <= 0 {
-                        continue;
-                    }
-                    if let Some(x) = new.get_mut(n) {
-                        *x = (
-                            m.sw_rx_ns,
-                            m.sw_rx_ns.saturating_sub(ex_ms.saturating_mul(1_000_000)),
-                        );
-                        n += 1;
-                    }
-                }
-                h.md_seen = count;
-            }
-            if let Some(new) = new.get_mut(..n) {
-                new.sort_unstable();
-                for (rx, lag) in new.iter() {
-                    self.lag.push(*rx, *lag);
-                }
-            }
-            self.lag.tick(utc_ns);
+    /// What the feature plan needs of the parameters.
+    fn plan_cfg(&self) -> PlanCfg {
+        PlanCfg {
+            comp: self.comp_on(),
+            lag: self.lag_on(),
+            flow_min_shares: self.p.defaults().comp_flow_min_shares,
         }
     }
 
@@ -339,22 +242,23 @@ impl Fast {
     pub fn comp_score<V: Views>(&self, v: &V, x: usize, o: usize, start: i64, utc_ns: i64) -> Option<i64> {
         let d = self.p.defaults();
         let (qx, qo) = (self.quotes.get(x)?, self.quotes.get(o)?);
-        let hx = self.hist.get(x)?;
+        let hx = self.feat.hist.get(x)?;
         let hot = v.inst(qx.inst);
         let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
         let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
-        let bx = BidSide::read(&v.book(qx.inst), self.own_bid(v, x, start));
-        let bo = BidSide::read(&v.book(qo.inst), self.own_bid(v, o, start));
+        let bx = BidSide::read(&v.book(qx.inst), Side::Buy, self.own_bid(v, x, start));
+        let bo = BidSide::read(&v.book(qo.inst), Side::Buy, self.own_bid(v, o, start));
         let implied = self
+            .feat
             .vol
             .sigma(d.vol_min_samples as usize)
             .map(|s| (i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE)) as i64);
-        let f = comp::features(&ScoreIn {
+        let f = features::features(&ScoreIn {
             x: &bx,
             o: &bo,
             hx,
-            ref_x2: &self.ref_x2,
-            trades: &self.trades,
+            ref_x2: &self.feat.ref_x2,
+            trades: &self.feat.trades,
             x_inst: qx.inst,
             o_inst: qo.inst,
             is_up: x.is_multiple_of(2),
@@ -363,11 +267,11 @@ impl Fast {
             unit_px,
             unit_qty,
         });
-        Some(comp::score(&f, &self.comp_mu(), &self.comp_sd()))
+        Some(features::score(&f, &self.comp_mu(), &self.comp_sd()))
     }
 
     /// `comp_*_mu` in feature order.
-    pub fn comp_mu(&self) -> [i64; comp::N_FEAT] {
+    pub fn comp_mu(&self) -> [i64; features::N_FEAT] {
         let d = self.p.defaults();
         [
             d.comp_imb1_mu.0,
@@ -382,7 +286,7 @@ impl Fast {
     }
 
     /// `comp_*_sd` in feature order.
-    pub fn comp_sd(&self) -> [i64; comp::N_FEAT] {
+    pub fn comp_sd(&self) -> [i64; features::N_FEAT] {
         let d = self.p.defaults();
         [
             d.comp_imb1_sd.0,
@@ -431,27 +335,10 @@ impl Fast {
 
     pub fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
         self.outcomes(ctx);
-        let now = v.now();
-        if now.clock_ok {
-            self.observe(ev, v, now.utc_ns);
-        }
+        let cfg = self.plan_cfg();
+        self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
-            EventRef::Bbo { inst, b, .. } if inst == self.reference => {
-                if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
-                    let mid_x2 = b.bid_px.0.saturating_add(b.ask_px.0);
-                    self.ref_mid_x2 = mid_x2;
-                    let (bq, aq) = (i128::from(b.bid_qty.0), i128::from(b.ask_qty.0));
-                    if bq >= 0 && aq >= 0 && bq + aq > 0 {
-                        self.ref_imb = ((bq - aq) * i128::from(ONE) / (bq + aq)) as i64;
-                    }
-                    let now = v.now();
-                    if now.clock_ok {
-                        self.vol
-                            .on_mid(i128::from(mid_x2), now.utc_ns.div_euclid(1_000_000_000));
-                    }
-                }
-                self.run(v, ctx);
-            }
+            EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Book { .. } => self.run(v, ctx),
             EventRef::Order { u, .. } => {
                 let now = v.now().engine_ns;
@@ -504,40 +391,22 @@ impl Fast {
     /// then through the digital delta, Φ(d0 + move / den) − Φ(d0) (README "规则" 5); 0 without
     /// an anchor.
     pub fn dfv(&self, q: &Quote) -> i64 {
-        if q.den <= 0 || q.b0 <= 0 || self.ref_mid_x2 <= 0 {
+        let ref_mid_x2 = self.feat.top.mid_x2;
+        if q.den <= 0 || q.b0 <= 0 || ref_mid_x2 <= 0 {
             return 0;
         }
         let one = i128::from(ONE);
-        let moved = (i128::from(self.ref_mid_x2) - i128::from(q.b0)) * one / i128::from(q.b0);
+        let moved = (i128::from(ref_mid_x2) - i128::from(q.b0)) * one / i128::from(q.b0);
         let shift = moved * one / i128::from(q.den);
         let z = (i128::from(q.d0) + shift).clamp(-6 * one, 6 * one) as i64;
         cdf(z) - cdf(q.d0)
     }
 
-    /// Direction forecast in standard deviations of the next 30 s (`Rate`, README "规则" 9):
-    /// `pred_w_imb` × level-1 imbalance + `pred_w_ret` × (sum of the last 5 one-second returns) /
-    /// (σ √5) + `pred_w_ser` × (sum of the last 15) / (sum of their absolute values); clamped to ±6.
+    /// Direction forecast (README "规则" 9) with this instance's `pred_w_*` weights.
     pub fn forecast(&self, sigma: i64) -> i64 {
         let d = self.p.defaults();
-        let one = i128::from(ONE);
-        let (s5, _) = self.vol.recent(5);
-        let (s15, a15) = self.vol.recent(15);
-        let sd5 = i128::from(sigma) * SQRT5_MICRO / 1_000_000;
-        let ret = if sd5 > 0 {
-            (i128::from(s5) * one / sd5).clamp(-6 * one, 6 * one)
-        } else {
-            0
-        };
-        let ser = if a15 > 0 {
-            i128::from(s15) * one / i128::from(a15)
-        } else {
-            0
-        };
-        let z = (i128::from(d.pred_w_imb.0) * i128::from(self.ref_imb)
-            + i128::from(d.pred_w_ret.0) * ret
-            + i128::from(d.pred_w_ser.0) * ser)
-            / one;
-        z.clamp(-6 * one, 6 * one) as i64
+        self.feat
+            .forecast(sigma, d.pred_w_imb.0, d.pred_w_ret.0, d.pred_w_ser.0)
     }
 
     /// Fair-value limits (Up, Down) of the current window as fractions of one (README "规则" 9),
@@ -560,17 +429,17 @@ impl Fast {
                 ..FvAnchor::default()
             };
         }
+        let ref_mid_x2 = self.feat.top.mid_x2;
         if self.fv.b_open <= 0 {
-            self.fv.b_open = self.ref_mid_x2;
+            self.fv.b_open = ref_mid_x2;
         }
-        let sigma = self.vol.sigma(d.vol_min_samples as usize)?;
+        let sigma = self.feat.vol.sigma(d.vol_min_samples as usize)?;
         let q = *self.quotes.get(up)?;
-        if self.fv.b_open <= 0 || self.ref_mid_x2 <= 0 || den <= 0 {
+        if self.fv.b_open <= 0 || ref_mid_x2 <= 0 || den <= 0 {
             return None;
         }
         let one = i128::from(ONE);
-        let moved =
-            (i128::from(self.ref_mid_x2) - i128::from(self.fv.b_open)) * one / i128::from(self.fv.b_open);
+        let moved = (i128::from(ref_mid_x2) - i128::from(self.fv.b_open)) * one / i128::from(self.fv.b_open);
         let hot = *v.inst(q.inst);
         let unit = i128::from(10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs())));
         let book = v.book(q.inst);
@@ -630,7 +499,7 @@ impl Fast {
         };
         let left_ms = (start + w) * 1_000 - utc_ms;
         // Venue-load gates (README "规则" 11): the previous minute's feed lag closes quoting.
-        let (load, slow) = self.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
+        let (load, slow) = self.feat.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
         let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms) && !load && !slow;
         // Shares and average cost of the current window's Up and Down legs.
         let pos = |q: Option<&Quote>| {
@@ -670,7 +539,7 @@ impl Fast {
                 _ => ONE / 2,
             }
         });
-        let den = self.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
+        let den = self.feat.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
             let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
             let v_ms = (left_ms - TWAP_TAIL_MS).max(1);
             let root_milli = isqrt(u128::try_from(v_ms).unwrap_or(1) * 1_000) as i128;
@@ -839,7 +708,7 @@ impl Fast {
                         m.px = px;
                         m.last_ens = now.engine_ns;
                         m.win = start;
-                        m.b0 = self.ref_mid_x2;
+                        m.b0 = self.feat.top.mid_x2;
                         m.d0 = inv_cdf(up_mid);
                         m.den = den;
                     }
@@ -853,7 +722,7 @@ impl Fast {
     /// remaining standard deviation (implied sigma × √seconds left) at least `min_rem_sd`.
     fn vol_ok(&self, left_ms: i64) -> bool {
         let d = self.p.defaults();
-        let Some(s) = self.vol.sigma(d.vol_min_samples as usize) else {
+        let Some(s) = self.feat.vol.sigma(d.vol_min_samples as usize) else {
             return false;
         };
         let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);

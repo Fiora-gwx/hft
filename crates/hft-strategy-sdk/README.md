@@ -28,6 +28,7 @@ status: spec
   - [Advice 载荷](#advice-载荷)
   - [预热注入](#预热注入)
   - [装配:StrategySet 与 strategy_set!](#装配strategyset-与-strategy_set)
+  - [特征导出](#特征导出)
   - [运行模式下意图的行为表](#运行模式下意图的行为表)
   - [确定性规则](#确定性规则)
   - [版本与兼容规则](#版本与兼容规则)
@@ -193,7 +194,8 @@ impl GroupSpecExt for GroupSpec { /* … */ }
 
 pub struct RefView<'a> { /* 借用 RefData,只暴露本实例需要的部分 */ }
 impl<'a> RefView<'a> {
-    pub fn new(rd: &'a RefData, account: AccountId) -> RefView<'a>;   // account = 本实例绑定的账户
+    pub fn new(rd: &'a RefData, account: AccountId) -> RefView<'a>;   // account = 该实例的主账户(账户集合中 id 最小者)
+    pub fn accounts(&self) -> &'a [AccountId];               // 该实例的账户集合(与 account 绑定同一实例的全部账户,升序,首个为主账户);未绑定 → 只有 account
     pub fn inst(&self, i: InstId) -> &'a InstHot;            // refdata 热行:市场类型、tick、lot、最小名义、资产、计价资产
     pub fn asset(&self, a: AssetId) -> &'a AssetMeta;
     pub fn insts_of(&self, a: AssetId) -> &'a [InstId];      // refdata 中该资产在全部 venue 上的 inst(InstId 升序),含不在本账户 venues 内的
@@ -563,6 +565,15 @@ pub trait Views {
     /// 提供的默认方法返回 0 / None(不带行情戳的实现);引擎实现(hft-sequencer)覆盖二者。
     fn md_count(&self, i: InstId) -> u64;
     fn md_stamp(&self, i: InstId, n: u64) -> Option<MdStampView>;
+    /// 最近一条更新了该 inst 报价的 Bbo 的戳(kind = MD_BBO;重复与较旧的成员连接更新不算),可见性同 md_stamp;之前没有 → None。
+    /// 提供的默认方法返回 None。
+    fn bbo_stamp(&self, i: InstId) -> Option<MdStampView>;
+    /// 正在投递的 Input 的时间戳:交易所时刻、本机接收戳与引擎时钟(Stamps)。策略按引擎时钟决策,其余可作数据(行情延迟、交易所时间相位)。
+    /// 提供的默认方法只有引擎时钟(kind、交易所与接收戳为 0)。
+    fn stamps(&self) -> Stamps;
+    /// 该账户在 i 上的未结订单(非 Free、非终态),按槽号顺序:前 out.len() 条写入 out,返回总条数(可大于 out.len())。
+    /// 模型侧与提供的默认方法返回 0。成本:该 (venue, 账户) 订单表一遍。
+    fn open_orders(&self, a: AccountId, i: InstId, out: &mut [OrderView]) -> usize;
 }
 
 /// 模型侧视图:advisor 从 journal 重建的同一组状态,截至 Model 当前处理的那条记录(now() = 该记录)。
@@ -638,10 +649,19 @@ pub struct BboView {                     // 按值返回(Views::bbo、EventRef::
     pub conn_up: bool,                   // 有成员连接 up
     pub resync: bool,                    // 该 inst 的报价在重同步或没有健康成员;为真时 quote_live 为假
 }
+pub struct Stamps {                      // 按值(Views::stamps);写者 sequencer,取自当前 Input 的 MarketHdr 或 OrderEvent
+    pub kind: u16,                       // Input 的 EventKind 编号(码表见 docs/generated/event-catalog.md)
+    pub venue_ns: i64,                   // 交易所时刻(MarketHdr/OrderEvent.ex_ts_ns,UTC ns;0 = 无)
+    pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用)
+    pub hw_rx_ns: i64,                   // 网卡硬件接收戳(PHC 域,不是 UTC;0 = 不可用)
+    pub rx_tsc: Tsc,                     // 接收线程的 TSC(本次运行;0 = 不是接收到的消息)
+    pub engine_ns: i64,                  // 该 Input 的 Now.engine_ns
+    pub utc_ns: i64,                     // 该 Input 的 Now.utc_ns
+}
 #[repr(u8)] pub enum RxTsSrc { None = 0, Hw = 1, Sw = 2 }   // 0 = 无接收戳;Hw = 网卡 PHC;Sw = 内核软件戳(REALTIME)
 #[derive(Clone, Copy)]
 pub struct MdStampView {                 // 按值(Views::md_stamp);写者 sequencer,取自该消息的 MarketHdr
-    pub kind: u8,                        // MD_BATCH = 1、MD_SNAPSHOT = 2(交易所或 TopN 整簿)、MD_TRADE = 3
+    pub kind: u8,                        // MD_BATCH = 1、MD_SNAPSHOT = 2(交易所或 TopN 整簿)、MD_TRADE = 3、MD_BBO = 4(只由 bbo_stamp 返回)
     pub ex_ts_ns: i64,                   // 交易所消息时刻(UTC ns;0 = 交易所未给)
     pub sw_rx_ns: i64,                   // 内核软件接收戳(CLOCK_REALTIME ns;0 = 不可用);与 ex_ts_ns 之差即交易所 → 本机的行情延迟
     pub rx_tsc: Tsc,                     // 接收线程的 TSC(本次运行;Now::utc_of 换成引擎 UTC)
@@ -1139,6 +1159,8 @@ pub trait StrategySet: 'static {
     #[cfg(feature = "schema-json")]
     fn schema_json(kind_id: u16) -> Option<String>;          // = params::schema_json(&DESC, Model::LAYOUT, schema.version);GetSchema 与 `hft-core schemas`(经 registry::export_schemas)
     fn cmds(kind_id: u16) -> &'static [CmdDesc];             // ctl-gateway 校验 StrategyCmd 用;集合外的 kind_id → 空
+    fn feature_columns(kind_id: u16) -> &'static [ColumnDesc] { &[] }      // = Strategy::FEATURES(见"特征导出");集合外 → 空
+    fn export_features(s: &Self::Inst, row: &mut FeatureRow<'_>) {}       // = Strategy::export_features
 }
 /// 与 hft-event CmdPreview 的同名字段同名同宽,原样进入 SetParams 的预览。
 pub struct ResetPreview { pub reset_groups: u32, pub no_open_ms: u32 }
@@ -1155,6 +1177,26 @@ hft_strategy_sdk::strategy_set! {
 - 宏生成三个枚举(实例、模型、参数)与 `impl StrategySet`;每个方法是一层 `match` + 内联调用,静态分派、无 `dyn`。编译期断言:`kind_id`、`name`、`schema.id` 各自唯一。行上可带 `#[cfg(...)]`(optional 策略用 Cargo feature 门控)。
 - `hft-sequencer` 是 `Sequencer<S: StrategySet>`;advisor 是 `Advisor<S>`;ctl-gateway 用 `S::decode_params` + `S::validate_params` 校验 `SetParams`、用 `S::model_mem_bytes`/`S::model_snapshot_bytes` 算 advisor 预算的输入、用 `S::reset_preview` 生成结构参数改动的预览、用 `S::kinds()` 的 `non_prod_only` 查绑定、用 `S::cmds` 校验 `StrategyCmd`、用 `S::schema_json` 回答 `GetSchema`。
 - 列出真实策略的调用只在 [strategies/registry](../../strategies/registry/README.md) 一处,hft-core 与 replayer 因此天然使用同一列表。replayer 遇到列表外的 `kind_id` → `UnknownStrategyKind` 并失败,不跳过。hft-testkit 另有一次只含 CI 测试策略(kind_id 0xFF00–0xFFFF)的调用,不含任何真实策略。本 crate 自己的 `tests/`(宏的分派与编译期测试)另有只含测试策略(kind_id 0xFF00–0xFFFF)的调用。`cargo xtask deps` 检查:除这三处外任何 crate 不得调用 `strategy_set!`;除 registry 外任何 crate 不得依赖 `strategies/*`;引擎 crate(含 dev 依赖)与 hft-testkit 不得依赖 registry。
+
+### 特征导出
+
+```rust
+// Strategy 的两个可选项(缺省:没有列、什么都不写):
+const FEATURES: &'static [ColumnDesc] = &[];
+fn export_features(&self, row: &mut FeatureRow<'_>) {}
+
+pub mod features {
+    pub enum Unit { Ratio, Px, Qty, Ns, Count, Minute }        // 列值 = 原始值 × 10^exp 个该单位;Px/Qty 的 exp 相对 inst 的 px_exp/qty_exp
+    pub struct ColumnDesc { pub name: &'static str, pub unit: Unit, pub exp: i8 }
+    pub const NA: i64 = i64::MIN;                               // 缺值
+    pub struct FeatureRow<'a> { .. }                            // put / put_opt / len:按 FEATURES 顺序写进调用方的存储,超出的值丢弃但计入 len
+}
+```
+
+- 策略把自己规则读的特征按 `FEATURES` 的顺序写出(通常就是特征节点的 `Feature::export`,[hft-feature](../hft-feature/README.md));研究导出([hft-replay 特征导出](../hft-replay/README.md#特征导出))因此拿到的是策略在线用的同一个值,不是研究侧的重写。
+- 冷路径:引擎从不调用 `export_features`;它只读状态、不改状态、不分配(存储由调用方给)。没有特征的策略不实现这两项。
+- 列名在一个 `StrategySet` 内按名字合并:两个 kind 声明同名列时,单位与指数必须相同(研究导出检查,否则报错)。
+- `ColumnDesc`、`FeatureRow`、`NA`、`Unit` 由 hft-feature 原样再导出,节点库与策略用同一组类型。
 
 ### 运行模式下意图的行为表
 

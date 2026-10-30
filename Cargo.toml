@@ -11,6 +11,7 @@ members = [
     "crates/hft-ctl",
     "crates/hft-strategy-sdk",
     "crates/hft-strat-lib",
+    "crates/hft-feature",
     "crates/hft-book",
     "crates/hft-sim",
     "crates/hft-ledger",
@@ -27,6 +28,7 @@ members = [
     "crates/hft-risk",
     "crates/hft-py",
     "crates/hft-sequencer",
+    "crates/hft-replay",
     "strategies/latency-probe",
     "strategies/cross-taker",
     "strategies/portfolio-carry",
@@ -39,6 +41,7 @@ members = [
     "tools/hft-secrets",
     "tools/latency-slice",
     "tools/pm-md-probe",
+    "tools/hft-pmcfg",
     "strategies/book-observer",
     "strategies/binary-maker",
 ]
@@ -73,6 +76,7 @@ hft-journal = { path = "crates/hft-journal" }
 hft-ctl-proto = { path = "crates/hft-ctl-proto" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 hft-strat-lib = { path = "crates/hft-strat-lib" }
+hft-feature = { path = "crates/hft-feature" }
 latency-probe = { path = "strategies/latency-probe" }
 cross-taker = { path = "strategies/cross-taker" }
 portfolio-carry = { path = "strategies/portfolio-carry" }
@@ -90,6 +94,7 @@ venue-bitget = { path = "crates/venue-bitget" }
 venue-polymarket = { path = "crates/venue-polymarket" }
 hft-risk = { path = "crates/hft-risk" }
 hft-sequencer = { path = "crates/hft-sequencer" }
+hft-replay = { path = "crates/hft-replay" }
 hft-oms = { path = "crates/hft-oms" }
 
 [workspace.lints.rust]
@@ -139,6 +144,9 @@ opt-level = 0
 opt-level = 0
 
 [profile.ci.package.latency-slice]
+opt-level = 0
+
+[profile.ci.package.hft-pmcfg]
 opt-level = 0
 
 # Leaf crates whose tests run in under ~6 s even at 0 (nothing in the workspace runs their code in

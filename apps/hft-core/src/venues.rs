@@ -28,7 +28,13 @@ use zerocopy::{FromZeros, IntoBytes};
 
 type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send>;
 pub struct VenueTasks(Vec<(Thread, TaskFn)>);
-pub type BuiltVenue = (VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>, State);
+/// The last element: each Live account's REST baseline, in `venues.<v>.accounts` order.
+pub type BuiltVenue = (
+    VenueTasks,
+    Option<io::GatewayInput>,
+    Vec<storage::Side>,
+    Vec<State>,
+);
 impl std::fmt::Debug for VenueTasks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VenueTasks")
@@ -375,13 +381,26 @@ where
     let mut net = hft_net::NetConfig::default();
     v.net.apply(&mut net);
     let ip = v.src_ip.ok_or_else(|| Error::config("SourceBind", name))?;
+    let device = v
+        .bind_device
+        .clone()
+        .ok_or_else(|| Error::config("SourceBind", name))?;
     net.src_ips.push(ip);
-    net.bind_device.push((
-        ip,
-        v.bind_device
-            .clone()
-            .ok_or_else(|| Error::config("SourceBind", name))?,
-    ));
+    net.bind_device.push((ip, device.clone()));
+    // Each account's egress (`accounts[].src_ip`, absent = `src_ip`) as an index into `src_ips`.
+    let mut src_ix = Vec::with_capacity(v.accounts.len());
+    for k in &v.accounts {
+        let a_ip = k.src_ip.unwrap_or(ip);
+        let ix = match net.src_ips.iter().position(|x| *x == a_ip) {
+            Some(ix) => ix,
+            None => {
+                net.src_ips.push(a_ip);
+                net.bind_device.push((a_ip, device.clone()));
+                net.src_ips.len() - 1
+            }
+        };
+        src_ix.push(u8::try_from(ix).map_err(|_| Error::config("SourceBind", name))?);
+    }
     net.ts_expect_hw = false;
     let mut targets = FeedEndpoints::default();
     for route in P::routes() {
@@ -428,9 +447,9 @@ where
     };
     let mut accounts = Vec::new();
     let mut creds = Vec::new();
-    let mut account_client = None;
-    let mut baseline = State::default();
-    for k in &v.accounts {
+    let mut clients = Vec::new();
+    let mut baselines = Vec::new();
+    for (i, k) in v.accounts.iter().enumerate() {
         let a = AccountId(k.account);
         let rest = credential(
             &k.rest_api_key_path,
@@ -463,6 +482,10 @@ where
         let rest_endpoint = endpoint(c, rd, P::VENUE, EndpointRole::Rest)?;
         let host = rest_endpoint.host.clone();
         rest_net.endpoints = vec![rest_endpoint];
+        // The account client's connections leave from this account's egress IP.
+        let a_ip = net.src_ips[usize::from(src_ix[i])];
+        rest_net.src_ips = vec![a_ip];
+        rest_net.bind_device = vec![(a_ip, device.clone())];
         let rest_arena = ConnArena::new(&[(ConnRole::Rest, 2)], &rest_net, clock);
         let rest_connector =
             Connector::new(rest_arena, &rest_net).map_err(|_| Error::config("AccountNetwork", name))?;
@@ -491,21 +514,26 @@ where
                 .poll(utc.utc_ns(hft_rt::tsc_now()))
                 .map_err(|e| account_error(name, &e))?;
             if let Some(state) = client.take() {
-                baseline = state;
+                baselines.push(state);
                 break;
             }
             std::thread::sleep(Duration::from_millis(1));
         }
         // The first live Funding event records this REST-derived interval in seq journal.
         // Rates/timestamps still come from the live frame; failed REST keeps the existing wait.
-        P::seed_funding(&mut ctx, &baseline.funding_schedule)
-            .map_err(|_| Error::config("FundingBootstrap", "feed schedule capacity or shape"))?;
-        account_client = Some(client);
+        // The schedule is the venue's: the first account's seeds the feed.
+        if i == 0
+            && let Some(b) = baselines.last()
+        {
+            P::seed_funding(&mut ctx, &b.funding_schedule)
+                .map_err(|_| Error::config("FundingBootstrap", "feed schedule capacity or shape"))?;
+        }
+        clients.push((a, client));
         let tpl = P::build_templates(&venue, rd, a, &rest)
             .map_err(|_| Error::config("Templates", "cannot build account templates"))?;
         accounts.push(GwAccountSpec::<P> {
             account: a,
-            src_ip_idx: 0,
+            src_ip_idx: src_ix[i],
             rest_credential: rest,
             tpl,
             ctx: gw_ctx(),
@@ -529,12 +557,16 @@ where
         gateway_rest = Some((id, ep.host.clone()));
         net.endpoints.push(ep);
     }
+    // Private connections are per account: each account has its own order, user-stream and REST
+    // pool connections.
+    let n_accounts =
+        u16::try_from(v.accounts.len().max(1)).map_err(|_| Error::config("AccountCapacity", name))?;
     let arena = ConnArena::new(
         &[
             (ConnRole::Md, 32),
-            (ConnRole::Order, 4),
-            (ConnRole::UserStream, 2),
-            (ConnRole::Rest, u16::from(gwcfg.rest_conns)),
+            (ConnRole::Order, 4 * n_accounts),
+            (ConnRole::UserStream, 2 * n_accounts),
+            (ConnRole::Rest, u16::from(gwcfg.rest_conns) * n_accounts),
         ],
         &net,
         clock,
@@ -620,7 +652,7 @@ where
     let mut sides = vec![fs];
     // A protocol without a Bbo route (Polymarket) runs the Md routes only, with its whole
     // DepthTopN book; the others keep the defaults (BBO racing plus TopN depth).
-    let dry = c.sim.is_some();
+    let dry = c.assembly().is_sim();
     let raw_bbo = crate::config::RawKind::resolve(v.feed.raw.bbo, dry);
     let raw_md = crate::config::RawKind::resolve(v.feed.raw.md, dry);
     let feed_cfg = if P::routes().iter().any(|r| r.kind == RouteKind::Bbo) {
@@ -699,7 +731,9 @@ where
     let (mut account_tx, account_rx) = byte_ring(c.rings.bytes)?;
     let (rest_order_tx, mut rest_order_rx) = ring(c.rings.elements)?;
     let (mut rest_reply_tx, rest_reply_rx) = ring(c.rings.elements)?;
-    publish_account(&mut account_tx, &baseline)?;
+    for b in &baselines {
+        publish_account(&mut account_tx, b)?;
+    }
     if !accounts.is_empty() {
         let (orders, cmds) = ring(c.rings.elements)?;
         let (out, reports) = ring(c.rings.elements)?;
@@ -764,11 +798,13 @@ where
         gw.set_rest(rest_order_tx, rest_reply_rx);
         gw.set_rep_bulk(rep_bulk_tx);
         if let Some((endpoint, host)) = gateway_rest {
-            let pool = gwcfg
-                .rest_pool(host.as_bytes(), &net, clock)
-                .ok_or_else(|| Error::config("RestPool", name))?;
-            gw.set_rest_pools(AccountId(v.accounts[0].account), vec![(endpoint, pool)])
-                .map_err(|_| Error::config("RestPool", name))?;
+            for k in &v.accounts {
+                let pool = gwcfg
+                    .rest_pool(host.as_bytes(), &net, clock)
+                    .ok_or_else(|| Error::config("RestPool", name))?;
+                gw.set_rest_pools(AccountId(k.account), vec![(endpoint, pool)])
+                    .map_err(|_| Error::config("RestPool", name))?;
+            }
         }
         gateway = Some(io::GatewayInput {
             venue: P::VENUE,
@@ -794,7 +830,6 @@ where
             }),
         ));
     }
-    let account = v.accounts.first().map(|k| AccountId(k.account));
     let task_name = name.to_owned();
     let v_timeout_ms = v.account_io.as_ref().map_or(10_000, |x| x.timeout_ms);
     // Session logins, account REST and connection deadlines: the same line as the gw's
@@ -844,17 +879,37 @@ where
                             .try_push(Handover::Failed(r.conn))
                             .map_err(|_| Error::runtime("HandoffFull", "REST connection", 3))?;
                     }
-                    if let Some(client) = &mut account_client {
-                        if pending_rest.is_none() {
-                            pending_rest = rest_order_rx.try_pop();
-                        }
-                        if pending_private.is_none()
-                            && client.idle()
-                            && let Some(r) = pending_rest.take()
-                        {
+                    // A private (order or user-stream) build waits for its account's client to
+                    // reauthenticate; an account without a client fails it.
+                    if let Some(r) = pending_private
+                        && !clients.iter().any(|(a, _)| *a == r.account)
+                    {
+                        pending_private = None;
+                        gh_tx
+                            .try_push(Handover::Failed(r.conn))
+                            .map_err(|_| Error::runtime("HandoffFull", "private connection", 3))?;
+                    }
+                    if pending_rest.is_none() {
+                        pending_rest = rest_order_rx.try_pop();
+                    }
+                    // REST order fallback: routed to the client of the command's account.
+                    if let Some(r) = pending_rest {
+                        let (_, client) =
+                            clients
+                                .iter_mut()
+                                .find(|(a, _)| *a == r.cmd.account)
+                                .ok_or_else(|| {
+                                    Error::runtime("RestRing", "REST order for an unknown account", 3)
+                                })?;
+                        if pending_private.is_none_or(|p| p.account != r.cmd.account) && client.idle() {
+                            pending_rest = None;
                             client.order(r, now).map_err(|e| account_error(&task_name, &e))?;
                         }
-                        if pending_private.is_some() && !reauth_started && client.idle() {
+                    }
+                    for (a, client) in &mut clients {
+                        let a = *a;
+                        let mine = pending_private.is_some_and(|r| r.account == a);
+                        if mine && !reauth_started && client.idle() {
                             client
                                 .reauthenticate()
                                 .map_err(|e| account_error(&task_name, &e))?;
@@ -864,7 +919,7 @@ where
                             eprintln!("{}", account_error(&task_name, &e));
                             let h = hft_event::AccountConfigReportHdr {
                                 venue: P::VENUE,
-                                account: account.unwrap_or(AccountId(0)),
+                                account: a,
                                 mismatches: 256,
                                 source: 3,
                                 ex_ts_ns: now,
@@ -877,12 +932,12 @@ where
                             ) {
                                 return Err(Error::runtime("AccountRing", "failed observation", 3));
                             }
-                            if let Some(r) = pending_private.take() {
+                            if mine && let Some(r) = pending_private.take() {
                                 gh_tx
                                     .try_push(Handover::Failed(r.conn))
                                     .map_err(|_| Error::runtime("HandoffFull", "private connection", 3))?;
+                                reauth_started = false;
                             }
-                            reauth_started = false;
                             client.retry(now);
                         }
                         if let Some(r) = client.take_order() {
@@ -892,12 +947,15 @@ where
                         }
                         if let Some(state) = client.take() {
                             publish_account(&mut account_tx, &state)?;
-                            if reauth_started && let Some(mut r) = pending_private.take() {
+                            if mine
+                                && reauth_started
+                                && let Some(mut r) = pending_private.take()
+                            {
                                 r.deadline_ns = now + i64::from(v_timeout_ms) * 1_000_000;
                                 let started = session.start_prepared(
                                     &mut connector,
                                     r,
-                                    account,
+                                    Some(a),
                                     now,
                                     client.listen_body(),
                                 );
@@ -940,7 +998,7 @@ where
             }
         }),
     ));
-    Ok((VenueTasks(tasks), gateway, sides, baseline))
+    Ok((VenueTasks(tasks), gateway, sides, baselines))
 }
 
 fn account_error(name: &str, e: &hft_venue::account::Error) -> Error {

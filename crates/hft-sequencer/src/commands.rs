@@ -1063,7 +1063,11 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
 
 fn live_instance<S: StrategySet>(e: &Engine, inst: &Instances<S>, s: StrategyId) -> bool {
     let Some(sl) = inst.get(s) else { return false };
-    if !matches!(e.rd.account(sl.account).kind, AccountKind::Live) {
+    if !sl
+        .accounts()
+        .iter()
+        .any(|a| matches!(e.rd.account(*a).kind, AccountKind::Live))
+    {
         return false;
     }
     // A Live instance: at least one cell desired Live (control-plane definition).
@@ -1499,8 +1503,8 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             else {
                 return Ok(res(status::UNKNOWN_TARGET, 0));
             };
-            let acc = inst.slots.get(ix).map_or(AccountId(0), |s| s.account);
-            if h.account.0 != 0 && h.account != acc {
+            let bound = inst.slots.get(ix).is_some_and(|s| s.has_account(h.account));
+            if h.account.0 != 0 && !bound {
                 return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_BOUND));
             }
             let gix = if *group == GROUP_NONE {

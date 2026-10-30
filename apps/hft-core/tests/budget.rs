@@ -1,3 +1,4 @@
+use hft_core::config::Assembly;
 mod support;
 use hft_core::budget::{check_space, hot_resident, journals};
 
@@ -19,11 +20,11 @@ fn core_101_journal_set_follows_active_venue_tasks() {
     let dir = tempfile::tempdir().unwrap();
     let path = support::write(dir.path(), &dir.path().join("hot"), None);
     let c = hft_core::config::parse(&path).unwrap();
-    assert_eq!(journals(&c, true), ["seq"]);
+    assert_eq!(journals(&c, Assembly::Sim), ["seq"]);
     let expected: Vec<_> = std::iter::once("seq".to_string())
         .chain(c.venues.keys().map(|n| format!("raw-feed-{n}")))
         .collect();
-    assert_eq!(journals(&c, false), expected);
+    assert_eq!(journals(&c, Assembly::Live { prod_orders: false }), expected);
 }
 
 #[test]
@@ -32,12 +33,18 @@ fn core_102_actual_journal_budget() {
     let path = dir.path().join("dual.toml");
     std::fs::write(&path, include_str!("../config/dual-testnet.toml")).unwrap();
     let c = hft_core::config::parse(&path).unwrap();
-    assert_eq!(journals(&c, false).len(), 5);
+    assert_eq!(journals(&c, Assembly::Live { prod_orders: false }).len(), 5);
     // Two venues with one gateway each: the documented dev2 seq/feed/gw layouts.
-    assert_eq!(hft_core::budget::required(&c, false).unwrap(), (120 << 20) + 4096);
-    assert_eq!(hft_core::budget::required(&c, true).unwrap(), (96 << 20) + 4096);
+    assert_eq!(
+        hft_core::budget::required(&c, Assembly::Live { prod_orders: false }).unwrap(),
+        (120 << 20) + 4096
+    );
+    assert_eq!(
+        hft_core::budget::required(&c, Assembly::Sim).unwrap(),
+        (96 << 20) + 4096
+    );
     let mut opened_budget = 4096;
-    for name in journals(&c, false) {
+    for name in journals(&c, Assembly::Live { prod_orders: false }) {
         let kind = if name == "seq" {
             hft_journal::JournalKind::Seq
         } else {
@@ -47,7 +54,10 @@ fn core_102_actual_journal_budget() {
         assert!(cfg.validate());
         opened_budget += hot_resident(cfg.segment_bytes, cfg.hot_keep).unwrap();
     }
-    assert_eq!(opened_budget, hft_core::budget::required(&c, false).unwrap());
+    assert_eq!(
+        opened_budget,
+        hft_core::budget::required(&c, Assembly::Live { prod_orders: false }).unwrap()
+    );
     assert!(check_space(192 << 20, 0, opened_budget).is_ok());
 }
 

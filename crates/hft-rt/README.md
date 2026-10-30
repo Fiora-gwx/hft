@@ -180,6 +180,7 @@ impl DriftTracker {
 
 pub const UTC_SLEW_PPM: u64 = 500;        // 线超前 CLOCK_REALTIME 时的最大减速(内核 adjtime 上限),从不回跳
 pub const UTC_RATE_TOL_PPM: u64 = 1_000;  // 实测频率偏离启动校准超过此值则不用(沿用启动频率)
+                                          // 两个常数全仓只在这里定义:hft-sequencer 的引擎 UTC 线(节 32)复用同一组
 #[derive(Clone)] pub struct UtcClock { /* &'static SeqCell<TscUtc> + 本读者最近一次读到的线 + 上次结果 */ }  // Send,非 Sync:每线程一个
 impl UtcClock {
     pub fn shared(clock: &TscClock, horizon_ms: u32) -> (UtcClock, UtcPublisher); // 启动期:进程唯一的线(初值 = clock.tsc_utc(&clock.base))与它唯一的写者;泄漏一个单元

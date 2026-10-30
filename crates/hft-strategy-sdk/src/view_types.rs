@@ -135,10 +135,11 @@ pub struct TradeView {
 
 /// Venue and receive stamps of one market-data message of an inst (its `MarketHdr`), kept by the
 /// engine for `Views::md_stamp`: an L2 batch, an exchange or top-N L2 snapshot (also the exchange
-/// snapshots that deliver no `EventRef::Book`), or a public trade.
+/// snapshots that deliver no `EventRef::Book`), or a public trade; `Views::bbo_stamp` gives the
+/// last applied Bbo in the same form.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct MdStampView {
-    /// `MD_BATCH`, `MD_SNAPSHOT` or `MD_TRADE`.
+    /// `MD_BATCH`, `MD_SNAPSHOT`, `MD_TRADE`, or `MD_BBO` (`Views::bbo_stamp` only).
     pub kind: u8,
     /// `MarketHdr.ex_ts_ns`: the venue's message time (UTC ns; 0 = the venue gave none).
     pub ex_ts_ns: i64,
@@ -162,6 +163,43 @@ impl MdStampView {
     pub const MD_SNAPSHOT: u8 = 2;
     /// A `Trade`.
     pub const MD_TRADE: u8 = 3;
+    /// A `Bbo` that updated the quote (duplicates and older updates from another member
+    /// connection are not recorded).
+    pub const MD_BBO: u8 = 4;
+}
+
+/// The time stamps of the Input being delivered (`Views::stamps`): the venue's time, the local
+/// receive stamps and the engine clock. Strategies decide on the engine clock and may use the
+/// others as data (feed lag, venue-time phase).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct Stamps {
+    /// `EventKind` number of the Input.
+    pub kind: u16,
+    /// Venue time: `MarketHdr.ex_ts_ns` or `OrderEvent.ex_ts_ns` (UTC ns); 0 = none.
+    pub venue_ns: i64,
+    /// Kernel software receive stamp (CLOCK_REALTIME ns); 0 = unavailable.
+    pub sw_rx_ns: i64,
+    /// Hardware receive stamp (PHC domain, not UTC); 0 = unavailable.
+    pub hw_rx_ns: i64,
+    /// The receiving thread's TSC (this run); 0 = not a received message.
+    pub rx_tsc: Tsc,
+    /// `Now.engine_ns` of the Input.
+    pub engine_ns: i64,
+    /// `Now.utc_ns` of the Input.
+    pub utc_ns: i64,
+}
+
+impl Stamps {
+    /// All zero.
+    pub const NONE: Stamps = Stamps {
+        kind: 0,
+        venue_ns: 0,
+        sw_rx_ns: 0,
+        hw_rx_ns: 0,
+        rx_tsc: Tsc(0),
+        engine_ns: 0,
+        utc_ns: 0,
+    };
 }
 
 /// One public-market liquidation (not this account's).

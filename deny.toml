@@ -21,6 +21,8 @@ allow = [
     "ISC",
     "MIT",
     "Unicode-3.0",
+    # hft-replay Parquet stack: tiny-keccak (const-random of ahash under arrow).
+    "CC0-1.0",
     "Unlicense",
 ]
 confidence-threshold = 0.9
@@ -33,7 +35,9 @@ deny = [
     # N4: no arbitrary-precision decimals or big integers (fixed-point i64/i128 only).
     { crate = "rust_decimal", reason = "N4" },
     { crate = "bigdecimal", reason = "N4" },
-    { crate = "num-bigint", reason = "N4" },
+    # Parquet output of the cold research replay (hft-replay; N4 applies to hot/pure only and
+    # `cargo xtask deps` keeps it out of their closure): only arrow-buffer and parquet may use it.
+    { crate = "num-bigint", reason = "N4", wrappers = ["arrow-buffer", "parquet"] },
 ]
 
 [advisories]

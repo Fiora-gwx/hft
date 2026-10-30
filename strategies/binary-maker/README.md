@@ -19,6 +19,7 @@ status: impl
   - [参数](#参数)
   - [订阅](#订阅)
   - [波动率](#波动率)
+  - [特征](#特征)
   - [规则](#规则)
   - [Note 码表与报表字段](#note-码表与报表字段)
 - [实现说明](#实现说明)
@@ -98,6 +99,18 @@ v7 的实盘参数 = v6 实盘参数(`clip_shares` 5、`inv_max_shares` 10、`si
 
 参考腿每条 `Bbo` 取 2 × 中间价(买一 + 卖一)。UTC 秒内的第一条报价记一个样本:与上一个样本的相对变化 r(1e-9,截到 ±1),进入长度 `vol_window_s` 的环,同时维护 Σr²。σ = ⌊√(Σr² / 样本数)⌋(每秒,1e-9);样本数不足 `vol_min_samples` 时没有 σ(不挂单)。没有报价的秒不记样本。`clock_ok = false` 时不记样本。
 
+### 特征
+
+规则读取的特征是 [hft-feature](../../crates/hft-feature/README.md) 的节点(`RealizedVol`、`BboTop`、`SecHist`、`SignedFlow`、`OwnExcludedSide`、`LagQuantiles`、`zsum`、Φ/Φ⁻¹ 与定点对数),由本策略的 `MakerFeatures`(`src/features.rs`)组合;规则 9 的方向预测与规则 10 的八个特征是本策略自己的组合。每个事件先跑特征的处理器,再跑规则,处理器顺序固定(执行计划,`clock_ok = false` 时只跑参考报价的 `BboTop`):
+
+| 事件 | 处理器(按序) |
+|---|---|
+| 参考腿 `Bbo` | 参考逐秒环 → 槽位逐秒环 → 延迟统计 → `BboTop`(两侧都有价时)→ `RealizedVol` |
+| 槽位 `Trade` | 大单环 → 槽位逐秒环 → 延迟统计 |
+| 其他事件 | 槽位逐秒环 → 延迟统计 |
+
+参考逐秒环、大单环与槽位逐秒环只在方向分数开启(`comp_skip` 或 `comp_dir` 非 0)时运行,延迟统计只在延迟闸门开启(`load_gate_ns` 或 `mdslow_gate_ns` 非 0)时运行。`MakerFeatures::export` 按 `features::COLUMNS` 写出一行定点列:`ref_mid_x2`、`ref_imb`、`ref_sigma`(至少 1 个样本即有)、`ref_samples`、`lag_minute`、`lag_p90`、`lag_p50`(上一结束分钟,×100 ns;无则 `NA`)。`Strategy::FEATURES` = `features::COLUMNS`,`export_features` 写出同一行([hft-strategy-sdk 特征导出](../../crates/hft-strategy-sdk/README.md#特征导出)),`replayer features` 由此导出。
+
 ### 规则
 
 每条参考腿 `Bbo`、槽位腿 `Book` 与本实例的 `Order` 事件之后判一次(参考腿 `Bbo` 先更新参考中间价与波动率样本)。每个事件(含 `Trade` 等不判定的事件,`clock_ok` 时)先做规则 10 的逐秒记录与规则 11 的延迟采样:
@@ -147,19 +160,16 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 
 <details><summary>实现要点</summary>
 
-- 状态:每个槽位 group 一条 `Quote{id, inst, venue, state, handle, r, px, last_ens, win, b0, d0, den, cool_until, fill_ens, n_fill}`(`state` ∈ None/Placing/Live/Cancelling;`last_ens` 是最近一次挂单或撤单的引擎时间,`win` 是挂单所在窗口的起点(UTC 秒),两者用于规则 8 的过期状态;`b0`–`cool_until` 是规则 5 的锚点与冷却;`fill_ens` 是该腿最近 8 笔成交的引擎时间环,`n_fill` 为累计笔数);参考 inst、最新参考 2 × 中间价与买一卖一数量失衡;波动率环 `Vol`(`recent(k)` 给出最近 k 个收益之和与绝对值之和);当前窗口的公允价锚点 `FvAnchor{win, b_open, off, off_ok, off_ens}`(规则 9,窗口变化时清零)。容量在 `new` 时按 `GroupTable::capacity()` 预留,`on_params` 只在 `vol_window_s` 变化时重建环。`GroupId` 与腿都不变的槽位保留挂单状态。
+- 状态:每个槽位 group 一条 `Quote{id, inst, venue, state, handle, r, px, last_ens, win, b0, d0, den, cool_until, fill_ens, n_fill}`(`state` ∈ None/Placing/Live/Cancelling;`last_ens` 是最近一次挂单或撤单的引擎时间,`win` 是挂单所在窗口的起点(UTC 秒),两者用于规则 8 的过期状态;`b0`–`cool_until` 是规则 5 的锚点与冷却;`fill_ens` 是该腿最近 8 笔成交的引擎时间环,`n_fill` 为累计笔数);参考 inst;特征 `MakerFeatures`(最新参考 2 × 中间价与买一卖一数量失衡 `BboTop`、波动率环 `RealizedVol`(`recent(k)` 给出最近 k 个收益之和与绝对值之和)与规则 10、11 的状态);当前窗口的公允价锚点 `FvAnchor{win, b_open, off, off_ok, off_ens}`(规则 9,窗口变化时清零)。容量在 `new` 时按 `GroupTable::capacity()` 预留,`on_params` 只在 `vol_window_s` 变化时重建环。`GroupId` 与腿都不变的槽位保留挂单状态。
 - 全部整数运算:相对变化 ×1e9 用 i128,平方和 u128,整数平方根(牛顿法)。
-- 规则 10、11 的状态:每个槽位一条 `SlotHist{inst, mid_x2, bid, md_seen}`(两个 128 秒的逐秒环与已读行情戳计数,约 4 KB)、参考 `ref_x2` 逐秒环、大单环 `Trades`(256 笔)、两条腿的分数缓存 `CompCache{ok, win, utc_ns, z}` 与延迟统计 `LagGate`(当前秒的样本缓冲 1 024 × 8 B、当前分钟每秒的两个分位、上一结束分钟的两个中位数);都在 `new` 分配,`on_params` 只在槽位 inst 变化时重建逐秒环;都不进快照(恢复后重新积累:最长 62 s 的历史与一分钟的延迟)。打分与分位在快速部分做(有界的整数运算:每 `comp_every_ms` 一次 2 × 64 档与 256 笔的扫描、每秒一次 ≤ 1 024 个样本的排序),不经 Model:本策略的部署不运行 advisor 进程,且分数需要当前簿。
+- 规则 10、11 的状态:每个槽位一条 `SlotHist{inst, mid_x2, bid, md_seen}`(两个 128 秒的逐秒环与已读行情戳计数,约 4 KB)、参考 `ref_x2` 逐秒环、大单环 `Trades`(256 笔)、两条腿的分数缓存 `CompCache{ok, win, utc_ns, z}` 与延迟统计 `LagQuantiles`(当前秒的样本缓冲 1 024 × 8 B、当前分钟每秒的两个分位、上一结束分钟的两个中位数);都在 `new` 分配,`on_params` 只在槽位 inst 变化时重建逐秒环;都不进快照(恢复后重新积累:最长 62 s 的历史与一分钟的延迟)。打分与分位在快速部分做(有界的整数运算:每 `comp_every_ms` 一次 2 × 64 档与 256 笔的扫描、每秒一次 ≤ 1 024 个样本的排序),不经 Model:本策略的部署不运行 advisor 进程,且分数需要当前簿。
 - 快照(`DESC_VERSION` 7;布局与 4、5、6 相同;`FvAnchor` 与规则 10、11 的状态不进快照,恢复后在下一次判定重新取 B_open 与锚点):`n: u16`,每个槽位 `id: u32, state: u8, venue: u8, account: u8, slot: u32, gen: u32, px: i64, b0: i64, d0: i64, den: i64, cool_until: i64, n_fill: u32, fill_ens: 8 × i64, last_ens: i64, win: i64`;`Placing` 存为 None。恢复按 `GroupId`;波动率环不进快照(重启后重新积累 `vol_min_samples` 个样本才挂单)。
 
 | 文件 | 职责 |
 |---|---|
 | `src/lib.rs` | `StrategyDesc` 与 `impl Strategy`,转发到 `fast` |
 | `src/fast/mod.rs` | 订阅、规则、订单状态、快照 |
-| `src/vol.rs` | 1 秒收益的实现波动率与整数平方根 |
-| `src/fast/comp.rs` | 规则 10:逐秒环、大单环、买盘读数(扣除自己的挂单)、特征、定点对数与分数 |
-| `src/fast/lag.rs` | 规则 11:行情延迟的每秒、每分钟分位与闸门 |
-| `src/norm.rs` | 整数标准正态分布函数 Φ 与 Φ⁻¹(查表插值) |
+| `src/features.rs` | `MakerFeatures`:hft-feature 节点的组合与执行计划;规则 9 的方向预测、规则 10 的八个特征与分数 |
 | `src/params.rs`、`src/desc.rs` | 参数 schema 与 `check`;空描述符 |
 | `tests/` | 场景测试与 refdata 夹具 |
 
@@ -181,7 +191,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 
 ## 依赖
 
-只依赖 `hft-strategy-sdk`;测试另依赖 hft-testkit、hft-types、hft-refdata、hft-event(只在 `[dev-dependencies]`)。
+依赖 `hft-strategy-sdk` 与 [`hft-feature`](../../crates/hft-feature/README.md)(特征节点);测试另依赖 hft-testkit、hft-types、hft-refdata、hft-event(只在 `[dev-dependencies]`)。
 
 ## 延伸阅读
 
@@ -194,6 +204,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - 返佣不计入;实盘挂单的排队位置与撤单竞争在模拟盘只能近似(hft-sim `maker_fill = Queue`)。
 - 实盘时本实例自己的挂单会出现在簿上,"买一"可能就是自己;目标价仍按簿上的买一(含自己),只有规则 10 的失衡特征扣除自己的挂单(逐秒中间价与买一不扣,与研究移植相同)。过期复位(规则 8)后仍在簿上的旧挂单不再扣除。
 - 规则 10 的逐秒记录按事件采样:交易所整簿(不投递 `Book` 事件)改变的簿在下一个事件记入,研究移植在整簿当时记入;一秒内的最后一个值只在整簿之后、同一秒再无事件时不同。
+- 特征状态(波动率环、逐秒环、大单环、延迟统计)不进快照,重启后重新积累(`vol_min_samples` 秒内不挂单);写进快照要改快照布局与 `DESC_VERSION`,作为单独的版本变更。
 - 规则 11 的样本来自本实例订阅的槽位 inst;每 inst 两个事件之间超过 16 条行情消息时多出的丢失(槽位 venue 的每条 L2 批与成交都是事件,只有整簿不是)。
 
 ### 开发备忘

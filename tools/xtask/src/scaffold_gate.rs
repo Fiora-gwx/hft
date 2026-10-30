@@ -7,9 +7,11 @@
 //!    dependencies (only those `deps.toml` allows `strategies/*`).
 //! 2. Writes the temporary workspace `target/decoupling/Cargo.toml`: the registry copy
 //!    (`registry/`, `strategy_set!` + `CiProbe`, a dependency on the probe, the DST short set
-//!    `tests/ci_probe_dst.rs`), the probe, and manifest copies of `apps/hft-core` and `apps/replayer`
-//!    whose sources stay in the repository and whose registry dependency points at the copy
-//!    (Cargo's `[patch]` cannot replace a path dependency, so the copies carry the redirection).
+//!    `tests/ci_probe_dst.rs`), the probe, and manifest copies of the registry's users
+//!    (`apps/hft-core`, `apps/replayer`, `tools/hft-pmcfg`) whose sources stay in the repository and
+//!    whose registry dependency, and path dependencies on each other, point at the copies (Cargo's
+//!    `[patch]` cannot replace a path dependency, so the copies carry the redirection; one registry
+//!    package in the graph keeps `-p hft-strategy-registry` unambiguous).
 //!    Every build runs with `CARGO_TARGET_DIR` = the main target directory and `--profile <name>`
 //!    (default `dev`; CI passes the profile of its main build); the root `Cargo.lock` is copied in so
 //!    that external versions match the main build. The registry copy gets the dev-dependency
@@ -48,7 +50,8 @@ pub const ENGINE_PATHS: [&str; 4] = ["crates", "apps", "tools/hft-cfg", "python"
 pub const DST_TEMPLATE: &str = "tools/xtask/scaffold/registry_dst.rs.tmpl";
 pub const CONFIG_TEMPLATE: &str = "tools/xtask/scaffold/sim-check.toml";
 pub const CONFIG_TEST_TEMPLATE: &str = "tools/xtask/scaffold/registry_config.rs.tmpl";
-const APPS: [&str; 2] = ["apps/hft-core", "apps/replayer"];
+/// The registry's users (deps.toml `registry_users`) whose manifests are copied.
+const APPS: [&str; 3] = ["apps/hft-core", "apps/replayer", "tools/hft-pmcfg"];
 
 fn probe() -> Opts {
     Opts {
@@ -94,33 +97,32 @@ pub fn relative(from: &Path, to: &Path) -> String {
 }
 
 /// Rewrites every dependency `path` of a dependency table for a manifest moved from `from` to
-/// `to`; a path resolving to `redirect.0` is sent to `redirect.1`.
-fn relocate_deps(t: &mut toml::Table, from: &Path, to: &Path, redirect: &(PathBuf, PathBuf)) {
+/// `to`; a path resolving to the first element of a `redirects` pair is sent to the second.
+fn relocate_deps(t: &mut toml::Table, from: &Path, to: &Path, redirects: &[(PathBuf, PathBuf)]) {
     for (_, dep) in t.iter_mut() {
         if let Some(d) = dep.as_table_mut()
             && let Some(p) = d.get("path").and_then(|v| v.as_str())
         {
             let abs = norm(&from.join(p));
-            let target = if abs == norm(&redirect.0) {
-                redirect.1.clone()
-            } else {
-                abs
-            };
+            let target = redirects
+                .iter()
+                .find(|(a, _)| abs == norm(a))
+                .map_or(abs.clone(), |(_, b)| b.clone());
             d.insert("path".into(), toml::Value::String(relative(to, &target)));
         }
     }
 }
 
-fn relocate_all_deps(t: &mut toml::Table, from: &Path, to: &Path, redirect: &(PathBuf, PathBuf)) {
+fn relocate_all_deps(t: &mut toml::Table, from: &Path, to: &Path, redirects: &[(PathBuf, PathBuf)]) {
     for k in ["dependencies", "dev-dependencies", "build-dependencies"] {
         if let Some(d) = t.get_mut(k).and_then(|v| v.as_table_mut()) {
-            relocate_deps(d, from, to, redirect);
+            relocate_deps(d, from, to, redirects);
         }
     }
     if let Some(targets) = t.get_mut("target").and_then(|v| v.as_table_mut()) {
         for (_, tt) in targets.iter_mut() {
             if let Some(tt) = tt.as_table_mut() {
-                relocate_all_deps(tt, from, to, redirect);
+                relocate_all_deps(tt, from, to, redirects);
             }
         }
     }
@@ -132,12 +134,12 @@ pub fn relocate_package(
     text: &str,
     from: &Path,
     to: &Path,
-    redirect: &(PathBuf, PathBuf),
+    redirects: &[(PathBuf, PathBuf)],
 ) -> Result<String, EnvError> {
     let mut t: toml::Table = text
         .parse()
         .map_err(|e| EnvError(format!("{}/Cargo.toml: {e}", from.display())))?;
-    relocate_all_deps(&mut t, from, to, redirect);
+    relocate_all_deps(&mut t, from, to, redirects);
     let name = t
         .get("package")
         .and_then(|p| p.get("name"))
@@ -246,7 +248,7 @@ pub fn workspace_manifest(
     let mut t: toml::Table = root_toml
         .parse()
         .map_err(|e| EnvError(format!("Cargo.toml: {e}")))?;
-    let redirect = (root.join(new_strategy::REGISTRY), dec.join("registry"));
+    let redirect = [(root.join(new_strategy::REGISTRY), dec.join("registry"))];
     let mut out = toml::Table::new();
     let mut ws = toml::Table::new();
     if let Some(w) = t.get_mut("workspace").and_then(|v| v.as_table_mut()) {
@@ -501,12 +503,11 @@ fn build_and_check(
     let lib = new_strategy::add_set_line(&lib, &format!("{}::{}", o.krate(), o.ty()))
         .ok_or_else(|| EnvError("registry src/lib.rs: no strategy_set! struct body".into()))?;
     wr(&rcopy.join("src/lib.rs"), &lib)?;
-    let none = (PathBuf::new(), PathBuf::new());
     // The copy keeps its own sources: only dependency paths move.
     let mut t: toml::Table = rd(&reg.join("Cargo.toml"))?
         .parse()
         .map_err(|e| EnvError(format!("registry Cargo.toml: {e}")))?;
-    relocate_all_deps(&mut t, &reg, &rcopy, &none);
+    relocate_all_deps(&mut t, &reg, &rcopy, &[]);
     with_testkit_seq(&mut t);
     let rt = toml::to_string(&t).map_err(|e| EnvError(format!("encode manifest: {e}")))?;
     let rt = new_strategy::add_dependency(&rt, &format!("{PROBE} = {{ path = \"../strategies/{PROBE}\" }}"));
@@ -526,14 +527,15 @@ fn build_and_check(
         wr(&rcopy.join("tests").join(format!("{config_test}.rs")), &config)?;
     }
     // App manifest copies and the temporary workspace.
-    let redirect = (reg.clone(), rcopy.clone());
+    let apps: Vec<&str> = APPS
+        .into_iter()
+        .filter(|app| root.join(app).join("Cargo.toml").is_file())
+        .collect();
+    let mut redirect = vec![(reg.clone(), rcopy.clone())];
+    redirect.extend(apps.iter().map(|app| (root.join(app), dec.join(app))));
     let mut members = vec!["registry".to_string(), format!("strategies/{PROBE}")];
-    for app in APPS {
-        let from = root.join(app);
-        if !from.join("Cargo.toml").is_file() {
-            continue;
-        }
-        let to = dec.join(app);
+    for app in apps {
+        let (from, to) = (root.join(app), dec.join(app));
         wr(
             &to.join("Cargo.toml"),
             &relocate_package(&rd(&from.join("Cargo.toml"))?, &from, &to, &redirect)?,

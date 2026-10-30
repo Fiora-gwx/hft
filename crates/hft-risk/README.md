@@ -476,7 +476,7 @@ pub fn level_of(r: &CapRecord) -> CapLevel;    // Kill + HARD → Hard;其余 �
 
 **恢复期按 venue 放行**(执行层补腿、残余修剪、外来成交默认处理与自动有界平仓的开始条件,按多出那一腿所在 venue 判定):`venue_gate_ok(a, v)` = `hedge_gate_ok(a, v)` ∧ `v ∈ reconciled_venues`。每次 `apply` 中某 (account, venue) 由假变真 → 列入 `ModeOutcome.venue_gate_open`,sequencer 调 `exec.on_venue_gate_open`(执行层每个 venue 每次运行只放行一次,重复列出无害);账户放行(`released` → `on_gate_open`)蕴含全部 venue。另一 venue 断线或某项差异待处置时,健康 venue 上多出的一腿照样开始处置。放行之前 `broken_auto_fix_ms` 与外来成交截止不计时、账户未放行而有裸量时的 P0 告警(`gate_naked_alarm_ms`),都归 [hft-exec](../hft-exec/README.md)。
 
-模拟账户(`AccountMeta.kind = Sim`):`RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 不适用,启动时(闸门复位时)直接置位,`reconciled_venues`、`cfg_ok_venues`、`identity_ok_venues` 置为该账户全部 venue,kill 自检视为已通过(模拟账户没有 kill 字位),所以其 `hedge_gate_ok`/`venue_gate_ok` 只看 sim-gw 的连接(reconciler 与交易所核验都跳过模拟账户);其余位照常由模拟网关(sim-gw,[hft-sim](../hft-sim/README.md))的连接状态推进(sim-gw 没有热备,`standby_up` 恒为真)。模拟账户的单不经 gw、不占 kill 字位;**kill 与实盘相同经检查链生效**(#1 HARD、#3 cap),cap、有效模式与闸门规则与实盘完全一致,本模块不为模拟账户另设分支。`sim` 实例([apps/hft-core](../../apps/hft-core/README.md))里全部账户都是 Sim,规则不变。
+模拟账户(`AccountMeta.kind = Sim`):`RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 不适用,启动时(闸门复位时)直接置位,`reconciled_venues`、`cfg_ok_venues`、`identity_ok_venues` 置为该账户全部 venue,kill 自检视为已通过(模拟账户没有 kill 字位),所以其 `hedge_gate_ok`/`venue_gate_ok` 只看 sim-gw 的连接(reconciler 与交易所核验都跳过模拟账户);其余位照常由模拟网关(sim-gw,[hft-sim](../hft-sim/README.md))的连接状态推进(模拟场所没有热备:`ORDER_CONNS` 对模拟账户不看 `standby_up`,与 `allow_missing_standby` 无关;`prod` 实例里的模拟账户(Shadow 变体)因此不必放宽实盘账户的热备要求)。模拟账户的单不经 gw、不占 kill 字位;**kill 与实盘相同经检查链生效**(#1 HARD、#3 cap),cap、有效模式与闸门规则与实盘完全一致,本模块不为模拟账户另设分支。`sim` 实例([apps/hft-core](../../apps/hft-core/README.md))里全部账户都是 Sim;`prod` 实例可含 Sim 账户(sim-venue 任务),规则不变。
 
 **身份与配置不符**:
 

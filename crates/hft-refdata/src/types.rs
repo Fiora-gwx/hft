@@ -54,7 +54,7 @@ wire_enum!(
 );
 wire_enum!(
     /// What a rate limit counts.
-    LimitBucket { Orders = 1, Weight = 2, WsInMsgs = 3, NewConns = 4, Amends = 5 }
+    LimitBucket { Orders = 1, Weight = 2, WsInMsgs = 3, NewConns = 4, Amends = 5, Cancels = 6 }
 );
 wire_enum!(
     /// Role of an endpoint.

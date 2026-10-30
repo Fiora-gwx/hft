@@ -910,6 +910,11 @@ pub enum RepMsg {                    // rep-<venue> 环与 sim-gw 的 rep-sim �
     MarginReport(MarginReportHdr),   // 其后 hdr.n 条 MarginItem 在配套的 rep-<venue>-bulk ByteSpsc 里,sequencer 按此处的顺序取
     Note(Note),                     // Venue 诊断，live driver 记录为 Meta，不参与业务决策
 }
+impl RepMsg {
+    /// 该元素成为的 Input 记录:kind + 逻辑体分片(定长体;AccountConfigReport/MarginReport 另接 bulk 条目)。
+    /// live driver、sim-gw 与研究回放共用这一映射。
+    pub fn with_parts<R>(&self, bulk: &[u8], f: impl FnOnce(EventKind, &[&[u8]]) -> R) -> R;
+}
 pub enum HkMsg {                     // hk 环元素(→ sequencer;唯一写者是 housekeeping 线程,启动路径在 housekeeping 线程启动之前写完;方向归 hft-sequencer 环表);size_of ≤ 128 B(编译期断言)
     ClockStatus(ClockStatus),        // Meta,原样记录
     Note(Note),                      // Meta;source ∈ {Housekeeping, Boot}(advisor 的 Note 走 advice 环)

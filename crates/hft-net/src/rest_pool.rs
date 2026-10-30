@@ -101,6 +101,8 @@ struct Lane {
     h: Option<Handoff>,
     retired: Option<RetireMsg>,
     pending: Option<(ReqTag, u64)>,
+    /// TSC right after the pending request's `sendmsg` returned (`SendOk::sent_tsc`).
+    sent_tsc: u64,
     result: Option<Result<Complete, RestErr>>,
     buf: Box<[u8]>,
     len: usize,
@@ -168,6 +170,7 @@ impl<const N: usize> RestPool<N> {
                 h: None,
                 retired: None,
                 pending: None,
+                sent_tsc: 0,
                 result: None,
                 buf: vec![0; if i < active { rx } else { 0 }].into_boxed_slice(),
                 len: 0,
@@ -288,11 +291,15 @@ impl<const N: usize> RestPool<N> {
         }
         let sent = c.send_plain(&self.tx[..n]);
         self.tx[..n].fill(0);
-        if let Err(e) = sent {
-            retire(lane, ErrBits::IO);
-            return Err(RestErr::Send(e));
-        }
+        let ok = match sent {
+            Ok(ok) => ok,
+            Err(e) => {
+                retire(lane, ErrBits::IO);
+                return Err(RestErr::Send(e));
+            }
+        };
         lane.pending = Some((req.tag, now_tsc));
+        lane.sent_tsc = ok.sent_tsc;
         lane.len = 0;
         lane.ts = None;
         lane.result = None;
@@ -409,10 +416,14 @@ impl<const N: usize> RestPool<N> {
         self.lanes.iter().any(|l| l.result.is_some())
     }
     pub fn pending_conn(&self, tag: ReqTag) -> Option<ConnId> {
+        self.pending_sent(tag).map(|(id, _)| id)
+    }
+    /// The connection of an in-flight request and the TSC right after its `sendmsg` returned.
+    pub fn pending_sent(&self, tag: ReqTag) -> Option<(ConnId, u64)> {
         self.lanes
             .iter()
             .find(|l| l.pending.is_some_and(|p| p.0 == tag))
-            .map(|l| l.id)
+            .map(|l| (l.id, l.sent_tsc))
     }
     /// Drain: retire all lanes for reclamation by their connector.
     pub fn retire_all(&mut self) {

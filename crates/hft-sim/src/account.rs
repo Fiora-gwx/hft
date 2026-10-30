@@ -1259,6 +1259,7 @@ impl SimExchange {
                 lvl: 0,
                 unexp: 0,
                 unexp_ts: 0,
+                exp_at: 0,
             };
             if let Some(x) = a.orders.get_mut(k) {
                 *x = o;

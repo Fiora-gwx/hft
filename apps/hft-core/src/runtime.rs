@@ -31,26 +31,34 @@ pub fn policy(c: &Config, task: &str) -> Result<Thread, Error> {
         .cloned()
         .ok_or_else(|| Error::config("ThreadPlan", task))
 }
+/// Whether `cpu` is in the kernel's isolated list (`isolated`, the text of
+/// `/sys/devices/system/cpu/isolated`, e.g. `2-5,7`).
+pub fn in_cpu_list(isolated: &str, cpu: u16) -> bool {
+    isolated.trim().split(',').any(|part| {
+        let (first, last) = part.split_once('-').unwrap_or((part, part));
+        first
+            .parse::<u16>()
+            .ok()
+            .zip(last.parse::<u16>().ok())
+            .is_some_and(|(first, last)| first <= cpu && cpu <= last)
+    })
+}
 pub fn pin(t: &Thread) -> Result<(), Error> {
-    if t.idle == Idle::Spin {
-        let isolated = std::fs::read_to_string("/sys/devices/system/cpu/isolated").unwrap_or_default();
-        let allowed = t.core.is_some_and(|cpu| {
-            isolated.trim().split(',').any(|part| {
-                let (first, last) = part.split_once('-').unwrap_or((part, part));
-                first
-                    .parse::<u16>()
-                    .ok()
-                    .zip(last.parse::<u16>().ok())
-                    .is_some_and(|(first, last)| first <= cpu && cpu <= last)
-            })
-        });
-        if !allowed {
-            return Err(Error::runtime(
-                "ThreadPolicy",
-                "spin requires a dedicated isolated CPU",
-                3,
-            ));
-        }
+    let isolated = || std::fs::read_to_string("/sys/devices/system/cpu/isolated").unwrap_or_default();
+    if t.idle == Idle::Spin && !t.core.is_some_and(|cpu| in_cpu_list(&isolated(), cpu)) {
+        return Err(Error::runtime(
+            "ThreadPolicy",
+            "spin requires a dedicated isolated CPU",
+            3,
+        ));
+    }
+    // sim-venue shares the prod instance with live tasks: never on an isolated (hot) CPU.
+    if t.task == crate::config::SIM_VENUE && t.core.is_some_and(|cpu| in_cpu_list(&isolated(), cpu)) {
+        return Err(Error::runtime(
+            "ThreadPolicy",
+            format!("{}: sim-venue on an isolated CPU", t.name),
+            3,
+        ));
     }
     if let Some(cpu) = t.core {
         hft_rt::pin_current_thread(cpu)
@@ -115,7 +123,7 @@ fn claim(
         "persist" => HbKind::Persist,
         "housekeeping" => HbKind::Housekeeping,
         "ctl-gateway" => HbKind::Ctl,
-        "sim-gw" => HbKind::Gw,
+        crate::config::SIM_GW | crate::config::SIM_VENUE => HbKind::Gw,
         "paper-feed" => HbKind::Feed,
         s if s.starts_with("gw:") => HbKind::Gw,
         s if s.starts_with("feed:") => HbKind::Feed,
@@ -372,15 +380,10 @@ pub fn join_all_within(
     }
     first.map_or(Ok(()), Err)
 }
-pub fn run(
-    l: Loaded,
-    dry: bool,
-    duration_ms: Option<u64>,
-    secrets: crate::secrets::SecretFiles,
-) -> Result<u8, Error> {
+pub fn run(l: Loaded, duration_ms: Option<u64>, secrets: crate::secrets::SecretFiles) -> Result<u8, Error> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (l, dry, duration_ms, secrets);
+        let _ = (l, duration_ms, secrets);
         Err(Error::runtime(
             "HostCheck",
             "runtime requires Linux (tmpfs journal and Unix ctl); --check and schemas are portable",
@@ -389,17 +392,19 @@ pub fn run(
     }
     #[cfg(target_os = "linux")]
     {
-        run_linux(l, dry, duration_ms, secrets)
+        run_linux(l, duration_ms, secrets)
     }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn run_linux(
     mut l: Loaded,
-    dry: bool,
     duration_ms: Option<u64>,
     secrets: crate::secrets::SecretFiles,
 ) -> Result<u8, Error> {
+    // Every mode-dependent branch below reads the assembly resolved at load.
+    let assembly = l.assembly;
+    let dry = assembly.is_sim();
     let c = &l.cfg;
     l.startup_trace.mark(3, false);
     #[cfg(target_os = "linux")]
@@ -442,7 +447,7 @@ fn run_linux(
     // Recovery is deliberately rejected above; the fresh session has no snapshot epoch.
     let epoch = lease.reserve_epoch(&meta, None)?;
     #[cfg(target_os = "linux")]
-    crate::budget::preflight(c, dry)?;
+    crate::budget::preflight(c, assembly)?;
     l.setup = hft_sequencer::EngineSetup::decode_blob(
         &l.configs.engine_blob,
         &l.rd,
@@ -519,9 +524,11 @@ fn run_linux(
             let vtask = crate::venues::assemble(
                 c, &l.setup, name, v, rd, clock, &utc, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
             )?;
-            let (task, gw, js, baseline) = vtask;
-            initial_balances.extend(baseline.balances);
-            initial_positions.extend(baseline.positions);
+            let (task, gw, js, baselines) = vtask;
+            for b in baselines {
+                initial_balances.extend(b.balances);
+                initial_positions.extend(b.positions);
+            }
             venue_tasks.push(task);
             if let Some(g) = gw {
                 gateway_inputs.push(g);
@@ -730,13 +737,20 @@ fn run_linux(
         }
         Ok(())
     })?;
-    if dry {
+    // The simulated exchange: the sim instance's sim-gw, or a prod instance's sim-venue for its Sim
+    // accounts (Shadow variants). Both tail the seq journal behind the decision barrier
+    // (`paper::barrier`); the replies are Inputs on rep-sim, the lowest-priority ring.
+    if let Some(sim_task) = c.sim_task() {
         let p = c
             .sim
             .as_ref()
             .ok_or_else(|| Error::config("SimConfig", "missing sim"))?;
         let tail_cfg = storage::reader_cfg(c);
-        let mut gateway = paper::Gateway::new(
+        let model = paper::model(p)?;
+        if let Some(sha) = &model.calib_sha {
+            eprintln!("hft-core: {sim_task} calibration table sha256 {sha}");
+        }
+        let gateway = paper::Gateway::new(
             paper::exchange(p, rd, clock.hz_milli)?,
             storage::reader(c)?,
             Box::new(move |seq| {
@@ -750,7 +764,21 @@ fn run_linux(
             rd,
             epoch,
         );
-        workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
+        // Pools draw by the condition of the Sim accounts' venues (hft-sim README "条件跟踪与校准表").
+        let mut gateway = match model.venue.pools {
+            Some(_) => {
+                let venues = (1..=255u8)
+                    .map(|a| rd.account(hft_types::AccountId(a)))
+                    .filter(|m| m.id.0 != 0 && matches!(m.kind, hft_refdata::AccountKind::Sim(_)))
+                    .fold(0u64, |v, m| v | m.venues);
+                gateway.with_condition(
+                    hft_sim::CondTracker::new(model.cond, venues, clock.hz_milli),
+                    utc.clone(),
+                )
+            }
+            None => gateway,
+        };
+        workers.spawn(policy(c, sim_task)?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
                 t.heartbeat.beat();
                 if !gateway.poll(hft_rt::tsc_now())? {
@@ -759,6 +787,8 @@ fn run_linux(
             }
             Ok(())
         })?;
+    }
+    if dry {
         workers.spawn(policy(c, "paper-feed")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
                 t.heartbeat.beat();

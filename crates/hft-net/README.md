@@ -269,6 +269,7 @@ pub struct BuildReq {
     pub src_ip_idx: u8,             // 本实例出口 IP 表 src_ips[] 的下标
     pub rx_queue: u16,              // 目标 RX 队列;只在 rss_plan 启用时使用
     pub deadline_ns: i64,           // 整个作业的截止;与各阶段超时先到者生效
+    pub account: AccountId,         // 私有连接(下单、用户流、账户 REST)所属账户,供会话取凭据;0 = 不属于账户(行情、公共 REST)
 }
 
 /// 一个池只连一个端点(BuildReq.endpoint);同一 venue 的多个 REST 端点由上层各持一个池(hft-venue §4a)。
@@ -283,6 +284,8 @@ impl<const N: usize> RestPool<N> {
     pub fn submit(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr>;
     /// 同 submit,但可以占用保留的通道:没有空闲的 Open 通道才 Busy。
     pub fn submit_urgent(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr>;
+    /// 在途请求的连接与其 sendmsg 返回后的 TSC(SendOk::sent_tsc);无此在途请求 → None。
+    pub fn pending_sent(&self, tag: ReqTag) -> Option<(ConnId, u64)>;
     /// 只读有在途请求的连接;返回一个完整响应(已去 chunk)或一个失败(该连接随之退役)。
     pub fn poll(&mut self, now_tsc: u64) -> Option<Result<RestResp<'_>, RestFail>>;
     /// 对没有在途请求的连接各做一次非阻塞读,只为发现对端关闭(EOF、RST、close_notify)或协议错误(未请求的数据),

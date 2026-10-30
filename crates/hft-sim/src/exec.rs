@@ -34,6 +34,7 @@ impl SimExchange {
     pub(crate) fn exec_cmd(&mut self, pc: &PendCmd) {
         let ai = usize::from(pc.acct);
         match pc.cmd.op {
+            GwOp::Place if pc.phase == 1 => self.exec_taker_match(ai, pc),
             GwOp::Place => self.exec_place(ai, pc),
             GwOp::Cancel => self.exec_cancel(ai, pc),
             GwOp::Amend => self.exec_amend(ai, pc),
@@ -228,6 +229,10 @@ impl SimExchange {
             self.push_no_conn(ai, pc, venue, 0);
             return;
         }
+        if self.vm.tombstone && self.take_tomb(ai, c.slot.0, c.r#gen) {
+            self.refuse_cancelled(ai, pc, ii);
+            return;
+        }
         let due = self.resp_due(ai, t);
         let ex_ts = ii.map_or(0, |ii| self.inst_ex_ts(ii));
         let post_only = c.tif == Tif::PostOnly || OrderFlags(c.oflags).contains(OrderFlags::POST_ONLY);
@@ -263,6 +268,7 @@ impl SimExchange {
             lvl: 0,
             unexp: 0,
             unexp_ts: 0,
+            exp_at: 0,
         };
         let verdict = match ii {
             Some(ii) if in_acct => self.check_place(ai, ii, &c, t),
@@ -315,9 +321,104 @@ impl SimExchange {
             return;
         };
         o.status = st::NEW;
+        if self.vm.gtd_ms > 0 {
+            o.exp_at = t.saturating_add(self.ms_to_tsc(u64::from(self.vm.gtd_ms)));
+        }
         if let Some(slot) = self.accts.get_mut(ai).and_then(|a| a.orders.get_mut(k)) {
             *slot = o;
         }
+        if o.tif != Tif::PostOnly
+            && o.tif != Tif::Gtc
+            && let Some(td) = self.vm.taker
+        {
+            // Marketable order: matched after the venue's matching delay (README "吃单延迟").
+            let us = match self.pool_draw(ai, crate::types::PoolLeg::Taker) {
+                Some(us) => us,
+                None => {
+                    let slow = td.slow_ppm > 0
+                        && self.accts.get_mut(ai).is_some_and(|a| {
+                            crate::models::below(&mut a.rng, 1_000_000) < u64::from(td.slow_ppm)
+                        });
+                    if slow { td.slow_us } else { td.base_us }
+                }
+            };
+            let at = t.saturating_add(self.us_to_tsc(us));
+            self.push_cmd(ai, at, c, 1);
+            return;
+        }
+        self.match_new(ai, k, ii, t, due, ex_ts);
+    }
+
+    /// The delayed match of a marketable order (`VenueModel::taker`): Ack, fills against the book
+    /// of this time, the rest expired; reported `TakerDelay::resp_us` later.
+    fn exec_taker_match(&mut self, ai: usize, pc: &PendCmd) {
+        let c = pc.cmd;
+        let t = pc.arrive;
+        let Some(k) = self.find_slot(ai, c.slot.0) else {
+            return;
+        };
+        let o = self.order_at(ai, k);
+        if o.r#gen != c.r#gen || o.resting || o.status != st::NEW || o.filled != 0 {
+            return;
+        }
+        let ii = usize::from(o.inst);
+        let resp = self.vm.taker.map_or(0, |d| d.resp_us);
+        let due = t.saturating_add(self.us_to_tsc(resp));
+        let ex_ts = self.inst_ex_ts(ii);
+        self.match_new(ai, k, ii, t, due, ex_ts);
+    }
+
+    /// A tombstone `(slot, gen)` of account `ai` was left by an earlier cancel: removed, true.
+    fn take_tomb(&mut self, ai: usize, slot: u32, r#gen: u32) -> bool {
+        match self.tombs.iter().position(|x| *x == (ai as u8, slot, r#gen)) {
+            Some(k) => {
+                self.tombs.remove(k);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// An order whose cancel arrived first: refused, reported as `CancelAck` (the Polymarket
+    /// "Already canceled" answer, hft-venue/venue-polymarket); it never rests.
+    fn refuse_cancelled(&mut self, ai: usize, pc: &PendCmd, ii: Option<usize>) {
+        let c = pc.cmd;
+        let due = self.resp_due(ai, pc.arrive);
+        let ex_ts = ii.map_or(0, |ii| self.inst_ex_ts(ii));
+        let o = Order {
+            used: true,
+            status: st::CANCELLED,
+            slot: c.slot.0,
+            r#gen: c.r#gen,
+            inst: ii.map_or(u16::MAX, |x| x as u16),
+            side: c.side,
+            tif: c.tif,
+            px: c.px.0,
+            qty: c.qty.0,
+            ..Order::EMPTY
+        };
+        let ev = self.order_event(
+            ai,
+            &o,
+            OrderEventKind::CancelAck,
+            o.px,
+            o.qty,
+            0,
+            AssetId(0),
+            0,
+            0,
+            ex_ts,
+            due,
+        );
+        self.push_event_raw(ai, ev, due);
+        if let Some(a) = self.accts.get_mut(ai) {
+            a.counters.tombstone_refusals += 1;
+        }
+    }
+
+    /// Ack, then (non-post-only) the taker match of new order `k`, then rest / finish.
+    fn match_new(&mut self, ai: usize, k: usize, ii: usize, t: u64, due: u64, ex_ts: i64) {
+        let o = self.order_at(ai, k);
         let ack = self.order_event(
             ai,
             &o,
@@ -385,7 +486,7 @@ impl SimExchange {
     /// Order `k` becomes resting with its remaining quantity locked.
     fn rest(&mut self, ai: usize, k: usize) {
         let o = self.order_at(ai, k);
-        let shown = if self.tune.maker_fill == crate::types::MakerFill::Queue {
+        let shown = if self.queue_model() {
             self.level_qty(usize::from(o.inst), o.side, o.px)
         } else {
             0
@@ -418,11 +519,22 @@ impl SimExchange {
     ) {
         let o = self.order_at(ai, k);
         let ii = usize::from(o.inst);
-        let rate = self
-            .accts
-            .get(ai)
-            .and_then(|a| a.fees.get(ii))
-            .map_or(0, |f| if maker { f.maker.0 } else { f.taker.0 });
+        let rate = match self.vm.fee {
+            crate::types::FeeModel::Refdata => self
+                .accts
+                .get(ai)
+                .and_then(|a| a.fees.get(ii))
+                .map_or(0, |f| if maker { f.maker.0 } else { f.taker.0 }),
+            // k × p × (1 − p) × qty = notional × k × (1 − p): a rate of notional.
+            crate::types::FeeModel::BinaryTaker { k_e9 } if !maker => {
+                let one = self
+                    .insts
+                    .get(ii)
+                    .map_or(1, |r| 10i64.saturating_pow(u32::from(r.px_exp.unsigned_abs())));
+                sat64(i128::from(k_e9) * i128::from(one.saturating_sub(px).max(0)) / i128::from(one.max(1)))
+            }
+            crate::types::FeeModel::BinaryTaker { .. } => 0,
+        };
         let (fee, fee_asset, cash) = self.settle_fill(ai, ii, o.side, px, q, rate, due);
         let perp = self.insts.get(ii).is_some_and(|r| r.perp);
         if let Some(x) = self.accts.get_mut(ai).and_then(|a| a.orders.get_mut(k)) {
@@ -798,7 +910,16 @@ impl SimExchange {
             return;
         }
         let t = pc.arrive;
-        let due = self.resp_due(ai, t);
+        if self.vm.tombstone && o.is_none() {
+            // The cancel reached the venue before its order: the venue remembers the order id,
+            // the order is refused when it arrives (`refuse_cancelled`); no report now.
+            if self.tombs.len() >= crate::TOMB_CAP {
+                self.tombs.pop_front();
+            }
+            self.tombs.push_back((ai as u8, c.target_slot.0, c.r#gen));
+            return;
+        }
+        let due = self.cancel_resp_due(ai, t);
         match (k, o) {
             (Some(k), Some(o)) if o.resting => {
                 let ex = self.inst_ex_ts(usize::from(o.inst));

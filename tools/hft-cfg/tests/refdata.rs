@@ -153,7 +153,8 @@ fn tool_131_account_validation() {
                 SPARE,
                 "label = \"spare\"\nkind = \"live\"\nis_prod = false\nbound_instance = \"pc-main\"\n",
             )],
-            msg: "InstanceMultiBound",
+            // An instance binds an account set (hft-refdata `accounts_of`): accepted.
+            exit: 0,
             ..R
         },
         Row {

@@ -33,7 +33,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 协议接口 | VEN-018、VEN-064、VEN-341、VEN-390 |
-| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403 |
+| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403、VEN-411、VEN-412 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264、VEN-404 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
 | 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402、VEN-405 |
@@ -44,7 +44,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
 | 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397、VEN-399 |
-| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402、VEN-405–VEN-408 |
+| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402、VEN-405–VEN-409、VEN-412、VEN-413 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
 | 5. 心跳 | VEN-120、VEN-134、VEN-280–VEN-283 |
@@ -3820,6 +3820,50 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-403.4 | `Query{target_slot: 64}` | 同 .3,`op: Query`,查单帧带槽 64 的 client id 与 `EX-64` 的值 |
 | VEN-403.5 | `MirrorRestore{slot: 65, …}` | `ConnState{Degraded, reason: 13}`;无镜像 65 |
 
+### VEN-412 撤单的独立限速窗口(`Cancels`)
+
+- 规则:[4. `GwRuntime::poll_once` 的循环结构](README.md#4-gwruntimepoll_once-的循环结构)(第 2 步限速兜底)
+- 级别:table
+- 里程碑:M4
+- 前置:`StubProto`,账户 A1、A2 同一 gw;refdata 在 `rd_stub` 的 Account/Orders 10 每 1 s 之外另有 Account/Cancels 20 每 1 s(.4 用 `rd_stub`,没有 Cancels);每批命令后轮询至处理完
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_412_cancels_have_their_own_bucket`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-412.1 | A1 11 条 `Place` | 前 10 条非 `RateLimited`,第 11 条 `RateLimited` |
+| VEN-412.2 | 接着 A1 20 条 `Cancel`;再 1 条 `Cancel` 与 1 条 `CancelAll` | 20 条都非 `RateLimited`;后两条 `RateLimited` |
+| VEN-412.3 | A2 `Cancel`;A1 `ResetRate` 后 `Place` 与 `Cancel` | 三条都非 `RateLimited` |
+| VEN-412.4 | `rd_stub`:A1 10 条 `Place` 后 1 条 `Cancel` | 该 `Cancel` `RateLimited`(撤单计入 Orders,行为不变) |
+| VEN-412.5 | `RateCounters::cancels`:只有 Orders 行;Orders 与 Cancels 行时分别收 Orders、Cancels 的 `RateObs{used 20, limit 20, 1000 ms}`;`RateCounters::new` 收 Cancels 的观测 | 空;Orders 观测后仍可 `take`、Cancels 观测后不可;`new` 的计数不受 Cancels 观测影响 |
+
+### VEN-413 私有建连带账户;每个账户一个 REST 池
+
+- 规则:[4. `GwRuntime::poll_once` 的循环结构](README.md#4-gwruntimepoll_once-的循环结构)、[7. 会话建立](README.md#7-会话建立warm-线程-conn-buildersessiondriver)
+- 级别:table
+- 里程碑:M4
+- 前置:`Stub<2048, V_REST_ORDERS | V_USER_STREAM>`(订单类 op 全走 REST,有独立用户流),账户 A1、A2 同一 gw,尚无连接;每条 `BuildReq` 都完成交接
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_413_private_builds_and_rest_pools_per_account`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-413.1 | 轮询至 6 条私有连接交接 | 每个账户恰 3 条 `BuildReq` 的 `account` 是它:2 条 `Order`、1 条 `UserStream` |
+| VEN-413.2 | `SetEpoch{5}`;A1、A2 各 `set_rest_pools`(2 条、不保留);轮询至 4 条交接 | 4 条都是 `Rest`,A1、A2 各 2 条 |
+| VEN-413.3 | A2 `Place{slot 7, S2}`、A1 `Place{slot 7, S1}` | 两条 `SendReport{Written}`,各自的 `conn` 属于本账户的 REST 池 |
+| VEN-413.4 | 再给 A2 `set_rest_pools` | `Err` |
+
+### VEN-411 槽镜像按账户:两个账户的同一槽号互不覆盖
+
+- 规则:[出环:`OutMsg = GwCmd`](README.md#出环outmsg--gwcmd)(槽镜像)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`,账户 A1、A2 同一 gw
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_411_slot_mirror_per_account`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-411.1 | A1 `Place{slot 7, gen 1, S1}`、A2 `Place{slot 7, gen 5, S2}` | `mirror_of(A1, 7)` = (live, A1, S1, gen 1);`mirror_of(A2, 7)` = (live, A2, S2, gen 5) |
+| VEN-411.2 | A2 `Cancel{target 7}`;A1 `Cancel{target 7}` | 各一条 `SendReport{Written, target_slot 7}`,`target_gen` 依次 5、1 |
+
 ### VEN-410 空闲圈调用 venue 的空闲工作,按账户轮转
 
 - 规则:[4. `GwRuntime::poll_once` 的循环结构](README.md#4-gwruntimepoll_once-的循环结构)(第 8 步)
@@ -3889,3 +3933,16 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-408.1 | `Cancel{target_slot 2}` × (n + 1),k = 0..=n | 只有第 n + 1 条立即得 `SendReport{NoConn, conn 0}`;`rest_cancel_queued` = n、`rest_cancel_dropped` = 1 |
 | VEN-408.2 | 轮询于 `t_0 + 10 s`;再于 `t_{n−1} + 10 s + 1`;其后一条连接的应答交出 | 第一次无报告;第二次 n 条 `SendReport{NoConn, target_slot 2}`;应答交出后无报告、无撤单编码 |
 | VEN-408.3 | `Cancel{target_slot 3}` 两条(第一条用空出的连接),再 `retire_all` | 第一条 `Written`;`retire_all` 时第二条得 `SendReport{NoConn}` |
+
+### VEN-409 REST 订单的 `SendReport.sent_tsc` 与 `RawTx` 取写出返回的时刻
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)(第 4、6 步)
+- 级别:table
+- 里程碑:M3
+- 前置:`order_channel = Rest` 的桩协议,一个两条连接的 REST 池;两条连接的下一次写出都在 4 777 返回
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_409_rest_send_report_carries_the_write_tsc`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-409.1 | `Place{slot 7}`,轮询于 4 000 | 恰一条 `SendReport{Written}`,`sent_tsc` = 4 777(写出返回时刻,不是本圈开始的 4 000) |
+| VEN-409.2 | 同上 | 该请求的 `RawTx` 记录头 `tsc` = 4 777 |

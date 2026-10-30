@@ -214,4 +214,7 @@ impl RejectBits {
     pub const LINK_FUNDS: Self = RejectBits(1 << 29);
     /// OMS order or link slots are exhausted; no order was created or sent.
     pub const CAPACITY: Self = RejectBits(1 << 30);
+    /// The order would trade against an open order of another account of the same strategy
+    /// instance (self-trade prevention, hft-sequencer).
+    pub const SELF_TRADE: Self = RejectBits(1 << 31);
 }

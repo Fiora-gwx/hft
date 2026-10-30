@@ -213,6 +213,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                         src_ip_idx: c.src_ip_idx,
                         rx_queue: 0,
                         deadline_ns: ns.saturating_add(i64::from(self.cfg.timeout_ms) * 1_000_000),
+                        account: hft_types::AccountId(0),
                     };
                     match c.connector.submit(req) {
                         Ok(job) => c.building = Some((job, id)),
@@ -276,6 +277,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                         .clock
                         .utc_ns(Tsc(now))
                         .saturating_add(i64::from(self.cfg.timeout_ms) * 1_000_000),
+                    account: hft_types::AccountId(0),
                 };
                 if c.build.try_push(req).is_ok() {
                     work = true;
@@ -530,7 +532,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                 if !valid || self.rate.available(now) {
                     self.tag = self.tag.wrapping_add(1);
                     let sent = if valid {
-                        crate::rest::submit(&mut self.pool, &wire, self.tag, false, now)
+                        crate::rest::submit(&mut self.pool, &wire, self.tag, false, now).map(|(conn, _)| conn)
                     } else {
                         Err(RestErr::Proto)
                     };

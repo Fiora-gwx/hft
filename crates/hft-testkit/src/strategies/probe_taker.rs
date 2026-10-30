@@ -107,6 +107,20 @@ pub struct TakerGroup {
     pub closes: u32,
 }
 
+/// Exported features (research export fixture): the first group's opens and closes.
+pub const FEATURES: [hft_strategy_sdk::ColumnDesc; 2] = [
+    hft_strategy_sdk::ColumnDesc {
+        name: "g0_opens",
+        unit: hft_strategy_sdk::features::Unit::Count,
+        exp: 0,
+    },
+    hft_strategy_sdk::ColumnDesc {
+        name: "g0_closes",
+        unit: hft_strategy_sdk::features::Unit::Count,
+        exp: 0,
+    },
+];
+
 /// The strategy, generic over its descriptor variant (`NP = true` → `probe-np`).
 #[derive(Debug)]
 pub struct ProbeTakerT<P: TakerCfg> {
@@ -423,5 +437,11 @@ impl<P: TakerKind> Strategy for ProbeTakerT<P> {
             }
         }
         Ok(())
+    }
+    const FEATURES: &'static [hft_strategy_sdk::ColumnDesc] = &FEATURES;
+    fn export_features(&self, row: &mut hft_strategy_sdk::FeatureRow<'_>) {
+        let g = self.groups.first().filter(|_| self.n > 0);
+        row.put_opt(g.map(|g| i64::from(g.opens)));
+        row.put_opt(g.map(|g| i64::from(g.closes)));
     }
 }

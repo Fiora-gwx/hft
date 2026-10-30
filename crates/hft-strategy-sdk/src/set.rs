@@ -7,6 +7,7 @@ use crate::advice::AdviceOut;
 use crate::ctx::{Ctx, SubsBuilder};
 use crate::desc::CmdDesc;
 use crate::event::EventRef;
+use crate::features::{ColumnDesc, FeatureRow};
 use crate::group::GroupTable;
 use crate::layout::ModelLayoutDesc;
 use crate::params::ParamError;
@@ -110,4 +111,10 @@ pub trait StrategySet: 'static {
     fn schema_json(kind_id: u16) -> Option<String>;
     /// Strategy command descriptors; outside the set → empty.
     fn cmds(kind_id: u16) -> &'static [CmdDesc];
+    /// `Strategy::FEATURES` of the kind (README "特征导出"); outside the set → empty.
+    fn feature_columns(_kind_id: u16) -> &'static [ColumnDesc] {
+        &[]
+    }
+    /// `Strategy::export_features` of the instance (cold: research export only).
+    fn export_features(_s: &Self::Inst, _row: &mut FeatureRow<'_>) {}
 }

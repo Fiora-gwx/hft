@@ -402,3 +402,85 @@ fn seq_446_anchor_input_replay() {
     assert_eq!(utc_of_record(&log, bbo_at(&log, tl)), Some(ul), "SEQ-446.5");
     let _ = e0;
 }
+
+/// SEQ-450: with the same calibration pairs, the engine UTC line and hft-rt's published
+/// warm-reader line agree when the engine is behind (both step onto the target line), and both
+/// never go back when it is ahead (they slew differently: lead decay vs rate cut).
+#[test]
+fn seq_450_engine_line_and_published_line_agree() {
+    use hft_rt::{CalibPair, UtcClock};
+    // 1 GHz counter, boot pair (0, 10^12 ns).
+    let hz = 1_000_000_000_000u64;
+    let boot = CalibPair {
+        tsc: Tsc(0),
+        realtime_ns: 1_000_000_000_000,
+        phc_ns: 0,
+        err_ns: 0,
+    };
+    let clock = TscClock::from_hz_milli(hz, boot);
+    let (reader, mut publisher) = UtcClock::shared(&clock, 1_000);
+    // .1 behind by 2 ms at 10 ms: both lines step to the target and then agree (within the
+    // rounding of the published multiplier, ≤ 2 ns over 10 s).
+    let pair = CalibPair {
+        tsc: Tsc(10_000_000),
+        realtime_ns: 1_000_012_000_000,
+        phc_ns: 0,
+        err_ns: 0,
+    };
+    publisher.update(&pair, Some(hz));
+    let a = UtcAnchor {
+        tsc: pair.tsc,
+        realtime_ns: pair.realtime_ns,
+        hz_milli: hz,
+        err_ns: 0,
+        _pad: 0,
+    };
+    let cur = 1_000_010_000_000;
+    let line = UtcLineRow::anchored(cur, pair.tsc, &a, hz);
+    for dt in [0u64, 1_000_000, 1_000_000_000, 10_000_000_000] {
+        let t = Tsc(10_000_000 + dt);
+        let (e, p) = (line.utc_at(t), reader.utc_ns(t));
+        assert!((e - p).abs() <= 2, "SEQ-450.1 dt {dt}: engine {e} published {p}");
+    }
+    // .2 ahead by 1 ms at 20 s: neither goes back; after the 500 ppm slew (2 s) plus one horizon
+    // both are on the target line again.
+    let t0 = Tsc(20_010_000_000);
+    let before = (line.utc_at(t0), reader.utc_ns(t0));
+    let pair = CalibPair {
+        tsc: t0,
+        realtime_ns: before.0 - 1_000_000,
+        phc_ns: 0,
+        err_ns: 0,
+    };
+    publisher.update(&pair, Some(hz));
+    let a = UtcAnchor {
+        tsc: pair.tsc,
+        realtime_ns: pair.realtime_ns,
+        hz_milli: hz,
+        err_ns: 0,
+        _pad: 0,
+    };
+    let line = UtcLineRow::anchored(before.0, t0, &a, hz);
+    assert!(
+        line.utc_at(t0) >= before.0 && reader.utc_ns(t0) >= before.1,
+        "SEQ-450.2"
+    );
+    let late = Tsc(t0.0 + 4_000_000_000);
+    let target = pair.realtime_ns + 4_000_000_000;
+    assert_eq!(line.utc_at(late), target, "SEQ-450.2 engine on target");
+    publisher.update(
+        &CalibPair {
+            tsc: late,
+            realtime_ns: target,
+            phc_ns: 0,
+            err_ns: 0,
+        },
+        Some(hz),
+    );
+    let p = reader.utc_ns(Tsc(late.0 + 1_000_000_000));
+    assert!(
+        (p - (target + 1_000_000_000)).abs() <= 2,
+        "SEQ-450.2 published on target: {p}"
+    );
+    let _ = UTC_SLEW_PPM;
+}

@@ -1,4 +1,5 @@
-//! VEN-196–VEN-203, VEN-205, VEN-206, VEN-240, VEN-241, VEN-246, VEN-403: the gw send path.
+//! VEN-196–VEN-203, VEN-205, VEN-206, VEN-240, VEN-241, VEN-246, VEN-403, VEN-412: the gw send
+//! path.
 #![allow(
     clippy::disallowed_types,
     clippy::disallowed_macros,
@@ -788,4 +789,136 @@ fn ven_403_last_slot_is_mirrored() {
         "VEN-403.5"
     );
     assert!(h.rt.mirror(65).is_none(), "VEN-403.5");
+}
+
+/// VEN-411: the slot mirror is per account — the same slot id on two accounts keeps two entries,
+/// and a Cancel targets its own account's entry.
+#[test]
+fn ven_411_slot_mirror_per_account() {
+    let mut h = gw_full::<StubProto>(g0(), &[A1, A2], GhOpts::default());
+    // .1 slot 7 on both accounts: two entries, each with its own inst and gen.
+    let a = h.place(A1, 7, 1, S1, false);
+    let b = h.place(A2, 7, 5, S2, false);
+    h.cmd(a);
+    h.cmd(b);
+    h.poll(3_000_000);
+    h.reps();
+    let (ma, mb) = (h.rt.mirror_of(A1, 7).unwrap(), h.rt.mirror_of(A2, 7).unwrap());
+    assert_eq!(
+        (ma.live, ma.account, ma.inst, ma.r#gen),
+        (true, A1, S1, 1),
+        "VEN-411.1"
+    );
+    assert_eq!(
+        (mb.live, mb.account, mb.inst, mb.r#gen),
+        (true, A2, S2, 5),
+        "VEN-411.1"
+    );
+    // .2 a Cancel of account 2's slot 7 reports account 2's generation; account 1's likewise.
+    for (acct, want) in [(A2, 5), (A1, 1)] {
+        let c = h.targeted(GwOp::Cancel, acct, 7);
+        h.cmd(c);
+        h.poll(4_000_000);
+        let r = reports(&h.reps());
+        let r = r.iter().find(|r| r.account == acct).unwrap();
+        assert_eq!(
+            (r.status, r.target_slot, r.target_gen),
+            (SendStatus::Written, SlotId(7), want),
+            "VEN-411.2"
+        );
+    }
+}
+
+#[test]
+fn ven_412_cancels_have_their_own_bucket() {
+    use hft_refdata::{LimitBucket, LimitScope, RateLimit};
+    let cancels = RateLimit {
+        scope: LimitScope::Account,
+        bucket: LimitBucket::Cancels,
+        limit: 20,
+        window_ms: 1000,
+        default_cost: 1,
+    };
+    let rd = rd_with(&RdOpts {
+        rest_limit: Some(cancels),
+        ..RdOpts::default()
+    });
+    let t = 3_000_000;
+    // Polls until every queued command is done (commands per loop are bounded).
+    let limited = |h: &mut Gh<StubProto>, now: u64| -> Vec<bool> {
+        for n in 0..8 {
+            h.poll(now + n);
+        }
+        reports(&h.reps())
+            .iter()
+            .map(|r| r.status == SendStatus::RateLimited)
+            .collect()
+    };
+    let mut h = gw_open(
+        gw_rd::<StubProto, 2048>(g0(), &[A1, A2], GhOpts::default(), rd).unwrap(),
+        &[A1, A2],
+    );
+    // .1 places use the Orders window (10/s): the 11th is refused.
+    for i in 0..11 {
+        let c = h.place(A1, 100 + i, 1, S1, false);
+        h.cmd(c);
+    }
+    let r = limited(&mut h, t);
+    assert_eq!(r.iter().filter(|x| **x).count(), 1, "VEN-412.1 {r:?}");
+    assert!(r[10], "VEN-412.1");
+    // .2 with Orders exhausted, cancels still go out on the Cancels window (20/s): the 21st is
+    // refused; CancelAll takes the same window.
+    for i in 0..20 {
+        let c = h.targeted(GwOp::Cancel, A1, 100 + i % 10);
+        h.cmd(c);
+    }
+    assert!(limited(&mut h, t + 10).iter().all(|x| !x), "VEN-412.2");
+    let c = h.targeted(GwOp::Cancel, A1, 100);
+    h.cmd(c);
+    h.cmd(base(GwOp::CancelAll, A1));
+    assert_eq!(limited(&mut h, t + 20), [true, true], "VEN-412.2");
+    // .3 the other account is untouched; ResetRate clears both windows.
+    let c = h.targeted(GwOp::Cancel, A2, 100);
+    h.cmd(c);
+    h.cmd(base(GwOp::ResetRate, A1));
+    let c = h.place(A1, 120, 1, S1, false);
+    h.cmd(c);
+    let c = h.targeted(GwOp::Cancel, A1, 120);
+    h.cmd(c);
+    assert_eq!(limited(&mut h, t + 30), [false, false, false], "VEN-412.3");
+    // .4 without a Cancels row (rd_stub) a cancel takes the Orders window, as before.
+    let mut h = gw::<StubProto>();
+    for i in 0..10 {
+        let c = h.place(A1, 100 + i, 1, S1, false);
+        h.cmd(c);
+    }
+    let c = h.targeted(GwOp::Cancel, A1, 100);
+    h.cmd(c);
+    let r = limited(&mut h, t);
+    assert_eq!(r.iter().filter(|x| **x).count(), 1, "VEN-412.4 {r:?}");
+    assert!(r[10], "VEN-412.4");
+    // .5 the Cancels counters: only `Cancels` rows and observations; none declared = empty.
+    let orders = RateLimit {
+        bucket: LimitBucket::Orders,
+        ..cancels
+    };
+    assert!(
+        hft_venue::RateCounters::cancels(&[orders], |ms| ms).is_empty(),
+        "VEN-412.5"
+    );
+    let mut c = hft_venue::RateCounters::cancels(&[orders, cancels], |ms| ms);
+    assert!(!c.is_empty(), "VEN-412.5");
+    let obs = |bucket| hft_venue_proto::RateObs {
+        bucket,
+        used: 20,
+        limit: 20,
+        window_ms: 1000,
+    };
+    c.observe_window(obs(LimitBucket::Orders), 0);
+    assert!(c.take(0), "VEN-412.5 an Orders observation leaves Cancels alone");
+    c.observe_window(obs(LimitBucket::Cancels), 0);
+    assert!(!c.take(0), "VEN-412.5");
+    let mut o = hft_venue::RateCounters::new(&[orders, cancels], |ms| ms);
+    o.observe_window(obs(LimitBucket::Cancels), 0);
+    assert!(o.take(0), "VEN-412.5 a Cancels observation leaves Orders alone");
 }

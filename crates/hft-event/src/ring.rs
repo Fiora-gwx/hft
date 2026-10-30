@@ -57,6 +57,25 @@ pub enum RepMsg {
 }
 const _: () = assert!(size_of::<RepMsg>() <= 144);
 
+impl RepMsg {
+    /// The Input record this element becomes (kind + logical body pieces): the fixed body, then
+    /// `bulk` for `AccountConfigReport` / `MarginReport` (their items from the paired bulk ring).
+    pub fn with_parts<R>(&self, bulk: &[u8], f: impl FnOnce(EventKind, &[&[u8]]) -> R) -> R {
+        match self {
+            RepMsg::OrderEvent(b, _) => f(EventKind::ORDER_EVENT, &[b.as_bytes()]),
+            RepMsg::SendReport(b) => f(EventKind::SEND_REPORT, &[b.as_bytes()]),
+            RepMsg::PositionReport(b) => f(EventKind::POSITION_REPORT, &[b.as_bytes()]),
+            RepMsg::BalanceReport(b) => f(EventKind::BALANCE_REPORT, &[b.as_bytes()]),
+            RepMsg::FundingSettle(b) => f(EventKind::FUNDING_SETTLE, &[b.as_bytes()]),
+            RepMsg::ExternalFill(b) => f(EventKind::EXTERNAL_FILL, &[b.as_bytes()]),
+            RepMsg::ConnState(b) => f(EventKind::CONN_STATE, &[b.as_bytes()]),
+            RepMsg::AccountConfigReport(b) => f(EventKind::ACCOUNT_CONFIG_REPORT, &[b.as_bytes(), bulk]),
+            RepMsg::MarginReport(b) => f(EventKind::MARGIN_REPORT, &[b.as_bytes(), bulk]),
+            RepMsg::Note(b) => f(EventKind::NOTE, &[b.as_bytes()]),
+        }
+    }
+}
+
 /// `hk` ring element (housekeeping → sequencer).
 #[derive(Copy, Clone, Debug)]
 pub enum HkMsg {

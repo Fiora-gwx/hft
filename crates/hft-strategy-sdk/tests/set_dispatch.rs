@@ -90,6 +90,28 @@ fn sdk_186_static_queries() {
 /// trait objects, no boxing; `on_event` is one `match` (`cargo expand` is not in the toolchain,
 /// the template is what every expansion is made of).
 #[test]
+fn sdk_215_feature_columns_and_export() {
+    use hft_strategy_sdk::features::NA;
+    // .1 the declared columns per kind; the default is none; outside the set: none.
+    let names: Vec<&str> = ProbeSet::feature_columns(0xFF01).iter().map(|c| c.name).collect();
+    assert_eq!(names, ["mode", "groups"], "SDK-215.1");
+    assert!(ProbeSet::feature_columns(0xFF02).is_empty(), "SDK-215.1");
+    assert!(ProbeSet::feature_columns(0xFF09).is_empty(), "SDK-215.1");
+    // .2 export goes to the instance's kind; the default writes nothing.
+    let v = gt3_views();
+    let echo = EchoProbe::new(s3(0xFF01), &tp(3, &[]), &gt3(), &v.refview()).unwrap();
+    let mut buf = [NA; 4];
+    let mut row = FeatureRow::new(&mut buf);
+    ProbeSet::export_features(&Inst::EchoProbe(echo), &mut row);
+    assert_eq!(row.len(), 2, "SDK-215.2");
+    assert_eq!(buf, [0, 3, NA, NA], "SDK-215.2");
+    let target = TargetProbe::new(s3(0xFF02), &tp2(3, &[]), &gt3(), &v.refview()).unwrap();
+    let mut row = FeatureRow::new(&mut buf);
+    ProbeSet::export_features(&Inst::TargetProbe(target), &mut row);
+    assert!(row.is_empty(), "SDK-215.2");
+}
+
+#[test]
 fn sdk_189_no_dyn_in_expansion() {
     let src = include_str!("../src/set_macro.rs");
     let start = src

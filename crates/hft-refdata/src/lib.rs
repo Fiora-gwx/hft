@@ -103,6 +103,7 @@ pub struct RefData {
     pub(crate) accounts: Box<[AccountMeta]>,
     pub(crate) instances: Box<[InstanceMeta]>,
     pub(crate) instance_account: Box<[u8]>,
+    pub(crate) instance_accounts: Box<[Box<[AccountId]>]>,
     pub(crate) fees: FeeTable,
     pub(crate) insts_of_asset: Box<[Box<[InstId]>]>,
     pub(crate) insts_of_venue: Box<[Box<[InstId]>]>,
@@ -206,10 +207,17 @@ impl RefData {
     pub fn instance(&self, s: StrategyInstanceId) -> Option<&InstanceMeta> {
         self.instances.get(usize::from(s.0).checked_sub(1)?)
     }
-    /// Account bound to the instance; unbound → `None`.
+    /// The instance's primary account (the lowest id bound to it); unbound → `None`.
     pub fn account_of(&self, s: StrategyInstanceId) -> Option<AccountId> {
         let a = *self.instance_account.get(usize::from(s.0))?;
         (s.0 != 0 && a != 0).then_some(AccountId(a))
+    }
+    /// Every account bound to the instance, ascending (empty when unbound).
+    pub fn accounts_of(&self, s: StrategyInstanceId) -> &[AccountId] {
+        if s.0 == 0 {
+            return &[];
+        }
+        self.instance_accounts.get(usize::from(s.0)).map_or(&[], |a| a)
     }
     /// Ascending `InstId`s of an asset.
     pub fn insts_of_asset(&self, a: AssetId) -> &[InstId] {

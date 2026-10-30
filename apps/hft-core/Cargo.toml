@@ -22,7 +22,7 @@ hft-sequencer = { workspace = true, features = ["live"] }
 hft-strategy-sdk.workspace = true
 hft-strategy-registry = { path = "../../strategies/registry" }
 hft-risk.workspace = true
-hft-sim.workspace = true
+hft-sim = { workspace = true, features = ["calib"] }
 hft-ctl = { path = "../../crates/hft-ctl" }
 hft-net.workspace = true
 hft-venue.workspace = true
@@ -55,6 +55,8 @@ hft-ledger.workspace = true
 hft-testkit = { workspace = true, features = ["seq"] }
 tempfile = "3"
 base64 = "0.22"
+# The Polymarket configuration generator behind tests/support and the example pm_sim_config.
+hft-pmcfg = { path = "../../tools/hft-pmcfg" }
 
 [lints]
 workspace = true

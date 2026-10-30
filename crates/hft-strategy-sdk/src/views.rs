@@ -8,7 +8,7 @@ use hft_types::{AccountId, AssetId, GroupId, InstId, Px, RunMode, Side, Tsc, Ven
 use crate::intent::OrderRef;
 use crate::view_types::{
     BboView, FeeView, FundingView, GroupPosView, InstRiskView, LegView, MdStampView, OrderView,
-    PortfolioRead, RiskStateView, TargetView,
+    PortfolioRead, RiskStateView, Stamps, TargetView,
 };
 
 /// Market-data stamps the engine keeps per inst for `Views::md_stamp` (the last this many).
@@ -230,6 +230,30 @@ pub trait Views {
     fn md_stamp(&self, _i: InstId, _n: u64) -> Option<MdStampView> {
         None
     }
+    /// Venue and receive stamps (`kind = MD_BBO`) of the last Bbo that updated `i`'s quote, with
+    /// the visibility of `md_stamp`; `None` before one (also the provided default).
+    #[inline]
+    fn bbo_stamp(&self, _i: InstId) -> Option<MdStampView> {
+        None
+    }
+    /// Time stamps of the Input being delivered. The provided default has only the engine clock
+    /// (`kind`, venue and receive stamps 0).
+    #[inline]
+    fn stamps(&self) -> Stamps {
+        let n = self.now();
+        Stamps {
+            engine_ns: n.engine_ns,
+            utc_ns: n.utc_ns,
+            ..Stamps::NONE
+        }
+    }
+    /// This account's open orders (neither terminal nor free) on `i`, in slot order: the first
+    /// `out.len()` go into `out`; returns how many there are (may exceed `out.len()`). Model side and
+    /// the provided default: 0.
+    #[inline]
+    fn open_orders(&self, _a: AccountId, _i: InstId, _out: &mut [OrderView]) -> usize {
+        0
+    }
 }
 
 /// Model-side views: the advisor's journal-rebuilt state as of the record the Model is processing
@@ -251,6 +275,18 @@ impl<'a> RefView<'a> {
     /// The underlying refdata (engine and test use).
     pub const fn refdata(&self) -> &'a RefData {
         self.rd
+    }
+    /// The instance's account set: every account bound to the same instance as this view's
+    /// account, ascending (the first is the primary account); just this account when it is the
+    /// only one (or unbound).
+    pub fn accounts(&self) -> &'a [AccountId] {
+        let s = self.rd.account(self.account).bound_instance;
+        let set = self.rd.accounts_of(s);
+        if set.is_empty() {
+            core::slice::from_ref(&self.rd.account(self.account).id)
+        } else {
+            set
+        }
     }
     /// Hot row (market kind, tick, lot, min notional, asset). Only for insts referenced by the
     /// instance's GroupSpecs or subscriptions (checked at assembly); others → the NONE row.

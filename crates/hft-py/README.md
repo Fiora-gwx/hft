@@ -111,7 +111,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 ### 1. journal → Arrow
 
 1. `open_journal` 列出热段与冷副本并核对段头 schema 表,读取以 `hft-journal::JournalReader` 进行(`OnGap::Error`,读到 `Pending` 即本次 `events()` 的结尾):冷副本 `O_RDONLY` + `PROT_READ` 映射;同机 RAM 热段同样只读映射,读 `committed_len`(Acquire)确定可读边界。单个段文件路径从该段的引导块读起,读到下一段的 `Begin` 或缺段即结束。`proc_ns` 先用当前段段头的校准对,之后每条 `ClockStatus` 更新校准对。
-2. `events()` 顺序扫描并按 `kind`、`inst`、`account` 与时间窗过滤(跳到 `t0` 附近的段索引优化留待吞吐成为瓶颈时再做)。
+2. `events()` 顺序扫描并按 `kind`、`inst`、`account` 与时间窗过滤;`time = "proc"` 且给了 `t0` 时从起点段读起:段头 `created_utc_ns ≤ t0` 的段中最新一段的前一段(记录的处理时刻不早于所在段的创建;多读一段覆盖滚段处的校准跳变),不足两段时从头读(`journal::start_segment`);`ex`/`hw` 时间窗不跳段(交易所与网卡时间可晚于段的创建)。
 3. 每批(默认 1,000,000 行或段尾)把行存的 `#[repr(C)]` 体**按列转置**进 Arrow 缓冲(列缓冲从 4 096 行起按倍增长到 `batch_rows` 为止,不按 `batch_rows` 一次预留):每个定长字段一次顺序拷贝。journal 是行存,这一次转置不可避免;列缓冲填好后各复制一次进 Python `bytes`,经 `pyarrow.py_buffer`(不再复制)组成 `pyarrow.RecordBatch`(本 crate 不链接 arrow-rs,见"依赖");**零拷贝指的是 pyarrow → Polars/DuckDB 的交接**(经 PyCapsule `__arrow_c_stream__`/`__arrow_c_array__`,消费方直接引用这些缓冲,无复制)。
 4. 返回 `RecordBatchReader`,惰性按批产出;Python 侧不持有 journal 映射的引用,段被回收不影响已产出的批。
 5. `tail()`:读者记住 `(segment, offset)`;每 `poll_ms` 检查 `committed_len` 与新段;跨段滚动时先读新段首的 `StateSnapshot`/`ConfigBlob` 再继续;一个事件的记录先暂存,读到带 `EVENT_END` 的记录才交付(冷副本的同步边界可能切在事件中间);Python 线程在两次检查之间 `sleep`(冷路径,释放 GIL)。
@@ -147,7 +147,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 
 ### 4. 打包与发布
 
-- **wheel**:`maturin` 构建 `hft_py-<版本>-cp310-abi3-manylinux_2_28_aarch64.whl`(`cp310-abi3`:一个 wheel 覆盖 Python ≥ 3.10);生产主机是 aarch64,与 Rust 二进制同一目标三元组([development 目标 CPU](../../docs/development.md#目标-cpu))。研究主机若为 x86_64,可另出 x86_64 wheel,只含 reader 与 ledger。
+- **wheel**:`maturin` 构建 `hft_py-<版本>-cp310-abi3-manylinux_2_28_aarch64.whl`(`cp310-abi3`:一个 wheel 覆盖 Python ≥ 3.10);生产主机是 aarch64,与 Rust 二进制同一目标三元组([development 目标 CPU](../../docs/development.md#目标-cpu))。x86_64 的研究主机用 `research-build.yml` 手动构建的 wheel(容器 `ubuntu:22.04`,与 x86_64 的 `replayer` 同一 artifact;不进 Release 与生产归档,[development 研究工具构建](../../docs/development.md#研究工具构建research-buildyml))。
 - 只在 CI 的发布流水线里与 Rust 二进制一起构建,放进同一个不可变发布归档的 `python/` 目录([deploy](../../deploy/README.md)),SHA-256 写进 `RELEASE.json`;部署脚本以 `pip install --no-index` 装进**该版本全部 Python 包共用的单一 venv**(按版本,冷进程经 `/opt/hft/current-cold/venv` 使用,[deploy 单元组](../../deploy/README.md#单元组与分组激活);与 `python/*` 各包的 wheel 一起,离线安装)。**不在服务器编译**。
 - 测试构建另开 cargo feature `testing`(导出 `hft_py._testing` 的测试钩子:最近一批的列缓冲地址、`tail` 的检查次数、`ledger` 结果的最终三节快照字节),发布 wheel 不含。
 - PyO3 不启用 `extension-module` 特性:maturin 构建扩展时设置 `PYO3_BUILD_EXTENSION_MODULE`,仓库的 `.cargo/config.toml` 对普通 cargo 构建设置同一变量,所以 Rust 测试与 workspace 构建不链接 libpython。
@@ -205,7 +205,7 @@ hft-py 以只读映射打开热段,对热进程的影响只有页表与共享 L3
 - Parquet 历史数据不经本 crate(研究直接用 DuckDB/Polars 读 S3);`events()` 只覆盖本机 journal 保留期。
 - `config_at` 的 `risk` 只给原始字节、`engine` 各节只给原始字节:`RiskParams` 的 blob 编解码与 ECF1 各节的解码归各自 crate,提供后再在本 crate 解码成 dict(同时补 PY-088 的对应行)。
 - 冷账本的 `Capacities` 用固定值,直到 ECF1 段 3 有解码(hft-sequencer);从关键帧起步的窗口估值见"参数语义"的 `ledger` 一条。
-- `events()` 没有按 `t0` 跳段:整份扫描;吞吐不够时用段头的校准对与 `created_utc_ns` 选起点段。
+- `events()` 只对 `proc` 时间窗按 `t0` 跳段;`ex`/`hw` 时间窗仍整份扫描。
 - Windows 不支持(journal 与热段只在 Linux)。
 
 ### 开发备忘

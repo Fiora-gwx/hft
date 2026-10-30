@@ -78,5 +78,5 @@ fn run() -> Result<u8, Vec<Error>> {
         println!("hft-core: configuration valid");
         return Ok(0);
     }
-    hft_core::runtime::run(loaded, dry, duration, secrets).map_err(|e| vec![e])
+    hft_core::runtime::run(loaded, duration, secrets).map_err(|e| vec![e])
 }

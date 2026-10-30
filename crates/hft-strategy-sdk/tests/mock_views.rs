@@ -1,4 +1,4 @@
-//! `MockViews` (SDK-127, SDK-129, SDK-194, SDK-195, SDK-213).
+//! `MockViews` (SDK-127, SDK-129, SDK-194, SDK-195, SDK-213, SDK-214).
 
 #![allow(
     clippy::disallowed_types,
@@ -235,4 +235,37 @@ fn sdk_213_mock_orders_and_md_stamps() {
     );
     assert_eq!(Views::md_stamp(&v, I1, 21), None, "SDK-213.4 not yet");
     assert_eq!(Views::md_count(&v, I2), 0, "SDK-213.4 other inst");
+}
+
+#[test]
+fn sdk_214_provided_stamps_and_open_orders() {
+    let v = at_9e9();
+    // .1 no Bbo stamp from the provided default.
+    assert_eq!(Views::bbo_stamp(&v, I1), None, "SDK-214.1");
+    // .2 stamps: only the engine clock.
+    let n = Views::now(&v);
+    let s = Views::stamps(&v);
+    assert_eq!((s.engine_ns, s.utc_ns), (n.engine_ns, n.utc_ns), "SDK-214.2");
+    assert_eq!(
+        (s.kind, s.venue_ns, s.sw_rx_ns, s.hw_rx_ns, s.rx_tsc),
+        (0, 0, 0, 0, Tsc(0)),
+        "SDK-214.2"
+    );
+    // .3 no open orders.
+    let blank = OrderView {
+        r: OrderRef::new(V1, A1, 0, 0),
+        group: G1,
+        inst: I1,
+        side: Side::Buy,
+        tif: hft_types::Tif::FAK,
+        class: IntentClass::Open,
+        px: Px(0),
+        qty: Qty(0),
+        filled: Qty(0),
+        state: OrderStateView::Live,
+        tag: 0,
+    };
+    let mut out = [blank; 2];
+    assert_eq!(Views::open_orders(&v, A1, I1, &mut out), 0, "SDK-214.3");
+    assert_eq!(hft_types::Tif::FAK, hft_types::Tif::Ioc, "SDK-214.3 FAK is Ioc");
 }

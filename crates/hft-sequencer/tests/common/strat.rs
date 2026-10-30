@@ -225,6 +225,9 @@ pub trait DynViews {
     fn group_pos(&self, a: AccountId, g: GroupId) -> hft_strategy_sdk::GroupPosView;
     fn md_count(&self, i: InstId) -> u64;
     fn md_stamp(&self, i: InstId, n: u64) -> Option<hft_strategy_sdk::MdStampView>;
+    fn bbo_stamp(&self, i: InstId) -> Option<hft_strategy_sdk::MdStampView>;
+    fn stamps(&self) -> hft_strategy_sdk::Stamps;
+    fn open_orders(&self, a: AccountId, i: InstId, out: &mut [OrderView]) -> usize;
     fn inventory(
         &self,
         a: AccountId,
@@ -262,6 +265,15 @@ impl<V: Views> DynViews for W<'_, V> {
     }
     fn md_stamp(&self, i: InstId, n: u64) -> Option<hft_strategy_sdk::MdStampView> {
         self.0.md_stamp(i, n)
+    }
+    fn bbo_stamp(&self, i: InstId) -> Option<hft_strategy_sdk::MdStampView> {
+        self.0.bbo_stamp(i)
+    }
+    fn stamps(&self) -> hft_strategy_sdk::Stamps {
+        self.0.stamps()
+    }
+    fn open_orders(&self, a: AccountId, i: InstId, out: &mut [OrderView]) -> usize {
+        self.0.open_orders(a, i, out)
     }
     fn legs(&self, a: AccountId, g: GroupId) -> LegView {
         *self.0.legs(a, g)

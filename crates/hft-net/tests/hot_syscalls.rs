@@ -57,6 +57,7 @@ fn net_212_hot_never_connects() {
             src_ip_idx: 0,
             rx_queue: 0,
             deadline_ns: i64::MAX,
+            account: hft_types::AccountId(0),
         })
         .unwrap();
     let mut peer = mempeer::server_only(0);

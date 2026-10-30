@@ -36,7 +36,8 @@ chain_allowed = ["crates/hft-amm", "crates/hft-chain-evm", "apps/chain-core", "c
 # rule 7: packages that must not have hft-rt in their closure (rule T4); strategies/* always included.
 no_rt = [
     "crates/hft-venue-proto", "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger",
-    "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-amm", "crates/venue-*",
+    "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-feature", "crates/hft-amm",
+    "crates/venue-*",
 ]
 rt = "crates/hft-rt"
 # rule 8: hft-journal's `writer` feature only in the closure of `journal_writer_allowed`; checked for the
@@ -47,7 +48,7 @@ journal_writer_allowed = ["apps/hft-core", "apps/replayer", "apps/chain-core"]
 journal_writer_roots = ["apps/*", "crates/hft-py"]
 # rule 9: strategy decoupling.
 registry = "strategies/registry"
-registry_users = ["apps/hft-core", "apps/replayer"]
+registry_users = ["apps/hft-core", "apps/replayer", "tools/hft-pmcfg"]
 no_strategy_closure = ["crates/hft-testkit", "tools/hft-cfg", "crates/hft-py"]
 # rule 10
 verify = "tools/hft-verify"
@@ -85,6 +86,12 @@ deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 [pkg."crates/hft-strat-lib"]
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+# Feature nodes of strategy fast parts (crates/hft-feature/README.md).
+[pkg."crates/hft-feature"]
+tier = "pure"
+deps = ["crates/hft-strategy-sdk"]
+dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 
 # ---------------------------------------------------------------- L1: protocol trait and venues
 [pkg."crates/hft-venue-proto"]
@@ -209,6 +216,15 @@ deps = [
     "crates/hft-ledger", "crates/hft-risk", "crates/hft-rt",
 ]
 
+# Research replay (crates/hft-replay/README.md): cold, offline only; the sequencer's replay-io
+# assembly with the simulated exchange and Parquet output.
+[pkg."crates/hft-replay"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-journal", "crates/hft-rt",
+    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer",
+]
+
 [pkg."crates/hft-testkit"]
 tier = "dev"
 deps = [
@@ -244,7 +260,7 @@ deps = [
 # ---------------------------------------------------------------- strategies
 [pkg."strategies/*"]
 tier = "hot"
-deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib"]
+deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-feature"]
 # Tests build refdata fixtures (RDB1 encoder) and group tables for the SDK test stubs.
 dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 
@@ -261,7 +277,8 @@ dev = [
 # ---------------------------------------------------------------- apps (assembly only)
 [pkg."apps/hft-core"]
 tier = "hot"
-dev = ["crates/hft-testkit", "crates/hft-ctl-proto"]
+# tools/hft-pmcfg: the Polymarket configuration fixtures of tests/support and the example pm_sim_config.
+dev = ["crates/hft-testkit", "crates/hft-ctl-proto", "tools/hft-pmcfg"]
 deps = [
     "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
@@ -279,6 +296,7 @@ deps = [
     "crates/hft-strat-lib", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-book",
     "crates/hft-event", "crates/hft-refdata", "crates/hft-sim", "crates/hft-journal", "strategies/registry",
     "crates/hft-telemetry", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
+    "crates/hft-replay",
 ]
 
 [pkg."apps/watchtower"]
@@ -364,9 +382,22 @@ dev_tier_ok = true
 # production archive.
 [pkg."tools/pm-md-probe"]
 tier = "cold"
+# hft-sequencer + hft-strategy-sdk: the `journal` subcommand rebuilds the engine UTC with the
+# sequencer's own `clock::UtcLineRow` (one implementation of the anchoring rules).
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue-proto", "crates/hft-venue", "crates/venue-polymarket",
+    "crates/hft-strategy-sdk", "crates/hft-sequencer",
+]
+
+# Polymarket configuration generator (tools/hft-pmcfg/README.md): the strategy descriptors come from the
+# registry (a registry user); hft-sequencer only for EngineSetup and its ECF1 encoder.
+[pkg."tools/hft-pmcfg"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk",
+    "strategies/registry", "crates/hft-risk", "crates/hft-ledger", "crates/hft-oms", "crates/hft-exec",
+    "crates/hft-sequencer", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-polymarket",
 ]
 
 [pkg."tools/hft-verify"]

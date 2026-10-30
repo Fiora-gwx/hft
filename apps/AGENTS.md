@@ -9,7 +9,7 @@
 
 ## 策略装配只在这里
 
-- 唯一的策略清单是 [`strategies/registry`](../strategies/registry/README.md);依赖它的只有 `apps/hft-core` 与 `apps/replayer`,两者由它取得同一个策略集合。需要真实策略的集成测试放 `apps/hft-core/tests/` 或 `strategies/registry/tests/`。新增策略 = 新的 `strategies/<name>` + 注册表一行,全部 app 零改动。
+- 唯一的策略清单是 [`strategies/registry`](../strategies/registry/README.md);依赖它的只有 `apps/hft-core`、`apps/replayer` 与配置生成器 `tools/hft-pmcfg`,三者由它取得同一个策略集合。需要真实策略的集成测试放 `apps/hft-core/tests/` 或 `strategies/registry/tests/`。新增策略 = 新的 `strategies/<name>` + 注册表一行,全部 app 零改动。
 - 其他 app 不依赖任何策略包;需要策略信息时读 journal 里的通用事件与 `hft-core schemas --out <dir>` 导出的 schema JSON。
 
 ## 测试规格

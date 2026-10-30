@@ -43,7 +43,7 @@ status: impl
 - 一个 Sim 账户与 Live 账户一样跨多个交易所,**每个交易所至多一个 venue**(同一账户在同一交易所只用一个市场,refdata `SameExchangeMarkets`,`SimExchange::new` 再查一次);它在 venue V 上的订单对 **V 的真实行情**撮合(行情由所在 hft-core 实例的 feed 订阅提供,不为模拟另开连接)。
 - 回报是与实盘**同一组事件**(`OrderEvent`、`FundingSettle`、`MarginReport`、`ExternalFill`…,不加新 kind),经 `rep-sim` 环进入 sequencer 并记为 journal 的 Input——回放确定,`replayer verify` 对含 Sim 账户的 journal 同样逐字节成立。`rep-sim` 是 sequencer 输入环中**优先级最低**的一个,每轮至多 `sim_max_per_round` 条,同一事件派发时实盘实例先于模拟实例(优先级、规则与该参数的取值都归 [hft-sequencer](../hft-sequencer/README.md),参数在 EngineConfig 的 ECF1 段 5);实盘繁忙时模拟回报晚于其 `due_tsc` 交付,滞后计入 `sim_tail_lag_ms`。
 - kill 对 Sim 账户与实盘相同,经 [hft-risk](../hft-risk/README.md) 的检查链生效(Sim 账户不占 kill 字位,没有 gw);本 crate 不做 kill 判定。
-- **放在哪个实例**([hft-core](../../apps/hft-core/README.md#实例角色prod-与-sim)):Sim 账户只出现在 `sim` 实例(配置 `instance.name = "sim"`:只含 Sim 账户、不持任何交易所 key、自己的行情连接与 journal,同一二进制),sim-gw 是其中一个 warm 任务;`prod` 实例从不含 Sim 账户。dev2 上常驻的就是 `sim` 实例;统一升级后 `sim` 实例与 `prod` 实例同机运行,只用非隔离核、在自己的 slice、网卡(ENI-C)与出口 IP 下(隔离规则归 hft-core)。
+- **放在哪个实例**([hft-core](../../apps/hft-core/README.md#实例角色prod-与-sim)):Sim 账户出现在 `sim` 实例(配置 `instance.name = "sim"`:只含 Sim 账户、不持任何交易所 key、自己的行情连接与 journal,同一二进制),sim-gw 是其中一个 warm 任务;`prod` 实例可含 Sim 账户作为 Shadow 变体,由同一实现的 `sim-venue` 任务撮合(只有 Sim 账户的决定是决策屏障)。dev2 上常驻的就是 `sim` 实例;统一升级后 `sim` 实例与 `prod` 实例同机运行,只用非隔离核、在自己的 slice、网卡(ENI-C)与出口 IP 下(隔离规则归 hft-core)。
 - Sim 账户不持有交易所 key;[reconciler](../../apps/reconciler/README.md) 与 [kill-switch](../../apps/kill-switch/README.md) 跳过它;ledger 与模拟真值的一致性由 sim-gw 周期推送的真值报告与 watchtower 的 `SimDrift` 规则检查。
 - 可同时开多个 Sim 账户(不同策略参数各绑一个账户,一个账户只绑定一个策略实例);账户之间互不影响:各自的余额、仓位、已吃流动性记忆与随机数子流,只共享只读的簿副本。
 
@@ -80,6 +80,9 @@ impl SimExchange {
     /// 结算仓位与均价、已实现盈亏和现货余额;返回本次实际永续现金(现货为零),不含费用,不从钱包差额反推。
     /// 未知账户/品种、未绑定 venue 或非正数量/价格返回 None,完整状态不变;不产出回报,推送由 venue 行为层决定。
     pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px) -> Option<Qty>;
+    /// 把账户 a 的随机数子流从 seed 重新开始(子流规则同"9. 确定性");未知账户无动作。研究回放在固定的事件时间
+    /// 边界重播种,使分段回放与整段回放抽到相同的延迟、各参数变体在同一区间共用同一组随机数。
+    pub fn reseed_account(&mut self, a: AccountId, seed: u64);
     pub fn state_hash(&self) -> u64;
 }
 
@@ -101,7 +104,7 @@ pub enum SimInput<'a> {
 /// [LeverageItem; n_lev] 字节(与 rep-sim-bulk 同一拆分)。
 pub struct SimReply<'a> { pub account: AccountId, pub due_tsc: Tsc, pub gen_seq: u64, pub msg: RepMsg, pub bulk: &'a [u8] }
 pub const SIM_CODE_BASE: u32 = 0x1000_0000;   // 模拟拒单的 OrderEvent.reject_code = SIM_CODE_BASE + n(n 见"拒单规则")
-pub const MAX_SIM_ACCOUNTS: usize = 16;
+pub const MAX_SIM_ACCOUNTS: usize = 64;    // prod 实例的 Shadow 变体 × 账户(原 16)
 pub const MAX_LATENCY_MODELS: usize = 16;
 pub const MAX_MARGIN_MODELS: usize = 16;
 pub const CMDS_PER_POLL: usize = 256;          // sim-gw
@@ -150,6 +153,74 @@ impl hft_rt::PollTask for SimGwTask {
 `delay_ms` 越界(`DelayReports` 不在 1..=60 000,其余不为 0)、账户不是 Sim 或 venue 不在该账户内时:不生效,计数 `sim_fault_ignored`(sequencer 已按命令路径拒绝,这里是防御)。故障状态不进快照、不由"重启恢复"重建:sim-gw 重启后全部故障清除。
 
 sim-gw 读 TSC 只用于第 3 步的静默推进与第 4 步的交付时刻;撮合本身只依赖 journal 事件时间与种子,因此 `replayer sim` 用同一种子可逐笔复现(无 `quiet_advance` 的区间)。
+
+### journal 衔接(`glue` 模块)
+
+hft-core 的 sim-gw 与研究回放([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md))共用的转换,都是纯函数:
+
+```rust
+pub enum Fed { Market, Clock, Skipped }
+/// 一条 seq journal 记录(逻辑体,多段已重组)按 journal 顺序交给模拟交易所:Bbo、Trade、MarkPrice、Funding、
+/// 交易所或 TopN 来源的 L2Snapshot、L2Batch → on_record(Market);引擎关键帧 L2Snapshot(簿状态,不是行情)
+/// 与解不出的行情体 → Skipped;其余记录 → on_record(Clock)。旧 schema 写的较短定长体按零扩展读。
+pub fn feed_record(ex: &mut SimExchange, hdr: &RecordHeader, kind: EventKind, body: &[u8], levels: &mut Vec<Level>) -> Fed;
+/// 订单类指令(Place、Cancel、Amend、Query、CancelAll)在任务层的 SendReport{Written},sent_tsc = now;其他 op → None。
+pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport>;
+/// 一条回报成为的 Input 记录:账户级 ConnState(venue 0)展开为该账户 refdata venues 中的每个 venue;
+/// OrderEvent 填入引擎 epoch(纯核心没有 epoch,OMS 按 (slot, gen, epoch) 匹配);其余按 RepMsg::with_parts。
+pub fn reply_parts(rd: &RefData, epoch: u16, msg: &RepMsg, bulk: &[u8], emit: impl FnMut(EventKind, &[&[u8]]));
+```
+
+### 场所行为选项(`VenueModel`)
+
+`SimExchange::set_venue_model(VenueModel)`(构造之后、第一条指令之前,冷路径)打开 Polymarket 实盘验证过的成交与时序规则(研究侧参照 `bm_sim.py`);`VenueModel::default()` 全部关闭,行为、回报与 `state_hash` 与不调用时相同(SIM-239)。hft-core 的 sim-gw 只在 `[sim] calib` 给出校准表时调用它([hft-core](../../apps/hft-core/README.md));研究回放([hft-replay](../hft-replay/README.md#模拟场所))按命令行或校准表设置。
+
+```rust
+pub struct VenueModel {
+    pub cancel_us: Option<(u32, u32)>,   // 撤单自己的 (entry, resp) µs;None = 账户的 LatencyModel
+    pub tombstone: bool,                 // 先于订单到达的撤单留下墓碑:订单到达时被拒,只回 CancelAck(Polymarket "Already canceled")
+    pub taker: Option<TakerDelay>,       // Ioc/Fok 到达后再等撮合延迟,按那一刻的簿撮合
+    pub fee: FeeModel,                   // Refdata(费率行)| BinaryTaker{k_e9}:吃单费 = k·p·(1−p)·qty,挂单 0
+    pub gtd_ms: u32,                     // 挂单自到达起的有效期(0 = 无):到期回 Expired
+    pub fill_resp_us: Option<u32>,       // 挂单成交的回报延迟;None = 账户的 resp
+    pub pools: Option<LatPools>,         // 条件延迟池
+}
+pub struct TakerDelay { pub base_us: u32, pub slow_us: u32, pub slow_ppm: u32, pub resp_us: u32 }
+pub struct LatPools { pub split_us: u32, pub min_n: u16, pub pools: Vec<Pool> }
+pub struct Pool { pub leg: PoolLeg /* Place | Cancel | Taker */, pub load: Option<u8>, pub mv: Option<u8>, pub phase: Option<u8>, pub us: Vec<u32> }
+pub struct Cond { pub load: u8, pub mv: u8, pub phase: u8 }
+impl SimExchange {
+    pub fn set_venue_model(&mut self, m: VenueModel);
+    pub fn set_condition(&mut self, c: Cond);                      // 之后的指令按此条件抽样
+    pub fn hide_own(&mut self, i: InstId, side: Side, px: Px, dq: Qty); // 自有挂单叠加层(累加,下限 0)
+}
+```
+
+- **`MakerFill::QueueCap`**:挂单到达时 `ahead` = 该价显示量;此后该档每次更新 `ahead = min(ahead, 显示量)`;同价、对手方向的成交先消耗 `ahead` 再成交本单;穿价成交与对手侧越过本单价格都成交全部剩余(不受成交量或越价档位量限制)。`Queue` 的 500 ms 未解释减少规则不变。
+- **撤单竞速**:撤单的到达延迟取 `cancel_us`(或 `Cancel` 池);`tombstone` 开时,到达时找不到订单记录的撤单不回报、记下 (账户, 槽, gen)(至多 4 096 条),之后该订单到达即以 `CancelAck` 拒绝、不挂(计数 `tombstone_refusals`);订单已到达的撤单照常在到达时下架,其间的成交照常发生;回报延迟取 `cancel_us.1`(有 `Cancel` 池时取 `split_us`)。
+- **吃单延迟**:`taker` 开时,非 PostOnly、非 Gtc 的订单在到达时只做拒单检查,撮合排在到达 + `base_us`(以 `slow_ppm`/10⁶ 的概率为 `slow_us`;有 `Taker` 池时取池中样本)之后,用那一刻的簿(含叠加层)撮合,Ack、成交与剩余的 Expired 在撮合 + `resp_us` 回报。
+- **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。
+- **GTD**:挂单自到达起 `gtd_ms` 到期,与指令按事件时间排序,到期回 `Expired`(计数 `gtd_expired`);OMS 把交易所的 Expired 当作终态(hft-oms 自己的 `ExpireAt` 只处理 Unknown 槽,不重复终结)。
+- **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出;撮合本身不看条件,条件由下面的 `CondTracker` 从喂给它的行情算出。
+- **自有挂单叠加层**:`hide_own` 登记的量从显示簿中扣除:挂单的 `ahead`/档位量、吃单与越价撮合看到的对手档位都不含它。
+
+#### 条件跟踪与校准表
+
+```rust
+pub struct CondCfg { pub load_thr_ns: Vec<i64>, pub window_s: u32 /* 缺省 300 */, pub phase_s: u32 /* 缺省 5 */ }
+impl CondTracker {
+    pub fn new(cfg: CondCfg, venues: u64 /* 每个 VenueId 一位 */, tsc_hz_milli: u64) -> CondTracker;
+    pub fn on_market(&mut self, kind: EventKind, body: &[u8], tsc: u64);   // 行情记录,按记录顺序
+    pub fn condition(&self, t: Tsc, utc_ns: i64) -> Cond;                   // 决策时刻 t、引擎 UTC 的条件
+}
+#[cfg(feature = "calib")]
+pub mod calib { pub fn apply(text: &[u8], maker_fill: &mut MakerFill, venue: &mut VenueModel, cond: &mut CondCfg) -> Result<(), String>; }
+```
+
+- `load`:`venues` 中各 venue 的 `L2Batch`/`L2Snapshot`/`Trade` 以 `sw_rx_ns − ex_ts_ns` 为一个延迟样本(两个戳都 > 0),按接收秒归组取 90 分位(第 ⌊0.9 n⌋ 个),每个 UTC 分钟的各秒值取中位数;上一个结束的分钟的中位数大于几个 `load_thr_ns` 阈值,`load` 就是几;第一个分钟结束前为 1。
+- `mv`:不在 `venues` 中的第一个出现的 inst 的 `Bbo` 是参考报价,保留最近 2 s 的 (记录 tsc, bid + ask);决策时取 1 s 内最早的一条与最新一条比较:变动 ≤ 0.25 bp → 0,≤ 1 bp → 1,否则 2;没有报价 → 0。
+- `phase`:`utc_ns` 所在秒在 `window_s` 窗口内的位置 < `phase_s` → 0,否则 1。
+- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
 
 ### 重启恢复
 
@@ -227,7 +298,7 @@ pub enum MmrSource { RefdataTiers, Flat(Rate) }
 | `transfer_delay_ms` | u32 | `SimTransfer` 到账延迟 | 300 000(待标定) |
 | `rate_limit` | bool | 按 refdata `RateLimitTable` 中 `Orders` 桶、范围 Ip/Uid/Account 的行计数(按到达时刻的固定窗口,到达第 10 条规则的新单计入),超限以 `RateLimited` 回拒 | true |
 | `late_fee` | bool | 模拟"成交后手续费另行到达"(`FeeOnly`)的所 | false(DST 打开) |
-| `maker_fill` | `TradeThrough` \| `Queue` | 挂单成交模型(§4) | `TradeThrough` |
+| `maker_fill` | `TradeThrough` \| `Queue` \| `QueueCap` | 挂单成交模型(§4;`QueueCap` 见[场所行为选项](#场所行为选项venuemodel)) | `TradeThrough` |
 
 改 `SimAccountCfg`(含换模型下标)= 改 refdata([tools/hft-cfg](../../tools/README.md))→ `ReplaceRefdata`(Drain + 重启);改 `SimTuning` 或两张模型表 = 改 hft-core 配置后重启。`[sim]` 全表随启动写入 journal(写法归 [hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段)),[replayer sim](../../apps/replayer/README.md#sim) 从 journal 取同一份,重演不读当前配置文件。
 
@@ -491,6 +562,8 @@ pub struct StressVerdict {
 | `src/exec.rs` | 指令执行:拒单规则、吃单撮合与已吃流动性记忆、订单表、撤/改/查 |
 | `src/account.rs` | 现货结算与锁定、手续费资产、永续仓位、全仓保证金与强平价、强平、资金费、划转、重置、seed、真值报告 |
 | `src/models.rs` | `LatencyModel`/`Dist` 校验、延迟抽样、账户子流 |
+| `src/glue.rs` | journal 衔接:`feed_record`、`written`、`reply_parts` |
+| `src/cond.rs`、`src/calib.rs`(`calib` feature) | 条件跟踪 `CondTracker`;校准表解析 |
 | `src/view.rs`、`src/hash.rs`、`src/fx.rs` | `SimAccountView`、`state_hash`、i128 定点辅助 |
 | `src/stress.rs`(M4) | `StressSpec`、`StressCase`、`PricePath`、`StressFault`、`StressTransform`、`StressVerdict` |
 | `src/task.rs`(`task` feature,M4) | `SimGwTask`、`DecisionTable` |
@@ -506,10 +579,10 @@ pub struct StressVerdict {
 |---|---|---|
 | `on_record(L2Batch)`(含簿副本更新) | ≤ 1 µs 均摊/档 | `sim/on_l2` |
 | `on_command(Place)` + 吃单撮合(≤ 10 档) | ≤ 2 µs | `sim/place_match` |
-| `SimGwTask::poll_once` | 单次工作量 ≤ 200 µs;sim-gw 落后 journal 末尾只记录(sim-gw 只在 `sim` 实例里运行,不设延迟验收;同机时 `sim` 实例只用非隔离核,滞后进日报) | `sim/poll_once`;指标 `sim_tail_lag_ms` |
+| `SimGwTask::poll_once` | 单次工作量 ≤ 200 µs;sim-gw 落后 journal 末尾只记录(sim-gw 与 `prod` 实例的 sim-venue 都不设延迟验收;同机时 `sim` 实例只用非隔离核,sim-venue 在非隔离核上以最低优先级运行,滞后进日报) | `sim/poll_once`;指标 `sim_tail_lag_ms` |
 | `replayer sim` 吞吐 | ≥ `replayer verify` 吞吐的 50% | `sim/replay_day` |
 
-- 分配:`SimExchange::new` 之后零分配(全部定容:`MAX_SIM_ACCOUNTS`、每账户订单表 1,024、记忆环 64 项、待交付堆 16,384)。
+- 分配:`SimExchange::new` 之后零分配(全部定容:`MAX_SIM_ACCOUNTS`、每账户订单表 1,024、记忆环 64 项、待交付堆 16,384)。每账户的定容内存随被跟踪 inst 数增长(记忆环约 4 KiB × inst、订单表 1,024 项),账户数接近 64 时按主机类内存表复核。
 - 内存:簿副本与 hft-book 容量相同,只为 Sim 账户实际交易的 (venue, inst) 建;sim-gw 总内存上限按主机类见 [hft-core 内存预算](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属)。
 - 系统调用:`SimGwTask` 只有环与 journal 读者的共享内存访问,无系统调用。
 
@@ -524,6 +597,7 @@ pub struct StressVerdict {
 | [`hft-types`](../hft-types/README.md)、[`hft-refdata`](../hft-refdata/README.md)、[`hft-event`](../hft-event/README.md) | 定点类型、`InstMeta`/`VenueCaps`/`FeeSchedule`/`SimAccountCfg`、事件体与 `GwCmd`/`RepMsg` | 默认 |
 | [`hft-book`](../hft-book/README.md) | 簿副本 | 默认 |
 | `rand_chacha` | 确定性随机 | 默认 |
+| `serde`、`serde_json` | 校准表 JSON | `calib` |
 | [`hft-rt`](../hft-rt/README.md)(环、`PollTask`)、[`hft-journal`](../hft-journal/README.md)(只用 `JournalReader`) | sim-gw 任务 | `task` |
 | `libm`、vendored hftbacktest 模型层(MIT) | 排队模型 | `queue-hftbacktest`(可选) |
 

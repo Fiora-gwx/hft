@@ -376,13 +376,12 @@ impl Exec {
             if s.id.0 == 0 || s.id == hft_types::GROUP_ALL {
                 continue;
             }
-            let Some(a) = rdd.account_of(s.id.strategy()) else {
-                continue;
-            };
-            if self.acct_ix(a).is_none() {
-                continue;
+            // One cell per account of the instance (its account set, refdata `accounts_of`).
+            for a in rdd.accounts_of(s.id.strategy()) {
+                if self.acct_ix(*a).is_some() {
+                    keys.push((*a, s.id, usize::from(gix)));
+                }
             }
-            keys.push((a, s.id, usize::from(gix)));
         }
         keys.sort_by_key(|k| (k.0, k.1));
         keys.dedup_by_key(|k| (k.0, k.1));

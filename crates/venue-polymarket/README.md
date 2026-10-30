@@ -153,7 +153,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 
 过期保护 `stale_guard()` = `ExpireAt{default_ms: GTD_S × 1000}`(300 000;官方文档 2026-10-23):每笔下单都是 GTD,`expiration` = 编码时刻秒 + `GTD_S`(见[下单](#下单));交易所对 GTD 单有 60 s 安全阈值,实际在 `expiration` 前 60 s 失效,`expiration` 过近的请求在撮合之前被拒(`INVALID_ORDER_EXPIRATION`),失效后的订单不再撮合。窗口由 `GTD_S` 唯一确定,不读 `gw.stale_guard_ms`;OMS 的 `expire_window_ms[polymarket]` 取这个 `default_ms`(hft-core Polymarket 配置),查单 `NotFound` 在下单后 300 500 ms 由 OMS 定为 `Rejected(NOT_FOUND)`([hft-oms Unknown 收敛](../hft-oms/README.md#unknown-收敛流程))。
 
-限速默认值:`Ip`/`NewConns` 300 次每 5 分钟,`Conn`/`WsInMsgs` 每秒 10 条,`Account`/`Orders` 每秒 20 单(交易所按 key 每秒 40 单、突发 60,撤单 80、突发 120,2026-10-22 官方文档;默认取下单的一半)。`SHARED_EGRESS_IP = true`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派)):交易所按 IP 的限制是 Cloudflare 限流(超出排队而不拒绝),下单与撤单的限额按 key 计,所以同一 venue 的多个 Live 账户可以共用一个出口 IP(hft-core 不报 `SharedAccountIp`;按 IP 计的 `Ip`/`NewConns` 额度由共用者合计)。死手 `None`:交易所的订单心跳(`POST /v1/heartbeats`,链式 `heartbeat_id`,10 s 无心跳撤全部挂单)尚未接入,见[已知限制](#已知限制与后续工作)。
+限速默认值:`Ip`/`NewConns` 300 次每 5 分钟,`Conn`/`WsInMsgs` 每秒 10 条,`Account`/`Orders` 每秒 20 单,`Account`/`Cancels` 每秒 40 单(交易所按 key 每秒 40 单、突发 60,撤单 80、突发 120,2026-10-22 官方文档;默认各取一半;撤单走自己的窗口,不占下单额度,规则归 [hft-venue 限速兜底](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构))。`SHARED_EGRESS_IP = true`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派)):交易所按 IP 的限制是 Cloudflare 限流(超出排队而不拒绝),下单与撤单的限额按 key 计,所以同一 venue 的多个 Live 账户可以共用一个出口 IP(hft-core 不报 `SharedAccountIp`;按 IP 计的 `Ip`/`NewConns` 额度由共用者合计)。死手 `None`:交易所的订单心跳(`POST /v1/heartbeats`,链式 `heartbeat_id`,10 s 无心跳撤全部挂单)尚未接入,见[已知限制](#已知限制与后续工作)。
 
 ### 签名
 

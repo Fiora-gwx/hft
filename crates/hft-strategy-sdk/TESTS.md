@@ -20,14 +20,15 @@ spec: README.md
 | Strategy 与 Model | SDK-009、SDK-016–SDK-041、SDK-059–SDK-089、SDK-207、SDK-208 |
 | 参数 schema 与 ParamSet | SDK-090–SDK-121 |
 | 策略描述符:Note、报表、策略命令 | SDK-053、SDK-054、SDK-112–SDK-119 |
-| Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213 |
-| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213 |
+| Views 与 ModelViews | SDK-056、SDK-123–SDK-140、SDK-213、SDK-214 |
+| 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209、SDK-213、SDK-214 |
 | EventRef | SDK-031、SDK-040–SDK-058、SDK-143、SDK-144、SDK-157 |
 | Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212 |
 | 目标意图 | SDK-141、SDK-158–SDK-163 |
 | Advice 载荷 | SDK-052、SDK-067、SDK-086、SDK-171–SDK-176、SDK-211 |
 | 预热注入 | SDK-055、SDK-180–SDK-184、SDK-210 |
 | 装配:StrategySet 与 strategy_set! | SDK-002、SDK-087、SDK-185–SDK-189 |
+| 特征导出 | SDK-215 |
 | 运行模式下意图的行为表 | SDK-164–SDK-170 |
 | 确定性规则 | SDK-011、SDK-013、SDK-015、SDK-029、SDK-079、SDK-128、SDK-176–SDK-179 |
 | 版本与兼容规则 | SDK-008、SDK-022、SDK-057、SDK-076、SDK-077、SDK-096、SDK-171、SDK-190、SDK-210 |
@@ -3164,6 +3165,33 @@ spec: README.md
 | SDK-213.2 | `clear_order(r)` | `order(r) = None` |
 | SDK-213.3 | 无行情戳 | `md_count(I1) = 0`,`md_stamp(I1, 1) = None` |
 | SDK-213.4 | `md_push(I1, …)` 20 次(`ex_ts_ns = k`、`sw_rx_ns = 100 + k`) | `md_count(I1) = 20`;`md_stamp` 第 4 条 `None`、第 5 条 `ex_ts_ns = 5`、第 20 条 `sw_rx_ns = 120`、第 21 条 `None`;`md_count(I2) = 0` |
+
+### SDK-214 `Views` 的 `bbo_stamp`、`stamps`、`open_orders` 提供的默认方法
+
+- 规则:[Views 与 ModelViews](README.md#views-与-modelviews)、[视图类型](README.md#视图类型)(`Stamps`)
+- 级别:table
+- 里程碑:M3
+- 前置:`MockViews::new(RefFixture{I1, I2, BTC, USDT, V1, V2, A1})`,`now` 的 `engine_ns`、`utc_ns` 已设;引擎侧见 SEQ-448、SEQ-449
+- 实现:`crates/hft-strategy-sdk/tests/mock_views.rs::sdk_214_provided_stamps_and_open_orders`
+
+| 行 | 读取 | 期望 |
+|---|---|---|
+| SDK-214.1 | `bbo_stamp(I1)` | `None` |
+| SDK-214.2 | `stamps()` | `engine_ns`、`utc_ns` 等于 `now()` 的值;`kind`、`venue_ns`、`sw_rx_ns`、`hw_rx_ns`、`rx_tsc` 为 0 |
+| SDK-214.3 | `open_orders(A1, I1, 2 条缓冲)` | 0 |
+
+### SDK-215 `Strategy::FEATURES`、`export_features` 与 `StrategySet` 的分派
+
+- 规则:[特征导出](README.md#特征导出)、[装配:StrategySet 与 strategy_set!](README.md#装配strategyset-与-strategy_set)
+- 级别:table
+- 里程碑:M3
+- 前置:`tests/set_dispatch.rs` 的 `ProbeSet { EchoProbe(0xFF01), TargetProbe(0xFF02) }`;`EchoProbe` 声明两列 `mode`、`groups`(`Count`,exp 0),`TargetProbe` 用缺省;实例以 `gt3()`(3 个 group)创建
+- 实现:`crates/hft-strategy-sdk/tests/set_dispatch.rs::sdk_215_feature_columns_and_export`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SDK-215.1 | `feature_columns(0xFF01)`、`(0xFF02)`、`(0xFF09)` | `["mode", "groups"]`;空;空 |
+| SDK-215.2 | `export_features` 写进 4 格、初值 `NA` 的存储 | EchoProbe:`len = 2`,存储 `[0, 3, NA, NA]`;TargetProbe:什么都不写(`is_empty`) |
 
 ## 验收
 

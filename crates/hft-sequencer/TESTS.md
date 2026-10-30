@@ -21,8 +21,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424、SEQ-441 |
-| 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
-| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447 |
+| 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340、SEQ-451 |
+| 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181、SEQ-447–SEQ-449 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
 | advisor | SEQ-030、SEQ-031、SEQ-051、SEQ-339 |
 | 实现说明 | 不适用:见子节 |
@@ -32,10 +32,10 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244、SEQ-442 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
-| 引擎 UTC | SEQ-443–SEQ-446 |
+| 引擎 UTC | SEQ-443–SEQ-446、SEQ-450 |
 | 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434、SEQ-440 |
-| 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
+| 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360、SEQ-452 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
@@ -352,6 +352,34 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 节 5 中 s1 行的 `StrategyRowHdr{strategy: 1, account: 1, kind_id: 0xFF01, desc_version: 3, params_version: 1}`,`n_groups = 1`,其后一条 `GroupSeqRow{group: g1}`
 - 实现:`crates/hft-sequencer/tests/strategies.rs::seq_017_desc_version_in_section5`
 
+
+### SEQ-451 一个实例绑定两个账户(账户集合)
+
+- 规则:[策略集](README.md#策略集strategyset)(实例表与账户集合)
+- 级别:table
+- 里程碑:M3
+- 前置:B0,账户 3(Live,venue A/B)的 `bound_instance` = s1;稳态
+- 实现:`crates/hft-sequencer/tests/strategies.rs::seq_451_instance_account_set`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-451.1 | 读实例表 | s1 的主账户 1、账户集合 [1, 3];s1 的 cell 依次为账户 1、3 各一个;`ix_of_account(3)` = s1;SDK `RefView::accounts` 对账户 1、3 都是 [1, 3],对账户 2 是 [2] |
+| SEQ-451.2 | s1 在 `a1` 报价上下两单:账户 3、账户 2(绑定 s2) | 账户 3 的决定没有 `NOT_BOUND`;账户 2 的决定 `reject` 含 `NOT_BOUND` |
+| SEQ-451.3 | `SetMode{scope (s1, 账户 3), CloseOnly}`(确认) | `Applied` |
+
+### SEQ-452 多账户实例的自成交防护
+
+- 规则:[意图管线](README.md#意图管线) 第 5 步(自成交防护)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SEQ-451(s1 的账户集合 [1, 3])
+- 实现:`crates/hft-sequencer/tests/strategies.rs::seq_452_self_trade_between_instance_accounts`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-452.1 | s1 在账户 1 上挂卖 0.001 @ 50 100 并 Ack | 决定不含 `SELF_TRADE` |
+| SEQ-452.2 | s1 在账户 3 上买 @ 50 100、买 @ 50 050 | 前者 `reject` = `SELF_TRADE`;后者不含 `SELF_TRADE` |
+| SEQ-452.3 | s1 在账户 1 上买 @ 50 100(与自己账户的卖单交叉) | 不含 `SELF_TRADE`(只检查实例内的其他账户) |
 ### SEQ-018 策略只经静态分派进入本 crate
 
 - 规则:[策略集](README.md#策略集strategyset)、[依赖](README.md#依赖)
@@ -1744,6 +1772,19 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
   - 新运行的 `EngineClock` 之后线未设置,UTC 回到新段校准对
 - 实现:`crates/hft-sequencer/tests/utc.rs::seq_446_anchor_input_replay`
 
+
+### SEQ-450 引擎 UTC 线与 hft-rt 发布线在同一组校准对下一致
+
+- 规则:[引擎 UTC](README.md#引擎-utc)(常数与 hft-rt 同一组);发布线归 [hft-rt 时间](../hft-rt/README.md#时间)
+- 级别:table
+- 里程碑:M3
+- 前置:1 GHz 计数器,启动校准对 (0, 10^12 ns);`UtcClock::shared(clock, horizon 1 000 ms)` 与 `UtcLineRow`
+- 实现:`crates/hft-sequencer/tests/utc.rs::seq_450_engine_line_and_published_line_agree`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-450.1 | 10 ms 处落后 2 ms 的校准对同时交给 `UtcPublisher::update` 与 `UtcLineRow::anchored` | 之后 0、1 ms、1 s、10 s 两线之差 ≤ 2 ns(发布线乘数的取整) |
+| SEQ-450.2 | 20.01 s 处超前 1 ms 的校准对;4 s 后再给一个在目标线上的校准对 | 两线都不回退;4 s 时引擎线已在目标线上;发布线在下一校准对后 1 s 处与目标线之差 ≤ 2 ns |
 ### SEQ-113 BBO 连接上各 Input 对连接活性的作用
 
 补充验证就绪缓存:连续报价期间断开全部成员,再重连并重建成员,Feeds 闸门随状态正确开闭,从关键帧回放一致。实现 `crates/hft-sequencer/tests/liveness.rs::seq_113_feed_gate_cache_rechecks_after_connection_and_membership_changes`。
@@ -6330,3 +6371,31 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 | SEQ-447.1 | `a1` 的 `L2Snapshot{origin = Exchange}`(`ex_ts_ns` 1 s、`sw_rx_ns` 1.010 s)、`L2Batch`(2 s / 2.012 s)、`Trade`(3 s / 3.013 s);再一条 `a1` 报价 | 在该报价的 `on_event` 中 `md_count(a1) = 3`,`md_stamp(a1, 1..=3)` 依次为 `(MD_SNAPSHOT, 1 s, 1.010 s)`、`(MD_BATCH, …)`、`(MD_TRADE, …)`,`rx_tsc` 非 0;第 0、4 条 `None` |
 | SEQ-447.2 | 再 17 条 `a1` 的 `Trade`(`ex_ts_ns` = 4 s + k) | `md_count(a1) = 20`;第 4 条 `None`,第 5 条为 `ex_ts_ns` 4 s + 1 ns 的 `MD_TRADE`,第 20 条 4 s + 16 ns;`md_count(b1) = 0` |
 | SEQ-447.3 | 写关键帧;再一条 `a1` 的 `Trade`(`ex_ts_ns` 5 s) | 关键帧后 `md_stamp(a1, 20) = None`(seq 不晚于 `rx_from_seq`),`md_count(a1)` 仍为 20;该成交后 `md_count(a1) = 21`,第 21 条为 `ex_ts_ns` 5 s 的 `MD_TRADE`,第 20 条仍 `None` |
+
+
+### SEQ-448 最近一条 Bbo 的戳与当前 Input 的时间戳
+
+- 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)(`bbo_stamp`/`stamps`)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;s1 订阅 `a1` 的 BBO
+- 实现:`crates/hft-sequencer/tests/views.rs::seq_448_bbo_stamp_and_input_stamps`
+
+| 行 | Input | 期望 |
+|---|---|---|
+| SEQ-448.1 | 连接 0 上 `a1` 的 Bbo(`update_id` 900,`ex_ts_ns` 7 s,`sw_rx_ns` 7.011 s) | 在其 `on_event` 中 `bbo_stamp(a1) = (MD_BBO, 7 s, 7.011 s, 该记录的 rx_tsc)`;`stamps()` 的 `kind` = BBO、`venue_ns` 7 s、`sw_rx_ns` 7.011 s、`rx_tsc` 同上、`engine_ns` = `now().engine_ns` |
+| SEQ-448.2 | 连接 1 上同一更新(`update_id` 900,`sw_rx_ns` 7.020 s) | 不被应用,`bbo_stamp(a1).sw_rx_ns` 仍为 7.011 s;`b1` 有稳态报价的戳 |
+| SEQ-448.3 | 写关键帧;再一条 `update_id` 901 的 `a1` Bbo | 关键帧后 `bbo_stamp(a1) = None`;该 Bbo 后为 `Some` |
+
+### SEQ-449 账户在一个 inst 上的未结订单
+
+- 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)(`open_orders`)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;s1 在 `a1` 的报价上下两张 GTC 买单(49 990、49 991,各 0.001),两张都 Ack
+- 实现:`crates/hft-sequencer/tests/views.rs::seq_449_open_orders`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SEQ-449.1 | 下一条 `a1` 报价的 `on_event` 中读 `open_orders(账户, a1, …)`,缓冲 1 条与 4 条 | 都返回 2;4 条缓冲依次为 49 990、49 991(槽号递增),1 条缓冲里是第一条;账户在 `b1` 上没有未结订单 |
+| SEQ-449.2 | 第一张收到 `CancelAck`,再一条报价 | 返回 1,剩 49 991 那张 |

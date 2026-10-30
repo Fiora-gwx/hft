@@ -210,6 +210,7 @@ pub const MAX_BBO_CONN_SLOTS: u8 = 8;
 ```rust
 pub enum Side       { Buy = 1, Sell = 2 }
 pub enum Tif        { Gtc = 1, Ioc = 2, Fok = 3, PostOnly = 4 }
+impl Tif { pub const FAK: Tif = Tif::Ioc; }   // fill-and-kill 与 Ioc 同一订单语义;原生类型名为 FAK 的 venue(Polymarket)把 Ioc 映射过去
 pub enum MarketKind { Spot = 1, LinearPerp = 2 }   // 市场段;反向(币本位)永续与交割不在 core,不分配值
 pub enum HostClass  { Dev2 = 1, C4 = 2, C8 = 3, Metal = 4, C16 = 5, C32 = 6 }   // 主机类:配置 host.class 与 ECF1 头 host_class 的编码,只追加
 impl VenueId {
@@ -291,10 +292,11 @@ impl RejectBits {
     LINK_STALE = 1<<28 /* 链接开仓:第二腿 inst 的 BBO 连接不健康(非 Live、重同步中或连接活性超时;判定归 hft-risk #5) */;
     LINK_FUNDS = 1<<29 /* 链接开仓:第二腿的可用计价资产或可用保证金不足以负担该链接 */;
     CAPACITY = 1<<30 /* OMS 订单槽或链接表容量耗尽,未建单未发送 */;
+    SELF_TRADE = 1<<31 /* 会与同一策略实例另一账户的未结订单成交(自成交防护) */;
 }
 ```
 
-`RejectBits` 放在这里是为了让 hft-oms、hft-exec、hft-event 的导出器与 hft-risk 同用一份位号,而不让 OMS/执行层依赖 hft-risk。`CAPACITY` 由 [sequencer 意图管线](../hft-sequencer/README.md#意图管线)置位;其余各位何时置位(检查链顺序、哪些类别适用)只在 [hft-risk](../hft-risk/README.md) 定义。
+`RejectBits` 放在这里是为了让 hft-oms、hft-exec、hft-event 的导出器与 hft-risk 同用一份位号,而不让 OMS/执行层依赖 hft-risk。`CAPACITY` 与 `SELF_TRADE` 由 [sequencer 意图管线](../hft-sequencer/README.md#意图管线)置位;其余各位何时置位(检查链顺序、哪些类别适用)只在 [hft-risk](../hft-risk/README.md) 定义。
 
 ### 对冲定价限值
 

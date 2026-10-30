@@ -130,6 +130,8 @@ impl Oms {
 
     /// 只读视图(策略视图、风控、执行层、ops 快照用)。
     pub fn slot(&self, s: SlotRef) -> Option<&OrderSlot>;
+    /// (venue, 账户) 在 inst 上每张未结订单(非 Free、非终态)的句柄,按槽号顺序调用 f;该表的槽一遍(SDK Views::open_orders 的来源)。
+    pub fn each_open(&self, v: VenueId, a: AccountId, inst: InstId, f: impl FnMut(OrderRef));
     pub fn inflight(&self) -> &InflightBook;
     pub fn legs(&self, a: AccountId, g: GroupId) -> &LegState;          // = SDK LegView
     pub fn link_peer(&self, link_id: u32) -> Option<(VenueId, AccountId)>; // 链接另一腿的 venue/account(B1)

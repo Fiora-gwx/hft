@@ -17,6 +17,9 @@ status: impl
 - [使用本组件](#使用本组件)
   - [verify](#verify)
   - [sim](#sim)
+  - [research](#research)
+  - [calib](#calib)
+  - [parity](#parity)
   - [compare](#compare)
   - [latency](#latency)
   - [bench(可选扩展)](#bench可选扩展)
@@ -40,6 +43,12 @@ replayer verify  --journal <dir|s3://…> [--from-seq N] [--to-seq M] [--instanc
 replayer sim     --journal … [--from-seq N] [--to-seq M] [--accounts <a,b>] [--as-sim <account>=<sim-account.toml>] [--seed S] [--check-fills]
                  [--advice recompute|journal] [--model-checkpoint <dir>] [--stress <case>[,<case>…]|gate|all] [--stress-spec <spec.toml>]
                  [--ab <paramsA> <paramsB>] [--emit-journal] --out <dir>
+replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]]
+                 [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N]
+                 [--calib calib.json] [--own] [--tombstone] [--cancel-latency E:R] [--taker-delay B[:S:P]] [--taker-resp-us N]
+                 [--fee-binary K] [--gtd-ms N] [--fill-resp-us N]
+replayer calib    --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N]
+replayer parity   --journal <file|dir> --out <dir> [--variants <file.toml>] [--set NAME=RAW[,…]] [--jobs N]
 replayer compare --a <journal> --b <journal> --map <a账户>=<b账户>[,…] [--from <utc>] [--to <utc>] [--window-ms 2000] --out <dir>
 replayer latency --journal … [--from <utc>] [--to <utc>] [--instance prod|sim] [--venue <v>[,<v>…]]
                  --cal-max-err-ns <ns> --burst-gap-ns <ns> --out <dir>
@@ -100,6 +109,22 @@ verify 是**离线**工具(夜跑与 CI);hft-core 冷启动用 `RecoverDriver`(�
 - 约束:`--accounts` 恰好一个账户;强制 `--advice recompute`(显式给出 `--advice journal` → 退出 2);与 `--check-fills`、`--stress`、`--emit-journal` 互斥(同时给出 → 退出 2);`--as-sim` 可用。
 - 输出 `ab-report.txt` 与 `ab.json`:`ab-report.txt` 的**第一行固定为"相对比较,不是收益估计,不得用于定仓"**,`ab.json` 的第一个字段 `notice` 是同一句话;正文只有 B − A 的差值——[hft-sim 报告字段](../../crates/hft-sim/README.md#报告字段)逐项的差(账户级与按 group)、目标与订单决策条数之差、拒单原因计数之差、第一处决策分歧的 seq;不输出任一组的绝对值。
 - 差值只反映"同一段录下的行情、同一模拟撮合器"下两组参数的相对行为:行情不会对我们的订单作出反应,撮合按 hft-sim 的模型;结论不得用于定仓或放量(放量依据是实时模拟账户与上线门槛)。
+
+### research
+
+研究回放:同一份 sequencer 与策略代码回放一个运行的 seq journal,被模拟账户的回报由进程内 `SimExchange` 重新生成,N 个参数变体 × M 个延迟种子各跑一次,写 `decisions/fills/orders/windows.parquet` 与 `run.json`。机制、选项缺省、屏蔽规则与输出列归 [hft-replay](../../crates/hft-replay/README.md)。它是研究与参数筛选工具([replay-as-research-tool](../../.agents/notes/proposed/architecture/2026-10-29-replay-as-research-tool.md)):输出带参数与模拟参数的哈希,结论不替代模拟账户与上线门槛。退出码:0 成功;2 选项错误(未知选项、缺 `--journal`/`--out`、变体重名);3 输入或运行失败(读不到段、无启动快照、策略种类未注册、变体字段未知或越界、`SetParams` 被拒)。
+
+### calib
+
+从一个实盘运行的 journal 生成该账户的条件延迟池(决策 → Ack、决策 → CancelAck,带负载、参考价变动与窗口相位标签),写成 `research --calib` 可读的校准表;规则归 [hft-replay 校准表的生成](../../crates/hft-replay/README.md#校准表的生成replayer-calib)。退出码:0 成功;2 选项错误(缺 `--journal`/`--account`/`--out`、未知选项);3 输入失败。
+
+### parity
+
+决策一致性:不模拟、用日志里的真实回报驱动,重算决策并与日志决策逐条匹配(每个变体一次;匹配规则、输出与口径归 [hft-replay parity](../../crates/hft-replay/README.md#parity))。退出码:0 基线变体(日志自身参数)的决策与日志完全一致;1 基线有差异(参数变体的差异不影响退出码);2 选项错误;3 输入或运行失败。
+
+### features
+
+特征导出:与 parity 相同的运行方式(不模拟、日志回报驱动),把策略自己声明的特征列(`Strategy::FEATURES`,在线规则读的同一个值)在决策点与引擎 UTC 网格上逐实例写成 `features.parquet` 与 `features.json`;采样、列与元数据归 [hft-replay 特征导出](../../crates/hft-replay/README.md#特征导出)。选项:parity 的全部选项,加 `--every-ms N`(网格,缺省 1000;0 = 不按网格)与 `--no-decisions`(不在决策点取行)。`research --features EVERY_MS` 在模拟运行里写同样的表。退出码:0 成功;2 选项错误(未知选项、`--every-ms 0` 与 `--no-decisions` 同给);3 输入或运行失败。
 
 ### compare
 

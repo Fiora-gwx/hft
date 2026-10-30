@@ -127,6 +127,7 @@ impl<const N: usize> AcctRestPools<N> {
                     .clock
                     .utc_ns(hft_types::Tsc(now))
                     .saturating_add(i64::from(c.timeout_ms) * 1_000_000),
+                account: c.account,
             };
             if c.build.try_push(req).is_err() {
                 pool.build_failed();
@@ -150,7 +151,7 @@ pub(crate) fn submit<const N: usize>(
     tag: u64,
     urgent: bool,
     now: u64,
-) -> Result<ConnId, RestErr> {
+) -> Result<(ConnId, u64), RestErr> {
     let mut headers = [(&[][..], &[][..]); 32];
     let mut count = 0;
     for line in req.headers.as_slice().split(|b| *b == b'\n') {
@@ -183,7 +184,7 @@ pub(crate) fn submit<const N: usize>(
     } else {
         pool.submit(&r, now)?;
     }
-    pool.pending_conn(tag).ok_or(RestErr::NoConn)
+    pool.pending_sent(tag).ok_or(RestErr::NoConn)
 }
 impl<const N: usize> AcctTransport for AcctRestPools<N> {
     fn maintain(&mut self, now: u64) -> bool {
@@ -195,7 +196,7 @@ impl<const N: usize> AcctTransport for AcctRestPools<N> {
         }
         let ix = usize::from(req.endpoint);
         let pool = self.pools.get_mut(ix).ok_or(RestErr::Proto)?;
-        let conn = submit(pool, req, tag, false, now)?;
+        let (conn, _) = submit(pool, req, tag, false, now)?;
         self.active = Some(ix);
         self.tag = tag;
         Ok(conn)

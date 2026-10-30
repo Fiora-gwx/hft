@@ -359,6 +359,19 @@ impl Journal {
         }
     }
 
+    /// Where a processing-time window from `t0` starts reading: the segment before the newest one
+    /// created at or before `t0` (`start_segment`); the journal start without `t0`, for a
+    /// single-segment journal, or when fewer than two segments qualify.
+    pub fn start_for(&self, t0: Option<i64>) -> StartAt {
+        if self.spec.single.is_some() {
+            return self.start();
+        }
+        match t0.and_then(|t| start_segment(&self.segs, t)) {
+            Some(no) => StartAt::SegmentBoot(no),
+            None => self.start(),
+        }
+    }
+
     /// A scan from `start`.
     pub fn scan(&self, start: StartAt) -> Res<Scan> {
         Scan::new(self, start)
@@ -587,6 +600,20 @@ struct ScanState {
 pub struct Scan {
     r: JournalReader,
     st: ScanState,
+}
+
+/// The start segment of a processing-time window from `t0`: of the segments whose header
+/// `created_utc_ns ≤ t0`, the one before the newest (a record's processing time is not earlier
+/// than its segment's creation; the extra segment covers the calibration step at a roll).
+/// `None` when fewer than two segments qualify.
+pub fn start_segment(segs: &BTreeMap<u64, SegFile>, t0: i64) -> Option<u64> {
+    let mut it = segs
+        .values()
+        .filter(|s| s.path().is_some() && s.header.is_some_and(|h| h.created_utc_ns <= t0))
+        .map(|s| s.no)
+        .rev();
+    it.next()?;
+    it.next()
 }
 
 /// Exact logical length of a Var record (prefix + tail, without the record padding).
@@ -1027,7 +1054,13 @@ impl Events {
             return Ok(None);
         }
         if self.scan.is_none() {
-            match self.j.scan(self.j.start()) {
+            // Processing time follows segment creation; venue and hardware times do not.
+            let t0 = if self.q.time == TimeSrc::Proc {
+                self.q.t0
+            } else {
+                None
+            };
+            match self.j.scan(self.j.start_for(t0)) {
                 Ok(s) => self.scan = Some(s),
                 Err(e) => {
                     self.done = true;
