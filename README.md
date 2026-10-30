@@ -62,6 +62,7 @@
 | [strategies/latency-probe](strategies/latency-probe/README.md) | hot | core | 延迟探针:只绑定非正式账户,在主网行情负载下以测试网下单产生延迟验收的订单类样本 |
 | [strategies/book-observer](strategies/book-observer/README.md) | hot | core | 只订阅行情、从不交易的策略:让实例按 group 腿拉取簿与成交(行情验收、新 venue 接入) |
 | [strategies/binary-maker](strategies/binary-maker/README.md) | hot | core | 二元结果代币挂单:参考市场波动够高时在当前窗口两个代币的买一各挂一张 post-only 买单,临近结束与参考价跳动时撤单 |
+| [strategies/pm-taker-probe](strategies/pm-taker-probe/README.md) | hot | core | 实盘吃单验证:人工把 `enabled` 从 0 改为 1 才做一轮——最优卖价按金额买入(SPEND、Ioc),再在最优买价卖回持仓 |
 | [strategies/cdex](strategies/cdex/README.md) · [cross-taker](strategies/cross-taker/README.md) · [maker-taker](strategies/maker-taker/README.md) | hot | optional | CEX-DEX;跨所价差吃单;挂单 + 吃单对冲 |
 | [apps/](apps/AGENTS.md) | — | core / optional | core:hft-core、journal-archiver、watchtower、reconciler、kill-switch、replayer(verify + 模拟重演);optional(冻结):chain-core、chain-grpc-relay、mock-exchange |
 | [python/pipeline](python/pipeline/README.md) · [ops_bot](python/ops_bot/README.md) · [treasury](python/treasury/README.md) | cold | core | pipeline 框架(各策略的插件在 `strategies/<name>/pipeline/`)→ 策略参数(经 hft-py)与预热数据,人工覆盖项按实例分键;Telegram 运维面(按 `from.id` 分角色,老板只读 + 紧急停止 `/stop`);跨所资金监控 + 划转建议 |

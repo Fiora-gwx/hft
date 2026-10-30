@@ -52,7 +52,7 @@ fn on_event(c: &mut Criterion) {
     measure(
         c,
         "strategies/pm-taker-probe/tick_fire",
-        Phase::Armed,
+        Phase::Ready,
         ev::book(U, 0),
     );
     measure(

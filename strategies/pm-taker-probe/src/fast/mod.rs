@@ -35,8 +35,8 @@ pub enum Phase {
     /// Not armed: waits for `enabled` 0 → 1.
     #[default]
     Idle = 0,
-    /// Armed: the buy goes out at the next quote of the leg.
-    Armed = 1,
+    /// Ready: the buy goes out at the next quote of the leg.
+    Ready = 1,
     /// Buy placed in the previous event; its outcome is read on the next one.
     Buying = 2,
     /// Buy has an OMS slot; waits for its end.
@@ -53,7 +53,7 @@ impl Phase {
     fn of(c: u8) -> Option<Phase> {
         Some(match c {
             0 => Phase::Idle,
-            1 => Phase::Armed,
+            1 => Phase::Ready,
             2 => Phase::Buying,
             3 => Phase::BuyLive,
             4 => Phase::Selling,
@@ -124,9 +124,9 @@ impl Fast {
         }
         let en = d.enabled;
         if en && !self.enabled && self.phase == Phase::Idle {
-            self.phase = Phase::Armed;
+            self.phase = Phase::Ready;
         }
-        if !en && matches!(self.phase, Phase::Armed | Phase::Done) {
+        if !en && matches!(self.phase, Phase::Ready | Phase::Done) {
             self.phase = Phase::Idle;
         }
         self.enabled = en;
@@ -136,7 +136,7 @@ impl Fast {
         self.outcome(v, ctx);
         match *ev {
             EventRef::Book { inst, .. } | EventRef::Bbo { inst, .. }
-                if inst == self.inst && self.phase == Phase::Armed =>
+                if inst == self.inst && self.phase == Phase::Ready =>
             {
                 self.buy(v, ctx);
             }
@@ -346,7 +346,7 @@ impl Fast {
         // `enabled` is that of the parameters the instance was built with.
         match phase {
             Phase::BuyLive | Phase::SellLive if self.r.is_some() => self.phase = phase,
-            Phase::Idle | Phase::Armed => {
+            Phase::Idle | Phase::Ready => {
                 self.r = None;
                 self.phase = Phase::Idle;
             }

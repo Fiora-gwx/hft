@@ -36,7 +36,7 @@ spec: README.md
 ### PTP-001 只订阅该腿的簿
 
 - 规则:[订阅](README.md#订阅)
-- 级别:unit
+- 级别:table
 - 里程碑:M3
 - 前置:默认参数,`G1`
 - 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_001_subscribes_the_leg_book`
@@ -50,13 +50,14 @@ spec: README.md
 - 规则:[规则](README.md#规则) 1、[参数](README.md#参数)
 - 级别:table
 - 里程碑:M3
+- 前置:默认参数(另注的除外),`G1`,`U` 报价 0.100 / 0.110
 - 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_002_nothing_until_enabled_goes_0_to_1`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
 | PTP-002.1 | 以 `enabled = 1` 创建;簿更新 | 空闲,无下单 |
 | PTP-002.2 | 再 `SetParams{enabled 1, spend_usdc 1.5}`;簿更新 | 无下单 |
-| PTP-002.3 | `enabled` 0 再 1;簿更新 | `Armed`;一张买单 `px 0.110, qty 13.63` |
+| PTP-002.3 | `enabled` 0 再 1;簿更新 | `Ready`;一张买单 `px 0.110, qty 13.63` |
 | PTP-002.4 | 新实例武装后又 `enabled 0`;簿更新 | 空闲,无下单 |
 
 ### PTP-003 一轮:按金额买入,终结后卖回
@@ -94,6 +95,7 @@ spec: README.md
 - 规则:[参数](README.md#参数)、[规则](README.md#规则) 2
 - 级别:table
 - 里程碑:M3
+- 前置:`PmTakerProbe::DESC.schema`;.4、.5 为以所列 `spend_usdc` 武装的实例,`U` 报价 0.100 / 0.110
 - 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_005_spend_cap_and_parameter_schema`
 
 | 行 | 输入 | 期望 |
@@ -124,6 +126,7 @@ spec: README.md
 - 规则:[规则](README.md#规则) 2–5、[事件处理](README.md#事件处理)
 - 级别:table
 - 里程碑:M3
+- 前置:默认参数(另注的除外),`G1`;每行从新实例开始
 - 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_007_gates_quotes_and_outcomes`
 
 | 行 | 输入 | 期望 |
@@ -140,6 +143,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
 - 里程碑:M3
+- 前置:默认参数,武装;快照写入后以同一参数新建实例并 `restore`
 - 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_008_snapshot_and_restart`
 
 | 行 | 输入 | 期望 |

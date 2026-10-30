@@ -67,7 +67,7 @@ fn ptp_002_nothing_until_enabled_goes_0_to_1() {
     // .3 enabled 0, then 1: armed; the next book update sends the buy.
     d.set(&[(0, 0)]);
     d.set(&[(0, 1)]);
-    assert_eq!(d.s.fast.phase, Phase::Armed, "PTP-002.3");
+    assert_eq!(d.s.fast.phase, Phase::Ready, "PTP-002.3");
     let o = d.book();
     assert_eq!(
         o.places,
