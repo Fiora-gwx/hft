@@ -1,0 +1,16 @@
+# Reference-machine limits from the strategy README; CI reports timings only.
+["strategies/pm-taker-probe/tick_miss"]
+p50_ns = 50
+p99_ns = 150
+
+["strategies/pm-taker-probe/tick_fire"]
+p50_ns = 300
+p99_ns = 1000
+
+["strategies/pm-taker-probe/exec_update"]
+p50_ns = 50
+p99_ns = 150
+
+["strategies/pm-taker-probe/risk_event"]
+p50_ns = 50
+p99_ns = 150

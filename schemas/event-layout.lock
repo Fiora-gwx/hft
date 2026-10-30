@@ -834,3 +834,9 @@ strategy 5 latency-probe
   note 9 TargetRejected
 strategy 6 book-observer
 strategy 7 binary-maker
+strategy 8 pm-taker-probe
+  note 1 BuySent
+  note 2 BuyEnd
+  note 3 SellSent
+  note 4 SellEnd
+  note 5 Skipped

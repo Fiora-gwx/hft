@@ -23,6 +23,7 @@ hft_strategy_sdk::strategy_set! {
         portfolio_carry::PortfolioCarry,
         book_observer::BookObserver,
         binary_maker::BinaryMaker,
+        pm_taker_probe::PmTakerProbe,
     }
 }
 

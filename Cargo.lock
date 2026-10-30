@@ -1885,6 +1885,7 @@ dependencies = [
  "hft-testkit",
  "hft-types",
  "latency-probe",
+ "pm-taker-probe",
  "portfolio-carry",
  "serde_json",
  "zerocopy",
@@ -2739,6 +2740,19 @@ dependencies = [
  "serde_json",
  "venue-polymarket",
  "zerocopy",
+]
+
+[[package]]
+name = "pm-taker-probe"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-strat-lib",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
 ]
 
 [[package]]

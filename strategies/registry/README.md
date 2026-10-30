@@ -26,7 +26,7 @@ status: impl
 
 cross-taker 参数 schema 为 version 3,portfolio-carry 为 version 2,固定第 0 腿为协议 VenueId 1 的 USDT 永续、第 1 腿为 VenueId 11 的同资产 USDT 现货;加载、创建与 SetParams 均由参数检查拒绝其他形态。交易所映射及负责人决定见[产品形态](../../.agents/notes/implemented/feature/2026-10-16-perp-spot-shape.md)。
 
-当前列表包含默认的 latency-probe、portfolio-carry、book-observer、binary-maker 与 feature 门控的 cross-taker。追加策略保留既有项顺序,按 kind_id 排序的 schema 导出不受注册顺序影响。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
+当前列表包含默认的 latency-probe、portfolio-carry、book-observer、binary-maker、pm-taker-probe 与 feature 门控的 cross-taker。追加策略保留既有项顺序,按 kind_id 排序的 schema 导出不受注册顺序影响。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
 
 ```rust
 // src/lib.rs —— 真实策略的列表只写在这一处;每行一个策略,optional 策略用 Cargo feature 门控。
@@ -36,6 +36,7 @@ hft_strategy_sdk::strategy_set! {
         latency_probe::LatencyProbe,                                  // 5(core;non_prod_only)
         book_observer::BookObserver,                                  // 6(core;只订阅行情)
         binary_maker::BinaryMaker,                                    // 7(core;二元结果代币挂单)
+        pm_taker_probe::PmTakerProbe,                                 // 8(core;人工武装的一轮按金额吃单验证)
         #[cfg(feature = "cdex")]        cdex::Cdex,                   // 2(optional)
         #[cfg(feature = "cross-taker")] cross_taker::CrossTaker,      // 3(optional)
         #[cfg(feature = "maker-taker")] maker_taker::MakerTaker,      // 4(optional)
@@ -62,6 +63,7 @@ pub fn export_schemas() -> Vec<(String, String)>;
 | 5 | [latency-probe](../latency-probe/README.md) | core(`non_prod_only`:只能绑定非正式账户) | 默认 |
 | 6 | [book-observer](../book-observer/README.md) | core | 默认 |
 | 7 | [binary-maker](../binary-maker/README.md) | core | 默认 |
+| 8 | [pm-taker-probe](../pm-taker-probe/README.md) | core | 默认 |
 | 0xFF00–0xFFFF | 测试策略(hft-testkit 的 `TestStrategies`、SDK 自己 `tests/` 的宏测试与解耦门槛的补丁副本;不进发布制品) | — | — |
 
 新策略取下一个编号(已登记的最大值 + 1);`schema.id` 约定为 `kind_id as u32`。退役的策略保留其行,crate 列写“退役:<原名>”。

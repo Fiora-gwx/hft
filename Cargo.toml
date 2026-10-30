@@ -44,6 +44,7 @@ members = [
     "tools/hft-pmcfg",
     "strategies/book-observer",
     "strategies/binary-maker",
+    "strategies/pm-taker-probe",
 ]
 
 [workspace.package]

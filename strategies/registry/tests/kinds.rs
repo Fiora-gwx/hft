@@ -23,6 +23,7 @@ fn reg_002_default_kinds_m4() {
     expected.push(("portfolio-carry", 1, false));
     expected.push(("book-observer", 6, false));
     expected.push(("binary-maker", 7, false));
+    expected.push(("pm-taker-probe", 8, false));
     assert_eq!(kinds, expected);
 }
 

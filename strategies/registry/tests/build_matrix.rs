@@ -43,6 +43,7 @@ fn reg_003_build_matrix() {
         "portfolio-carry",
         "book-observer",
         "binary-maker",
+        "pm-taker-probe",
     ]
     .into_iter()
     .collect();
