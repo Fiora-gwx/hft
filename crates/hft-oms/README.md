@@ -481,7 +481,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 | `Ack` | → Live,记 `exch_order_id` | dup | 保持(迟到的新单回执) | 保持 | → Live(证据) | dup |
 | `Reject` | 零成交 → Rejected;有成交见下文 | 同左 | 同左 | 同左 | 同左 | 无成交证据 dup;有成交见下文 |
 | `PartialFill` | 应用增量 → Live,置 `FILL_BEFORE_ACK` | 应用增量 | 应用增量,保持 | 应用增量,保持 | 应用增量 → prev_state 或 Live | Cancelled 时应用增量 + 异常;Filled dup |
-| `Fill`(cum==qty) | → Filled(fill-before-ack,置 `FILL_BEFORE_ACK`) | → Filled | → Filled | → Filled | → Filled | Cancelled 时 → Filled + 异常;Filled dup |
+| `Fill`(cum==qty;按金额买入的槽见[按金额买入](#按金额买入)) | → Filled(fill-before-ack,置 `FILL_BEFORE_ACK`) | → Filled | → Filled | → Filled | → Filled | Cancelled 时 → Filled + 异常;Filled dup |
 | `CancelAck` / `Expired` | → Cancelled(撤掉未确认的单) | → Cancelled(交易所主动撤/IOC 余量) | → Cancelled | → Cancelled | → Cancelled | dup |
 | `CancelReject` 原因=已成交/不存在 | — | — | 若 `filled==qty` → Filled;否则 → Unknown + 查询(不重试撤单) | 同左 | 保持,继续查询 | dup |
 | `CancelReject` 原因=撤单早到(`EARLY`) | — | — | 若 `filled==qty` → Filled;否则重发撤单(→ `PendingCancel`,迁移原因 `CancelReq`,不记延迟戳) | — | 置 `CANCEL_HELD`(收敛为 Live 时发出撤单);`filled==qty` → Filled | dup |
@@ -548,7 +548,7 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 3. 成交增量 `d = ev.cum_filled − slot.filled`:`d ≤ 0` → 成交部分视为重复/乱序,仅状态部分按表处理;`d > 0` → 增量名义 = `ev.avg_px × ev.cum_filled − slot.filled_notional`(`OrderEvent.avg_px` 为交易所给的累计均价,i128 积),`filled_notional` 取新值。未被外来成交抵扣的完整增量通过 `FillOut.notional = Some(增量名义)` 保留原值,现货现金不从已取整的 `FillOut.px × qty` 反算;`px` 仍按增量名义除以数量 HalfEven 取整,供成本与分析使用。墓碑及被部分抵扣的增量没有完整原始名义,输出 `None` 并保留增量价路径;不按比例猜金额。
 4. **与外来成交去重**(成交去重键的唯一定义是 [hft-venue-proto](../hft-venue-proto/README.md) 契约 22:`(inst, trade_id)`,强平/ADL 等 0 或负的成交 id 改用 `(inst, exch_order_id, fill_seq)`;本 crate 不另设键):gw 无法匹配到槽的成交先暂存 `gw.unmatched_hold_ms`(默认 5 000,等同账户的 Ack 补上 exch id),超时才报为 `ExternalFill{cause: Unknown}`(规则在 [hft-venue](../hft-venue/README.md))。若之后该单被查询或迟到回报匹配到槽,且 `ext_held[slot.exch_order_id] = b > 0`(这部分已按外来成交入账):槽的 `filled`、链接的 `first_net` 照常按全量 `d` 推进,但 `FillOut` 与 LegTracker 只计 `d − min(d, b)`(为 0 时不产出 `FillOut`),`b` 同量递减,`FillOut.flags |= EXT_DEDUP`,写 `Note{OmsExtDedup}`(P1)。第 1、2 条的 `ForeignFill` 同样按 `ext_held[ev.exch_order_id]` 先扣,只产出 `d − min(d, b)`,并写同一 Note。对冲按 OnFill 规则发出,数量受**该方向裸量**约束:若这段敞口已被 hft-exec 的外来成交默认处理或策略平掉,裸量为 0,不再重复对冲;若仍裸露,照常补发。
 5. **`avg_px` 为 0**(交易所没给均价):`OrderEvent` 成交类回报 → 退回 `ev.px × d`(`ev.px` 是本笔成交价);`QueryResult`(`ev.px` 可能只是委托价)→ 以委托价计、`FillOut.flags |= PX_EST`、写 `Note{OmsFillPxEstimated}`(P1)与 `Note{OmsNeedsRestQuery, trades = 1}`,由对账的成交历史校正价格(校正走 ledger 的采纳路径)。venue 契约:`QueryResult` 在 `cum_filled > 0` 时应给均价,给不出的由 gw 先查成交再出事件。
-6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误)→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。
+6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误;按金额买入的槽改按金额判定,见[按金额买入](#按金额买入))→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。
 7. `venue-<x>` 必须在每条成交回报里给出**累计成交量** `cum_filled` 与累计均价;给不出的在 gw 内按 exec id 去重合成;仍给不出则该 venue 不允许启用下单(加载时拒绝)。
 8. **冷读者的入账依据**:第 1、2 条每产出一条 `ForeignFill`,同一事件内另写一条 `Note{OmsForeignFill}`(Info,Output 类,回放比对;字段唯一定义在此):`Note.inst = inst`、`Note.group = GROUP_NONE`,`v = [venue | account << 8 | side << 16 | path << 24 | fee_asset << 32, qty, px, fee, exch_order_id, trade_id, fill_seq, cum_filled]`(`path`:防御路径 = 1、`StaleGen` = 2;数值为 raw;`fill_seq` = `trade_id = 0` 时 `cum_filled` 的 raw 值,否则 0)。这笔外来成交与对账 `AUTO_EXTERNAL` 同理,由 sequencer 在本条 Input 内按这些字段确定地构造为 `ExternalFill{cause = Unknown}`(现金字段按第 10–12 条,其余字段为 0)并入账,不另写 Input;冷读者(reconciler 的引擎视图、hft-py)在同一事件内读到本 Note 时构造同一 `ExternalFill`,经 hft-ledger 的 journal 消费路径入账(消费规则归 [hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill),码名登记归 hft-event)。
 9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量通常不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;**任何回报带来成交增量且 `fee ≠ 0` 时,该费用随增量入账,同时 `fee_cum = max(fee_cum, ev.cum_filled)`**——venue 契约:非成交回报若带费用,它就是这段增量(至 `cum_filled`)的费用,之后覆盖同一数量的成交回报不再记费;冷读者(hft-ledger 的 journal 消费)按同一规则。**槽已回收时同样适用**:墓碑保存该代的 `fee_cum`,命中墓碑、`d ≤ 0` 的 `PartialFill`/`Fill` 若 `ev.cum_filled > Tomb.fee_cum` 且 `fee ≠ 0`,只输出 `FeeOut`(计 `dup`,不产出 `FillOut`),并推进 `Tomb.fee_cum`;墓碑迟到成交(`d > 0`)随 `FillOut` 记费并推进水位。
@@ -562,6 +562,24 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 逐笔现金事实按同一完整订单身份处理,即使未声明 PERP_CASH:当前 `fill_cash_qty = qty = cum_filled − filled` 且已有现金覆盖等于 filled 才可并入累计水位,以实际金额输出 `FillOut.cash`。已知零现金同样入水位;之后缺事实的新成交、缺口、混合表示、现货现金事实或无保留身份均失败,不退回均价估算。重复/旧水位不再入账,同一成交键的载荷一致性由协议保证;无新成交的非现金回报保留已知前缀。费用单独记一次。快照沿用槽/墓碑累计水位,不依赖网关缓存。完整外来现金能力的限制保持不变。
 
 `FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与非零的回报 inst 不一致(仅 PERP_CASH,见第 2 条),或原始 ExternalFill 的品种不是该 venue 的 PERP_CASH 品种(`external_cash_guard` 在保留来源之前拒绝,节 12 恢复同样只接受这种行,保证写出的快照都能恢复)。
+
+### 按金额买入
+
+槽带 `OrderFlags::SPEND`(`place` 时意图带 SDK `OrderIntent::SPEND` 且 `spend_valid` 为真才置位;位值归 [hft-event](../hft-event/README.md#orderflags))= 买入 `Ioc`/`Fok`、无链接,至多花 `px × qty` 的计价资产,成交价低于 `px` 时 `cum_filled` 可以超过 `qty`。与其他槽的差别只有三处,其余规则(增量、入账、费用、墓碑、Unknown 收敛)不变:
+
+1. **何时成交完**:不按 `cum_filled ≥ qty` 判定;`Fill` 回报(交易所说该单已成交完,无新增量也一样)或 `QueryResult{Filled}` 才 → `Filled`;`PartialFill` 即使 `cum_filled > qty` 也只应用增量、保持原状态;`Expired`/`CancelAck` 照表处理(`filled ≥ qty` → `Filled`,否则 `Cancelled`)。不带增量地进入 `Filled`(上述各路径与撤改 `GONE`)时,拥有者收到一条 `OrderUpdate::Filled{d: 0, px: 累计均价, cum: filled, done: true}`,所以每张按金额买入单都以恰一条 `done` 更新(或 `Cancelled`/`Rejected`)告诉拥有者终结。
+2. **超量**:`2 × filled_notional > 2 × px × qty + cum_filled`(`filled_notional` 为本条增量入账后的累计名义,i128 原始积;容差是均价取整的每单位半个价格单位)时才算超量(第 6 条的 `OVERFILL`、`Note{OmsOverfill}`);价格为估计值(`PX_EST`)的增量不判超量。`cum_filled > qty` 本身是正常成交,仓位与账本按实际数量记。
+3. **在途**:InflightBook 的剩余量取 `open_qty()` = `qty − ⌈filled_notional / px⌉`(≥ 0,未花的金额按委托价折成的数量,不小于 `qty − filled`),名义 = 该量 × `px`;风控的下单名义仍按 `px × qty`([hft-risk](../hft-risk/README.md))。
+
+```rust
+/// 为真 ⇔ 意图不带 OrderIntent::SPEND,或 side = Buy、tif ∈ {Ioc, Fok} 且无链接。sequencer 在意图管线第 0 步对策略 place 调用,
+/// 为假 → 只写 OrderDecision{reject = INVALID}、结果 Rejected(INVALID)(同 link_valid)。
+pub fn spend_valid(it: &OrderIntent) -> bool;
+impl OrderSlot {
+    pub fn spend(&self) -> bool;          // oflags 含 SPEND
+    pub fn open_qty(&self) -> Qty;        // 非 SPEND = remaining();SPEND 见第 3 条
+}
+```
 
 ### 成交净量(B4)
 
@@ -800,7 +818,7 @@ const _: () = assert!(size_of::<LegState>() == 192);
 
 | 项 | 键 | 内容 | 读者 |
 |---|---|---|---|
-| `open_buy`、`open_sell` | (account, inst) | 非终态槽剩余量(两类在途之和) | 仓位检查 #7 的 Open 与 Reduce(防重复开仓;hft-risk `open_qty`、`pending_reduce`) |
+| `open_buy`、`open_sell` | (account, inst) | 非终态槽剩余量(两类在途之和;按金额买入的槽取 `open_qty()`,见[按金额买入](#按金额买入)) | 仓位检查 #7 的 Open 与 Reduce(防重复开仓;hft-risk `open_qty`、`pending_reduce`) |
 | `imm_buy`、`imm_sell` | (account, inst) | 同上,只计即时在途 | 仓位检查 #7 的 Flatten 与 Hedge(hft-risk `open_qty_immediate`、`pending_reduce_immediate`) |
 | 在途名义 | (account, group)、(account, venue) | 非终态 Open 类槽剩余量 × 委托价 | 名义检查 |
 | `buy_notional` | (account, venue) | 非终态现货买单剩余量 × 委托价 | 可负担性 `avail_quote` |

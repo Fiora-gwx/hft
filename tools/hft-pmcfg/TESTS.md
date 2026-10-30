@@ -15,9 +15,9 @@ spec: README.md
 | 概要 | PMC-005 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 见子节 |
-| 命令行 | PMC-001、PMC-002、PMC-005 |
+| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007 |
 | 多账户 | PMC-001、PMC-003、PMC-004 |
-| 库 | PMC-004、PMC-005、PMC-006 |
+| 库 | PMC-004、PMC-005、PMC-006、PMC-007 |
 | 实现说明 | PMC-005、PMC-006 |
 | 延迟与资源契约 | 不适用:无门槛 |
 | 测试与验收 | 不适用:非规范 |
@@ -42,6 +42,7 @@ spec: README.md
 | PMC-001.3 | `--live 12345 k1 --no-presign --daily-loss 20.5 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5` | 模式 Live:UID `12345`、目录 `k1`、`presign = false`、`daily_loss_abs = 20.5 USDC (20 500 000)`、resumes 3、carry `(20 755, −3.5 USDC (−3 500 000))`、无附加账户 |
 | PMC-001.4 | `--live 12345 k1` | `presign = true`;carry、`daily_loss_abs`、resumes 均为 `None` |
 | PMC-001.5 | `--account acct-b:888:any k3 --live 12345 k1 --live-account 777 k2 --account acct-c:999:any k4` | 附加账户依次为 `acct-b`/888/k3/any、无标签/777/k2/any、`acct-c`/999/k4/any;标签 `[pm-live, acct-b, pm-live-3, acct-c]` |
+| PMC-001.6 | `--taker-probe --live 12345 k1 --param spend_usdc=1500000` | 模式 LiveProbe:UID `12345`、`presign = true`;参数 `[(spend_usdc, 1 500 000)]` |
 
 ### PMC-002 不合法的命令行被拒绝并给出原因
 
@@ -73,6 +74,10 @@ spec: README.md
 | PMC-002.18 | `--daily-loss 5 --daily-loss 6` + L | `given twice` |
 | PMC-002.19 | `--live 12345`(缺 KEYS_DIR) | `--live: missing KEYS_DIR` |
 | PMC-002.20 | `--day-loss-carry 2026-10-29 -1`,无 `--live` | `--day-loss-carry needs --live` |
+| PMC-002.21 | `--taker-probe`,无 `--live` | `--taker-probe needs --live` |
+| PMC-002.22 | `--taker-probe --param clip_shares=5` + L | `not a pm-taker-probe parameter` |
+| PMC-002.23 | `--taker-probe --param spend_usdc=2000001` + L(超过 schema 上限 2 USDC) | `outside` |
+| PMC-002.24 | `--taker-probe --taker-probe` + L | `given twice` |
 
 ### PMC-003 `--account` 条目的解析与账户约束
 
@@ -118,7 +123,7 @@ spec: README.md
   1. 对每行分别运行工具与对应的库函数,写到两个目录
   2. 运行 `hft-pmcfg --no-presign <bad> <hot> 10.0.0.5 ens5`
 - 期望:
-  - 步骤 1 每行退出 0、标准输出为工具目录下 `core.toml` 的路径;`core.toml`、`principals.toml`、`refdata.bin`、`engine.bin`、`risk_params.bin`、`strategy_params.bin` 两边逐字节相同。行:.1 无模式选项 ↔ `write_polymarket_sim`;.2 `--maker --param clip_shares=7` ↔ `write_polymarket_maker_sim_with`;.3 `--live 12345 k1 --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5` ↔ `write_polymarket_maker_live`(`presign = false`、20 USDC、3、(20 755, −3.5 USDC));.4 `--live 12345 k1 --live-account 777 k2 --account acct-b:888:any k3 --param clip_shares=7` ↔ `write_polymarket_maker_live_with`
+  - 步骤 1 每行退出 0、标准输出为工具目录下 `core.toml` 的路径;`core.toml`、`principals.toml`、`refdata.bin`、`engine.bin`、`risk_params.bin`、`strategy_params.bin` 两边逐字节相同。行:.1 无模式选项 ↔ `write_polymarket_sim`;.2 `--maker --param clip_shares=7` ↔ `write_polymarket_maker_sim_with`;.3 `--live 12345 k1 --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5` ↔ `write_polymarket_maker_live`(`presign = false`、20 USDC、3、(20 755, −3.5 USDC));.4 `--live 12345 k1 --live-account 777 k2 --account acct-b:888:any k3 --param clip_shares=7` ↔ `write_polymarket_maker_live_with`;.6 `--live 12345 k1 --taker-probe --param spend_usdc=1500000` ↔ `write_polymarket_taker_probe_live`
   - .5 步骤 2 退出 2,标准输出为空,标准错误含 `--no-presign needs --live` 与 `usage: hft-pmcfg`;`<bad>` 不存在
 - 实现:`tools/hft-pmcfg/tests/output.rs::pmc_005_tool_output_equals_library`
 
@@ -132,6 +137,22 @@ spec: README.md
 - 期望:两种构建的 ECF1 字节逐字节相同
 - 实现:`tools/hft-pmcfg/tests/output.rs::pmc_006_engine_base_equals_seq_rig_setup`
 
+### PMC-007 实盘吃单探针配置:策略换成 pm-taker-probe,其余与实盘做市相同
+
+- 规则:[命令行](README.md#命令行)、[库](README.md#库)
+- 级别:unit
+- 里程碑:M6
+- 前置:`PmLive`:UID `12345`、目录 k1,附加账户 shorthand(777, k2);`write_polymarket_taker_probe_live`(参数 `spend_usdc = 1 500 000`)与 `write_polymarket_maker_live` 写到两个目录
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_007_taker_probe_live_output`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-007.1 | 两个 `core.toml` 去掉 `sha256` 行;`engine.bin`;refdata 的 inst 数与实例 1 的账户 | 相同 |
+| PMC-007.2 | refdata 实例 | 恰一个:kind 8、名 `pm-taker-probe` |
+| PMC-007.3 | `strategy_params.bin`(`parse_spb1` + `decode_body`) | kind 8、账户 1、一个 group(一腿:InstId 1、Polymarket,`open_allowed = 1`);字段值 `[enabled 0, spend_usdc 1 500 000, sell_back 1, sell_delay_ms 0, sell_retries 0]` |
+| PMC-007.4 | `risk_params.bin` | 价格带含 `rr_max_cross = PM_PROBE_RR_MAX_CROSS`(做市配置不含);账户与 venue 限额行逐项相同 |
+| PMC-007.5 | 参数 `clip_shares=5` | `Err`,含 `not a pm-taker-probe parameter` |
+
 ## 验收
 
-PMC-001–PMC-006 全部通过。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。
+PMC-001–PMC-007 全部通过。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。

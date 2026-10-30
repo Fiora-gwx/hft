@@ -1260,6 +1260,8 @@ impl SimExchange {
                 unexp: 0,
                 unexp_ts: 0,
                 exp_at: 0,
+                // A spend order is a taker order: it never rests, so none is restored.
+                spend: false,
             };
             if let Some(x) = a.orders.get_mut(k) {
                 *x = o;

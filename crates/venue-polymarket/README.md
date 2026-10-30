@@ -1,5 +1,5 @@
 ---
-description: "Polymarket CLOB 二元结果代币的纯协议实现(optional):market 频道解码与合成序号、运行期 token 绑定表、文本 PING 心跳、VenueCaps 默认值;REST 下单(存款钱包签名、post-only、GTD)、撤单与查单,用户频道回报,账户启动核验"
+description: "Polymarket CLOB 二元结果代币的纯协议实现(optional):market 频道解码与合成序号、运行期 token 绑定表、文本 PING 心跳、VenueCaps 默认值;REST 下单(存款钱包签名、post-only、GTD;FAK/FOK 吃单)、撤单与查单,用户频道回报,账户启动核验"
 kind: crate
 tier: pure
 scope: optional
@@ -26,6 +26,7 @@ status: impl
   - [签名](#签名)
   - [凭证](#凭证)
   - [下单](#下单)
+  - [吃单](#吃单)
   - [预签名](#预签名)
   - [用户流事件表](#用户流事件表)
   - [累计量与费用来源](#累计量与费用来源)
@@ -144,14 +145,14 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | 字段 | 值 |
 |---|---|
 | `market` | `Spot` |
-| `flags` | `POST_ONLY`、`IOC`、`FOK`(交易所支持;本实现只编码 `PostOnly` 与 `Gtc`,IOC/FOK → `Unsupported`);不声明 `CANCEL_NEEDS_ACK`:撤单按订单哈希,哈希在签名时已知,下单回执未到也立即按哈希撤([下单](#下单)) |
+| `flags` | `POST_ONLY`、`IOC`、`FOK`(`PostOnly`、`Gtc` 编码为 GTD 挂单,`Ioc`/`Fok` 编码为 FAK/FOK 吃单,见[吃单](#吃单));不声明 `CANCEL_NEEDS_ACK`:撤单按订单哈希,哈希在签名时已知,下单回执未到也立即按哈希撤([下单](#下单)) |
 | `fee_asset_rule` | `Quote` |
 | `required_spot_borrow` | `Some(false)` |
 | `own_liquidation_marker` | `NotIdentifiable` |
 | `testnet` | `None`(交易所没有测试网) |
 | `dms` | `None` |
 
-过期保护 `stale_guard()` = `ExpireAt{default_ms: GTD_S × 1000}`(300 000;官方文档 2026-10-23):每笔下单都是 GTD,`expiration` = 编码时刻秒 + `GTD_S`(见[下单](#下单));交易所对 GTD 单有 60 s 安全阈值,实际在 `expiration` 前 60 s 失效,`expiration` 过近的请求在撮合之前被拒(`INVALID_ORDER_EXPIRATION`),失效后的订单不再撮合。窗口由 `GTD_S` 唯一确定,不读 `gw.stale_guard_ms`;OMS 的 `expire_window_ms[polymarket]` 取这个 `default_ms`(hft-core Polymarket 配置),查单 `NotFound` 在下单后 300 500 ms 由 OMS 定为 `Rejected(NOT_FOUND)`([hft-oms Unknown 收敛](../hft-oms/README.md#unknown-收敛流程))。
+过期保护 `stale_guard()` = `ExpireAt{default_ms: GTD_S × 1000}`(300 000;官方文档 2026-10-23):每笔挂单都是 GTD,`expiration` = 编码时刻秒 + `GTD_S`(见[下单](#下单));FAK/FOK 单不挂单、撮合后即结束([吃单](#吃单)),同一窗口对它们只是更保守;交易所对 GTD 单有 60 s 安全阈值,实际在 `expiration` 前 60 s 失效,`expiration` 过近的请求在撮合之前被拒(`INVALID_ORDER_EXPIRATION`),失效后的订单不再撮合。窗口由 `GTD_S` 唯一确定,不读 `gw.stale_guard_ms`;OMS 的 `expire_window_ms[polymarket]` 取这个 `default_ms`(hft-core Polymarket 配置),查单 `NotFound` 在下单后 300 500 ms 由 OMS 定为 `Rejected(NOT_FOUND)`([hft-oms Unknown 收敛](../hft-oms/README.md#unknown-收敛流程))。
 
 限速默认值:`Ip`/`NewConns` 300 次每 5 分钟,`Conn`/`WsInMsgs` 每秒 10 条,`Account`/`Orders` 每秒 20 单,`Account`/`Cancels` 每秒 40 单(交易所按 key 每秒 40 单、突发 60,撤单 80、突发 120,2026-10-22 官方文档;默认各取一半;撤单走自己的窗口,不占下单额度,规则归 [hft-venue 限速兜底](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构))。`SHARED_EGRESS_IP = true`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派)):交易所按 IP 的限制是 Cloudflare 限流(超出排队而不拒绝),下单与撤单的限额按 key 计,所以同一 venue 的多个 Live 账户可以共用一个出口 IP(hft-core 不报 `SharedAccountIp`;按 IP 计的 `Ip`/`NewConns` 额度由共用者合计)。死手 `None`:交易所的订单心跳(`POST /v1/heartbeats`,链式 `heartbeat_id`,10 s 无心跳撤全部挂单)尚未接入,见[已知限制](#已知限制与后续工作)。
 
@@ -178,7 +179,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 | op | 请求 | 说明 |
 |---|---|---|
-| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`timestamp` = 毫秒时间戳,每账户严格递增(同一毫秒的第二单取上一单 + 1:V2 以它代替 nonce,须唯一);`salt` = (`timestamp` 低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字)。签名 = 存款钱包签名(类型 3);有匹配的[预签名](#预签名)订单时用它(`timestamp`、`salt`、签名取自该单),否则当场签名。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
+| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;`Tif::Ioc`(= `Tif::FAK`)/`Tif::Fok` → FAK/FOK 吃单(请求体、金额与回报见[吃单](#吃单));reduce-only、平仓标记 → `Unsupported`;吃单买入必须带 `OrderFlags::SPEND`,其他订单不得带它,否则 `Unsupported`([吃单](#吃单))。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`timestamp` = 毫秒时间戳,每账户严格递增(同一毫秒的第二单取上一单 + 1:V2 以它代替 nonce,须唯一);`salt` = (`timestamp` 低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字)。签名 = 存款钱包签名(类型 3);有匹配的[预签名](#预签名)订单时用它(`timestamp`、`salt`、签名取自该单),否则当场签名。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
 | `Cancel` | `DELETE /order {"orderID":"0x…"}`:哈希按 `exch_order_id` 取,没有(REST 回执未到)时取编码 `Place` 时为目标 client id 记下的哈希,不等回执;都没有(重启前的订单):`DELETE /cancel-market-orders {"asset_id":<token>}` | 后者撤该账户在该代币上的全部挂单;本 venue 的策略每个代币至多一张挂单。回执未到时按哈希发出的撤单记在 `GwCtx`(先撤后到的处理见下方"先撤后到") |
 | `CancelAll` | `inst ≠ 0`:`DELETE /cancel-market-orders {"asset_id"}`;`inst = 0`:`DELETE /cancel-all` | |
 | `Query` | `GET /data/order/<哈希>` | 哈希按 `exch_order_id` 取;没有(REST 回执未到,槽在 `Unknown`)时取编码 `Place` 时为目标 client id(epoch、账户、槽、代都相同)记下的哈希;都没有 → `UnknownTarget` |
@@ -189,7 +190,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 | 请求 | 应答 | 产出 |
 |---|---|---|
-| `POST /order` | 200 `{"success":true,"orderID":"0x…","status":"live"|"matched"|…}` | `Ack`(成交由用户频道报);该单此前已在定槽之前低于原始量完成([累计量与费用来源](#累计量与费用来源))时,其后再一条 `QueryResult{Filled}`(`cum_filled` = 已知累计量,`avg_px` = 订单价) |
+| `POST /order` | 200 `{"success":true,"orderID":"0x…","status":"live"|"matched"|…}` | `Ack`(挂单的成交由用户频道报;FAK/FOK 单其后按[吃单](#吃单)定终态);该单此前已在定槽之前低于原始量完成([累计量与费用来源](#累计量与费用来源))时,其后再一条 `QueryResult{Filled}`(`cum_filled` = 已知累计量,`avg_px` = 订单价) |
 | | 400 `{"error":"order 0x… is invalid. Already canceled."}`(本进程先撤了这个哈希,见"先撤后到") | `CancelAck{slot, gen, exch_order_id = 该哈希的键}`(不是 `Reject`);`raw_code` = 消息的码 |
 | | 200 `{"success":false,"errorMsg":…}`;400/401/403/404 `{"error":…}`;425、429 | `Reject`,`reject_code` = 消息文本的码(无消息时为 HTTP 码);425/429 另置 `ctl = RateLimited` |
 | | 5xx、其他、无应答 | `outcome_unknown` |
@@ -211,6 +212,36 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | `not_canceled`,回执已到且为 `live`/`delayed` | — | `CancelReject{EARLY}` |
 | `not_canceled`,其余(回执后发出的撤单、已终态) | — | `CancelReject{GONE}` |
 
+### 吃单
+
+`Tif::Ioc`(= `Tif::FAK`)编码为 FAK 单(立即与簿成交,其余撤销),`Tif::Fok` 编码为 FOK 单(全部成交或全部撤销)。2026-10-30 实盘探针(BTC 5 分钟盘,约 1 USDC)核实了请求体、三种应答与用户频道事件;部分成交未遇到(簿不薄),按交易所文档处理。
+
+**请求**:`POST /order`,`order` 对象与 GTD 挂单相同(同一签名、同一 `timestamp`/`salt` 规则),但 `"expiration":"0"`;顶层只有 `order`、`owner`、`"orderType":"FAK"`/`"FOK"`、`"deferExec":false`,没有 `postOnly`(官方客户端的市价单)。总是当场签名:不用、也不锚定[预签名](#预签名)订单(预签名只为挂单)。
+
+**金额**(官方客户端市价单的取整;以 1e-6 为单位;inst 的 tick 必须是 10 的幂 0.1–0.0001,金额小数位 = min(tick 小数位 + 2, 4):交易所对市价单的份数(买)与 USDC(卖)最多收 4 位小数,2026-10-30 实盘在 0.01 tick 市场上以 5 位小数被拒 "taker amount a max of 4 decimals";tick 取 refdata):
+
+| 方向 | `makerAmount` | `takerAmount`(最少收到) |
+|---|---|---|
+| 买 | `px × qty` USDC 向下取整到 0.01 | `makerAmount / px` 份向下取整到金额小数位 |
+| 卖 | `qty` 份向下取整到 0.01 | `makerAmount × px` USDC(恰为金额小数位) |
+
+**吃单买入是按金额买入**(hft-oms [按金额买入](../hft-oms/README.md#按金额买入),负责人 2026-10-30 决定):交易所按 `makerAmount` 的 USDC 撮合,成交价低于 `px` 时收到的份数多于 `qty`,所以 `Place` 的吃单买入必须带 `OrderFlags::SPEND`(不带 → `Unsupported`);卖单与挂单带该位同样 `Unsupported`。买单的 `trade` 只产出 `PartialFill`,何时成交完只由下单应答(金额是否用完)或查单决定;卖单仍按份数。
+
+`px` 是意图的最差价,必须在 inst 的 tick 上;不在 tick 上、tick 不是 10 的幂、任一金额取整后为 0 → `FieldOverflow`。例:买 0.35 × 2.914286 份 → 1020000 / 2914200;卖 0.35 × 2.914286 份 → 2910000 / 1018500。实际最差价:买 = `makerAmount / takerAmount`,高于 `px` 不到一个金额步长对应的价差(上例 0.350010);卖 = `px`。交易所按金额撮合:买单花掉 `makerAmount` 的 USDC(全部成交时收到 `makerAmount / 成交均价` 份,成交价低于 `px` 时多于 `qty`;按 `px` 全部成交时比 `qty` 少不足 0.01 USDC 对应的份数),卖单卖出 `makerAmount` 的份数。
+
+**应答**(`decode_rest`):
+
+| 应答 | 产出 |
+|---|---|
+| 200 `{"status":"matched","takingAmount","makingAmount",…}`(`takingAmount` = 收到的:买为份数、卖为 USDC;`makingAmount` = 付出的) | `Ack`;"成交完" = 买:`makingAmount` ≥ 签名的 `makerAmount`(整单金额用完,份数不论);卖:累计量 = max(M, 已报) ≥ 订单量。成交份数 M(买取 `takingAmount`、卖取 `makingAmount`,按 inst qty 精度向下取整)超过用户频道已报的累计量时,一条 `Fill`(成交完)或 `PartialFill`,`qty` = 差额、`px` = `avg_px` = USDC / M(HalfEven 到 inst 价格精度);这条不是 `Fill` 时(买:没有新增成交或金额未用完;卖:累计量小于订单量)再一条终态:金额用完 → `QueryResult{Filled}`,否则 → `Expired`(余量被撤);均带 `cum_filled` 与 `avg_px`。每单一次 |
+| 200 `status` = `unmatched` 或其他非 `live`/`delayed` 的状态 | `Ack`,再 `Expired{cum_filled = 已报累计量}` |
+| 200 `live`/`delayed` | 只有 `Ack`;成交由 `trade` 事件报,终态由 OMS 的 `ioc_timeout_ms` → `Unknown` → 查单定 |
+| 400 `no orders found to match with FAK order. …`(FAK 无可成交)、400 `order couldn't be fully filled. FOK orders are fully filled or killed.`(FOK 不能全部成交) | `Reject`,`reject_code` = 消息的码(两条消息的码不同),非 `outcome_unknown`;OMS 槽终态 `Rejected` |
+
+**用户频道**:FAK/FOK 单没有 `order` 事件(实测),只有 `trade`:`MATCHED` 在发出后约 200 ms,`MINED` 约 2.3 s。`trade` 的 `taker_order_id` 是本进程签出且未终态的 FAK/FOK 单、`status = MATCHED` 时,每个 `id` 计一次(每单记 4 个,循环覆盖),产出 `PartialFill`(卖单累计 ≥ 订单量为 `Fill`;买单总是 `PartialFill`,累计可超过订单量):`qty` = `size`、`px` = 该笔 `price`、`avg_px` = 累计均价、`ex_ts_ns` = `timestamp`,按签出的 client id 定槽(回执未到也归本槽)。其他状态(`MINED`、`CONFIRMED`、`RETRYING`、`FAILED`)、下单回执已定终态之后的、以及挂单为 maker 的 `trade` 不产出事件;FAK/FOK 单的 `order` 事件(若出现)忽略。回执与 `trade` 先后不定,两条路径按累计量去重,收敛到同一累计量。
+
+**查单**:FAK/FOK 单的 `size_matched` 可以超过 `original_size`(买单花完金额),不按形状错误处理;查得终态(非 `LIVE`/`DELAYED`)后不再计 `trade`。
+
 ### 预签名
 
 当场签名一单约 84–92 µs(钱包私钥派生地址一次曲线乘法、ECDSA 签名一次,[延迟与资源契约](#延迟与资源契约)),都在 gw 线程上。开启预签名后,gw 在空闲的轮次([hft-venue §4](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构) 第 8 步,`gw_idle`)提前签好 `Place` 可能用到的订单,`Place` 只填请求体(约 4 µs)。默认关;hft-core 的 `venues.<v>.presign` 开启([配置文件字段](../../apps/hft-core/README.md#配置文件字段))。
@@ -230,7 +261,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | `order`,`type = PLACEMENT` | 无(回执来自 REST);记下哈希 |
 | `order`,`type = UPDATE` | `size_matched` 比 `GwCtx` 里该单的累计量大时一条 `PartialFill`(订单完成时 `Fill`,见[累计量与费用来源](#累计量与费用来源)):`qty` = 增量,`px` = `avg_px` = 订单价(挂单按自己的价格成交),`detail` = 方向,`ex_ts_ns` = `timestamp`(毫秒);低于原始量完成时其后再一条 `QueryResult{Filled}` |
 | `order`,`type = CANCELLATION` | 先按 `size_matched` 补成交(同上),再一条 `CancelAck`(未终态、未完成且能定槽时) |
-| `trade` | 无(成交以订单的累计量为准;`MATCHED → MINED → CONFIRMED` 的链上状态不进事件) |
+| `trade` | 挂单无(成交以订单的累计量为准;`MATCHED → MINED → CONFIRMED` 的链上状态不进事件);本进程的 FAK/FOK 单见[吃单](#吃单) |
 | 其他 `event_type` | `skip = Unknown`,事件名供 Note |
 | `PONG` | `skip = Listed` |
 
@@ -244,7 +275,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | 完成 | `size_matched > 0` 且(`status = MATCHED` 或剩余 `original_size − size_matched` 不足 inst 的一个 `lot`):交易所的金额取整使完全成交的单常剩下零头(2026-10-23 实盘:5 份的单 `size_matched` 4.99737、4.99116)。完成时成交类事件为 `Fill`;低于原始量完成的,OMS 只在 `cum_filled ≥ qty` 时把 `Fill` 定为终态,所以其后再一条 `QueryResult{Filled, cum_filled, avg_px = 订单价}`(OMS 按结果收敛为 Filled),每单一次;槽未知时欠着,在 REST 回执的 `Ack` 之后补发 |
 | 本笔量 | `size_matched` − `GwCtx` 中该单上次的累计量;重复推送(两条连接、重放)不再产出 |
 | 价格、均价 | 订单的 `price`(挂单不会以别的价格成交) |
-| 手续费 | 0:挂单方不付费(吃单费 0.07·p·(1 − p) 本实现不产生,post-only 单不会吃单);返佣按日另发,不进订单事件 |
+| 手续费 | 0:挂单方不付费;返佣按日另发,不进订单事件。FAK/FOK 单的吃单费(0.07·p·(1 − p))也报 0:探针的 `trade` 为 `fee_rate_bps = "0"`,应答金额未扣费,扣费方式待核实(方法:见[已知限制](#已知限制与后续工作)) |
 | `trade_id` | 0;去重键按契约 22 的 `(inst, exch_order_id, fill_seq = cum_filled)` |
 
 ### 结果未知码表
@@ -253,7 +284,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 | 类 | 码 |
 |---|---|
-| 确定拒绝(订单没有进入撮合) | HTTP 400(含 `invalid post-only order: order crosses book`、`not enough balance / allowance`、订单格式错误)、401、403、404;HTTP 425(撮合引擎重启中)、429(限速),二者另置 `ctl = RateLimited`;200 且 `success: false` |
+| 确定拒绝(订单没有进入撮合) | HTTP 400(含 `invalid post-only order: order crosses book`、`not enough balance / allowance`、FAK 无可成交、FOK 不能全部成交([吃单](#吃单))、订单格式错误)、401、403、404;HTTP 425(撮合引擎重启中)、429(限速),二者另置 `ctl = RateLimited`;200 且 `success: false` |
 | 结果未知 | 5xx、其他未登记状态、无应答 |
 | `GONE`(撤单) | 单笔撤单 `not_canceled` 里的任何原因(已成交、已撤或不存在),[先撤后到](#下单)的情形除外 |
 | `EARLY`(撤单) | 回执前按哈希撤单得 `not_canceled`,而该单随后挂上(下单回执或查单为 `live`/`delayed`),见[先撤后到](#下单) |
@@ -282,8 +313,8 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | 文件 | 职责 |
 |---|---|
 | `src/lib.rs` | `VenueProtocol`、`AccountProtocol`、`FundingHistoryProtocol` 实现(资金费入口 `Unsupported`) |
-| `src/orders.rs` | 凭证拆分、`Templates`、L2 头、`POST /order`/撤单/查单编码([下单](#下单)) |
-| `src/reports.rs` | `GwCtx`、REST 应答与用户频道解码([用户流事件表](#用户流事件表)) |
+| `src/orders.rs` | 凭证拆分、`Templates`、L2 头、`POST /order`/撤单/查单编码([下单](#下单)、[吃单](#吃单)的金额) |
+| `src/reports.rs` | `GwCtx`、REST 应答与用户频道解码([用户流事件表](#用户流事件表)、[吃单](#吃单)的应答与 `trade`) |
 | `src/account.rs` | 账户启动核验与余额轮询([账户配置核验](#账户配置核验)) |
 | `src/bind.rs` | 绑定表与合成序号(固定容量,构造时分配一次) |
 | `src/md.rs` | 分类、`peek`、三种消息的解码 |
@@ -328,7 +359,10 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 ## 已知限制与后续工作
 
 - 订单心跳(死手):`POST /v1/heartbeats` 是链式的(每次带上一次返回的 `heartbeat_id`),而 `dead_man_refresh` 拿不到 `GwCtx`;接入前靠 GTD(300 s)、窗口结束前策略撤单与进程退出时的全撤兜底。
-- 吃单手续费 `FeeModel`(0.07·p·(1 − p)):post-only 下单不产生;以后做吃单再补。
+- 吃单手续费(0.07·p·(1 − p)):FAK/FOK 成交报 `fee = 0`;交易所实际是否、以何种资产扣费待核实(方法:吃单后的持仓、余额与应答的 `takingAmount`/`makingAmount` 核对),不符时仓位由对账校正。
+- FAK 买单按金额成交:成交价低于 `px` 时收到的份数多于订单量,OMS 记为超量成交(`OmsOverfill`,P0,[hft-oms 回报匹配](../hft-oms/README.md#回报匹配与成交增量));是否有不超量的买单形式(如按限价单金额 `px × qty` / `qty` 发 FAK)待核实(方法:最优卖价低于限价时发一张这种 FAK 买单,看 `takingAmount` 是否等于 `qty`)。
+- FAK 部分成交、`delayed` 应答与 `trade` 的 `FAILED`(链上失败,成交已按 `MATCHED` 报出)未实测;后者由对账校正。
+- refdata 的槽位 inst 以 tick 0.001 建(见下条),而市场多为 0.01 tick:FAK 金额的小数位因此按 4 位封顶(实盘已核实 5 位会被拒),限价仍须落在市场当前的 tick 上(由策略取簿上价格保证)。
 - 重启后的订单哈希:`GwCtx` 不进快照,重启前的挂单只能按代币撤(`/cancel-market-orders`),查单 → `UnknownTarget`(交 reconciler)。
 - `tick_size_change` 不解码:每个 5 分钟市场在价格接近 0 或 1 时(约开盘 4 分钟后)把 tick 从 0.01 改为 0.001,之后出现三位小数价格。解码按 px_exp −3 照常解析;hft-core 的 Polymarket 槽位 inst 以 tick 0.001 建 refdata(`pm_sim_config`),所以三位小数的档位照常应用。
 - 吃单扫过时公开簿会在 1–3 条消息内锁住或交叉(新挂单档位先于撮合后的删除推送);hft-core 的 Polymarket 槽位 inst 以 `crossed_tolerance = 3` 建 refdata,簿在其内保持 Live(此前 0:每次扫单都 `Stale(Crossed)` 到下一个整簿,做市策略随之撤单)。
@@ -338,6 +372,6 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 <details><summary>给实现者</summary>
 
-已实测(2026-10-19,eu-west-1):订阅帧无应答;同一连接可追加订阅与退订;`PING` → `PONG`;每次成交后推一次整簿。2026-10-22 实测(不可成交的 0.02 post-only 买单):`POST /order` 回 `orderID` 与 `status: live`;用户频道不带市场过滤订阅即收到全账户的 `PLACEMENT`/`CANCELLATION`,与 REST 回执相差 ±50 ms,先后不定;`DELETE /order`、`/cancel-market-orders`、`/cancel-all` 的应答格式同[下单](#下单)。2026-10-28 实测(同上):本地算出的订单哈希(`order_digest`)与 `POST /order` 应答的 `orderID` 逐字节一致;先撤后到的应答见[下单](#下单);同一 HTTP/1.1 连接上背靠背写出下单与撤单(管线化)按序应答、撤单生效(4/4)。成交(`UPDATE`、`trade`)样本按官方 asyncapi 文档,首个实盘成交后补实采样本。
+已实测(2026-10-19,eu-west-1):订阅帧无应答;同一连接可追加订阅与退订;`PING` → `PONG`;每次成交后推一次整簿。2026-10-22 实测(不可成交的 0.02 post-only 买单):`POST /order` 回 `orderID` 与 `status: live`;用户频道不带市场过滤订阅即收到全账户的 `PLACEMENT`/`CANCELLATION`,与 REST 回执相差 ±50 ms,先后不定;`DELETE /order`、`/cancel-market-orders`、`/cancel-all` 的应答格式同[下单](#下单)。2026-10-28 实测(同上):本地算出的订单哈希(`order_digest`)与 `POST /order` 应答的 `orderID` 逐字节一致;先撤后到的应答见[下单](#下单);同一 HTTP/1.1 连接上背靠背写出下单与撤单(管线化)按序应答、撤单生效(4/4)。成交(`UPDATE`、`trade`)样本按官方 asyncapi 文档,首个实盘成交后补实采样本。2026-10-30 实测(FAK/FOK,见[吃单](#吃单)):请求体与应答取自官方客户端的市价单,金额取整与 py-clob-client-v2 `get_market_order_amounts` 一致。
 
 </details>

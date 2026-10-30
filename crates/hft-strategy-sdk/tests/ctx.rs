@@ -225,3 +225,70 @@ fn sdk_212_timer_admission_preserves_call_order() {
     );
     assert_eq!((remaining, c.next_timer_id(), c.full_count()), (1, u64::MAX, 1));
 }
+
+#[test]
+fn sdk_216_spend_buy_and_spend_qty() {
+    use hft_refdata::{InstHot, InstKind, InstStatus};
+    use hft_types::{AssetId, Notional, Tif};
+    assert_eq!(OrderIntent::SPEND, 0x80, "SDK-216.1");
+    assert_eq!(
+        u16::from(OrderIntent::SPEND),
+        hft_event::OrderFlags::SPEND.0,
+        "SDK-216.1"
+    );
+    let o = OrderIntent::spend_buy(V1, A1, G1, I1, Tif::Ioc, Px(110), Qty(9_090_000), 7);
+    assert_eq!(o.side, Side::Buy, "SDK-216.1");
+    assert_eq!(o.class, IntentClass::Open, "SDK-216.1");
+    assert_eq!(o.tif, Tif::Ioc, "SDK-216.1");
+    assert_eq!(o.flags, OrderIntent::SPEND, "SDK-216.1");
+    assert!(o.spend() && !o.reduce_only(), "SDK-216.1");
+    assert!(o.link.get().is_none(), "SDK-216.1");
+    assert_eq!((o.max_rest_ms, o.tag), (0, 7), "SDK-216.1");
+    assert_eq!(
+        (o.venue, o.account, o.group, o.inst),
+        (V1, A1, G1, I1),
+        "SDK-216.1"
+    );
+    assert_eq!((o.px, o.qty), (Px(110), Qty(9_090_000)), "SDK-216.1");
+    let hot = InstHot {
+        venue: V1,
+        status: InstStatus::Trading,
+        kind: InstKind::Spot,
+        flags: 0,
+        px_exp: -3,
+        qty_exp: -6,
+        px_wire_exp: -3,
+        qty_wire_exp: -6,
+        asset: AssetId(3),
+        quote: AssetId(1),
+        book_window: 64,
+        tick: 1,
+        lot: 10_000,
+        min_qty: Qty(1),
+        max_qty: Qty(i64::MAX),
+        min_notional: Notional(0),
+        l2_depth: 20,
+        crossed_tolerance: 0,
+        _pad: 0,
+    };
+    let one = Notional(1_000_000);
+    assert_eq!(
+        OrderIntent::spend_qty(one, Px(110), &hot),
+        Qty(9_090_000),
+        "SDK-216.2"
+    );
+    let lot1 = InstHot { lot: 1, ..hot };
+    assert_eq!(
+        OrderIntent::spend_qty(one, Px(110), &lot1),
+        Qty(9_090_909),
+        "SDK-216.3"
+    );
+    assert_eq!(OrderIntent::spend_qty(one, Px(0), &lot1), Qty(0), "SDK-216.4");
+    assert_eq!(
+        OrderIntent::spend_qty(Notional(0), Px(110), &lot1),
+        Qty(0),
+        "SDK-216.4"
+    );
+    let bad = InstHot { px_exp: 40, ..lot1 };
+    assert_eq!(OrderIntent::spend_qty(one, Px(110), &bad), Qty(0), "SDK-216.4");
+}

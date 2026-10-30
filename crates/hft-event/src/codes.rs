@@ -79,6 +79,7 @@ desc!(
         RISK_REDUCING = 16,
         SMOKE = 32,
         POSITION_CLOSE = 64,
+        SPEND = 128,
     ]
 );
 desc!(

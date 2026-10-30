@@ -789,26 +789,56 @@ mod seq_177 {
 
 #[test]
 fn seq_352_link_valid_precheck() {
-    fn with(f: fn(&mut hft_strategy_sdk::LegLink)) -> impl Fn(&Hx<'_>) -> hft_strategy_sdk::OrderIntent {
+    use hft_strategy_sdk::{LegLink, LegLinkOpt, OrderIntent};
+    fn link(it: &mut OrderIntent, f: fn(&mut LegLink)) {
+        if let Some(l0) = it.link.get() {
+            let mut l = *l0;
+            f(&mut l);
+            it.link = LegLinkOpt::some(l);
+        }
+    }
+    fn with(f: fn(&mut OrderIntent)) -> impl Fn(&Hx<'_>) -> OrderIntent {
         move |hx| {
             let mut it = pair_first(hx, q("0.01"));
-            if let Some(l0) = it.link.get() {
-                let mut l = *l0;
-                f(&mut l);
-                it.link = hft_strategy_sdk::LegLinkOpt::some(l);
-            }
+            f(&mut it);
             it
         }
     }
-    let rows: [(&str, fn(&mut hft_strategy_sdk::LegLink), bool); 4] = [
+    let rows: [(&str, fn(&mut OrderIntent), bool); 7] = [
         ("352.1", |_| {}, false),
-        ("352.2", |l| l.role = hft_strategy_sdk::LinkRole::Second, false),
         (
-            "352.3",
-            |l| l.hedge.kind = hft_strategy_sdk::HedgeKind::Simultaneous,
+            "352.2",
+            |it| link(it, |l| l.role = hft_strategy_sdk::LinkRole::Second),
             false,
         ),
-        ("352.4", |l| l.role = hft_strategy_sdk::LinkRole::Second, true),
+        (
+            "352.3",
+            |it| link(it, |l| l.hedge.kind = hft_strategy_sdk::HedgeKind::Simultaneous),
+            false,
+        ),
+        (
+            "352.4",
+            |it| link(it, |l| l.role = hft_strategy_sdk::LinkRole::Second),
+            true,
+        ),
+        (
+            "352.5",
+            |it| {
+                it.link = LegLinkOpt::NONE;
+                it.side = hft_types::Side::Sell;
+                it.flags = OrderIntent::SPEND;
+            },
+            false,
+        ),
+        (
+            "352.6",
+            |it| {
+                it.link = LegLinkOpt::NONE;
+                it.flags = OrderIntent::SPEND;
+            },
+            false,
+        ),
+        ("352.7", |it| it.flags = OrderIntent::SPEND, false),
     ];
     for (row, f, shadow) in rows {
         let mut h = steady();
@@ -823,7 +853,7 @@ fn seq_352_link_valid_precheck() {
             h.run();
             assert_eq!(h.res(id).0, 0, "{row}");
         }
-        let ok = row == "352.1";
+        let ok = row == "352.1" || row == "352.6";
         let g = with(f);
         let n = h.io_ref().out.len();
         let tokens =
@@ -866,6 +896,11 @@ fn seq_352_link_valid_precheck() {
         let d = ds[0].1;
         if ok {
             assert_eq!(d.reject, 0, "{row}");
+            assert_eq!(
+                d.oflags & hft_event::OrderFlags::SPEND.0 != 0,
+                row == "352.6",
+                "{row}: SPEND carried into the decision"
+            );
             assert!(tr_mode >= 1);
             assert!(tr_eval >= 1);
             assert_eq!(h.io_ref().out.len(), n + 1, "{row}");

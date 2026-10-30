@@ -1,9 +1,13 @@
 //! Order reports (README "回报"): the gw state (`GwCtx`: token bindings, order hashes and
-//! cumulative fills), REST order responses and the user channel's `order` events.
+//! cumulative fills), REST order responses and the user channel's `order` events; the `trade`
+//! events of this process's FAK / FOK orders (README "吃单").
 
 use hft_event::{GwOp, OrderEvent, OrderEventKind};
 use hft_refdata::RefData;
-use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, Side, SlotId, parse_exact};
+use hft_types::{
+    AccountId, AssetExp, ClientOrderId, InstId, Notional, Px, Qty, RoundMode, Side, SlotId, parse_exact,
+    parse_round,
+};
 use hft_venue_proto::{
     DecodeErr, ExchIdHint, MsgOp, ProtoErr, ReportCtl, ReportOutcome, ReportSink, RestOrigin, RestWhat,
     RxMeta, Skip, raw_code_http, raw_code_str,
@@ -12,6 +16,7 @@ use serde::Deserialize;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::bind::FeedCtx;
+use crate::orders::TakerSpec;
 use crate::presign::{Presign, Presigned};
 use crate::{ReportClass, VENUE};
 
@@ -35,6 +40,19 @@ const ORDERS: usize = 512;
 const TOKENS: usize = 64;
 /// Events of one user-channel frame.
 const FRAME_MAX: usize = 16;
+/// `trade` ids remembered per FAK / FOK order (README "吃单").
+const TRADES: usize = 4;
+
+/// A FAK / FOK order this process signed (README "吃单").
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+struct Taker {
+    spec: TakerSpec,
+    /// Σ size × price of the fills taken from `trade` events (inst px × qty units).
+    val: i128,
+    /// Keys of the `trade` ids counted (`trade_key`; 0 = empty), written round-robin.
+    trades: [u64; TRADES],
+    n_trades: u8,
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 struct Row {
@@ -61,6 +79,9 @@ struct Row {
     cancel_nf: bool,
     /// The place answer said the order rests (`live` / `delayed`).
     live: bool,
+    /// A FAK / FOK order this process signed: fills come from `trade` events and the place
+    /// answer, never from `order` events (README "吃单").
+    taker: Option<Taker>,
 }
 
 /// gw state of one account: token ids bound by `BindWire`, the hashes of this process's orders
@@ -161,6 +182,15 @@ impl GwCtx {
         let key = self.remember(hash);
         if let Some(r) = self.row_mut(key) {
             r.owner = Some(owner);
+        }
+    }
+    /// Marks the order signed as `hash` a FAK / FOK order (README "吃单").
+    pub(crate) fn taker_placed(&mut self, hash: &[u8; 32], spec: TakerSpec) {
+        if let Some(r) = self.row_mut(key_of(hash)) {
+            r.taker = Some(Taker {
+                spec,
+                ..Taker::default()
+            });
         }
     }
     /// Hash a `Cancel` addresses: the acked order's (`exch_order_id`), else the one signed for the
@@ -271,6 +301,12 @@ struct PlaceResp<'a> {
     error_msg: &'a str,
     #[serde(default, borrow)]
     status: &'a str,
+    /// What the order received (a FAK / FOK `matched` answer): shares of a buy, USDC of a sell.
+    #[serde(rename = "takingAmount", default, borrow)]
+    taking: &'a str,
+    /// What the order gave: USDC of a buy, shares of a sell.
+    #[serde(rename = "makingAmount", default, borrow)]
+    making: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -452,6 +488,12 @@ pub(crate) fn decode_rest(
                 {
                     let key = ctx.remember(&h);
                     let live = matches!(p.status, "live" | "delayed");
+                    // A FAK / FOK order ends with this answer (README "吃单"); its numbers are
+                    // read before any event is written.
+                    let end = match ctx.row(key).and_then(|w| w.taker) {
+                        Some(t) => taker_end(rd, req.inst, &t.spec, &p)?,
+                        None => End::Wait,
+                    };
                     // A cancel sent before this answer found nothing, yet the order rests: the
                     // cancel overtook it (README "下单"). `EARLY` precedes the Ack, so an Unknown
                     // slot holds the OMS's second cancel until the Ack makes it Live.
@@ -474,6 +516,7 @@ pub(crate) fn decode_rest(
                     e.exch_order_id = key;
                     out.order(&e);
                     o.events += 1;
+                    let base = e;
                     // Fills that completed the order below its size before this answer were held
                     // unresolved (the runtime releases them after this Ack): owe the completion.
                     if let Some(w) = ctx.row_mut(key) {
@@ -488,6 +531,7 @@ pub(crate) fn decode_rest(
                             o.events += 1;
                         }
                     }
+                    taker_finish(ctx, key, end, base, out, &mut o);
                     return Ok(o);
                 }
                 // `success: false` with a message: refused by the exchange.
@@ -597,16 +641,23 @@ pub(crate) fn decode_rest(
                 "CANCELED" | "CANCELED_MARKET_RESOLVED" | "UNMATCHED" | "INVALID" => status::CANCELLED,
                 _ => return Err(DecodeErr::Shape),
             };
-            if cum < 0 || cum > orig {
+            let key = key_of(&h);
+            // A FAK buy spends its USDC: it may receive more shares than its size (README "吃单").
+            let taker = ctx.row(key).is_some_and(|w| w.taker.is_some());
+            if cum < 0 || (cum > orig && !taker) {
                 return Err(DecodeErr::Shape);
             }
-            let key = key_of(&h);
             // A cancel that found nothing while the place was unanswered, and the order rests:
             // `EARLY` before the Ack (README "下单").
             let resting = matches!(q.status, "LIVE" | "DELAYED") && e.detail != status::FILLED;
             if let Some(w) = ctx.row_mut(key) {
                 if resting {
                     w.live = true;
+                }
+                // A FAK / FOK order's final state: later `trade` events are not counted again.
+                if w.taker.is_some() && !resting {
+                    w.terminal = true;
+                    w.cum = w.cum.max(cum);
                 }
                 if w.cancel_nf && resting && !w.terminal {
                     w.cancel_nf = false;
@@ -752,6 +803,12 @@ struct Event<'a> {
     status: &'a str,
     #[serde(default, borrow)]
     timestamp: &'a str,
+    /// `trade`: the taker's order hash.
+    #[serde(default, borrow)]
+    taker_order_id: &'a str,
+    /// `trade`: matched shares.
+    #[serde(default, borrow)]
+    size: &'a str,
 }
 
 /// The `event_type` of a frame, for an unknown-event note (never the frame itself).
@@ -798,8 +855,12 @@ pub(crate) fn decode_report(
                 known = true;
                 order_event(rd, ctx, ev, rx, out, &mut o)?;
             }
-            // Fills are taken from the order's cumulative `size_matched` (README "累计量与费用来源").
-            "trade" => known = true,
+            // Fills of resting orders are taken from the order's cumulative `size_matched` (README
+            // "累计量与费用来源"); a FAK / FOK order has only `trade` events (README "吃单").
+            "trade" => {
+                known = true;
+                trade_event(rd, ctx, ev, rx, out, &mut o)?;
+            }
             _ => {}
         }
     }
@@ -823,6 +884,10 @@ fn order_event(
     let inst = ctx.inst_of(ev.asset_id.as_bytes());
     // A token no slot is bound to: an order outside this engine (or of an unbound window).
     if inst.0 == 0 {
+        return Ok(());
+    }
+    // A FAK / FOK order is reported by its `trade` events and the place answer (README "吃单").
+    if ctx.row(key_of(&h)).is_some_and(|r| r.taker.is_some()) {
         return Ok(());
     }
     let row = rd.inst(inst);
@@ -895,5 +960,236 @@ fn order_event(
     if ev.kind == "CANCELLATION" && !terminal && !done && slot.is_some() {
         cancelled(ctx, &h, inst, ex_ts_ns, rx, out, o);
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- FAK / FOK (README "吃单")
+
+/// What a FAK / FOK place answer says.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum End {
+    /// `matched`: shares received or given (inst qty units), their average price (inst px units)
+    /// and whether the whole signed maker amount was used.
+    Matched { cum: i64, avg: i64, full: bool },
+    /// Accepted but not matched (`unmatched` or any other status): killed.
+    Killed,
+    /// `live` / `delayed`, or not a taker order: no end yet.
+    Wait,
+}
+
+/// Reads a FAK / FOK place answer: `matched` → the amounts, `live` / `delayed` → no end, any other
+/// status → killed with no fill.
+fn taker_end(rd: &RefData, inst: InstId, t: &TakerSpec, p: &PlaceResp<'_>) -> Result<End, DecodeErr> {
+    match p.status {
+        "matched" => {}
+        "live" | "delayed" => return Ok(End::Wait),
+        _ => return Ok(End::Killed),
+    }
+    let row = rd.inst(inst);
+    let (shares, usdc) = if t.sell {
+        (p.making, p.taking)
+    } else {
+        (p.taking, p.making)
+    };
+    let num = |s: &str, exp, m| parse_round(s.as_bytes(), exp, m).map_err(|_| DecodeErr::Number);
+    let cum = num(shares, row.qty_exp, RoundMode::Floor)?;
+    let usdc = num(usdc, -6, RoundMode::HalfEven)?;
+    let making = num(p.making, -6, RoundMode::HalfEven)?;
+    if cum < 0 || usdc < 0 || making < 0 {
+        return Err(DecodeErr::Shape);
+    }
+    let avg = if cum > 0 {
+        let e = AssetExp {
+            px_exp: row.px_exp,
+            qty_exp: row.qty_exp,
+        };
+        Px::from_notional(Notional(usdc), Qty(cum), e, RoundMode::HalfEven)
+            .map_err(|_| DecodeErr::Overflow)?
+            .0
+    } else {
+        0
+    };
+    let full = u64::try_from(making).is_ok_and(|m| m >= t.maker_amount);
+    Ok(End::Matched { cum, avg, full })
+}
+
+/// `n / d` rounded half to even (`n ≥ 0`, `d > 0`).
+fn div_half_even(n: i128, d: i128) -> i64 {
+    if d <= 0 || n < 0 {
+        return 0;
+    }
+    let (q, r) = (n / d, n % d);
+    let q = if 2 * r > d || (2 * r == d && q % 2 == 1) {
+        q + 1
+    } else {
+        q
+    };
+    i64::try_from(q).unwrap_or(0)
+}
+
+/// Ends a FAK / FOK order at its place answer, after its `Ack` (README "吃单"): the fill the
+/// `trade` events have not reported yet, then — below the order's size — `QueryResult{Filled}`
+/// when the whole maker amount was used, else `Expired` (the rest killed); `cum_filled` is the
+/// larger of the answer's and the trades' count. Once per order.
+fn taker_finish(
+    ctx: &mut GwCtx,
+    key: u64,
+    end: End,
+    mut e: OrderEvent,
+    out: &mut impl ReportSink,
+    o: &mut ReportOutcome,
+) {
+    let (m, avg_m, full) = match end {
+        End::Matched { cum, avg, full } => (cum, avg, full),
+        End::Killed => (0, 0, false),
+        End::Wait => return,
+    };
+    let Some(w) = ctx.row_mut(key) else { return };
+    let Some(t) = w.taker else { return };
+    if w.terminal {
+        return;
+    }
+    w.terminal = true;
+    let prev = w.cum;
+    let cum = prev.max(m);
+    let avg = if m >= prev && m > 0 {
+        avg_m
+    } else {
+        div_half_even(t.val, i128::from(prev))
+    };
+    w.cum = cum;
+    w.px = avg;
+    let side = if t.spec.sell { Side::Sell } else { Side::Buy };
+    // A buy is a spend order (hft-oms "按金额买入"): done when its USDC is used, whatever the
+    // shares; a sell is done at its size.
+    let spend = !t.spec.sell;
+    let done = if spend { full } else { cum >= t.spec.qty };
+    if m > prev {
+        e.what = if done {
+            OrderEventKind::Fill
+        } else {
+            OrderEventKind::PartialFill
+        };
+        e.detail = side as u8;
+        e.px = Px(avg_m);
+        e.qty = Qty(m - prev);
+        e.cum_filled = Qty(cum);
+        e.avg_px = Px(avg);
+        out.order(&e);
+        o.events += 1;
+    }
+    // The end, unless the fill above already said it: `QueryResult{Filled}` when the maker amount
+    // was used, else `Expired` (the rest killed). A sell below its size only.
+    let end_owed = if spend {
+        !(done && m > prev)
+    } else {
+        cum < t.spec.qty
+    };
+    if end_owed {
+        if full {
+            e.what = OrderEventKind::QueryResult;
+            e.detail = status::FILLED;
+        } else {
+            e.what = OrderEventKind::Expired;
+            e.detail = 0;
+        }
+        e.px = Px(0);
+        e.qty = Qty(0);
+        e.cum_filled = Qty(cum);
+        e.avg_px = Px(if cum > 0 { avg } else { 0 });
+        out.order(&e);
+        o.events += 1;
+    }
+}
+
+/// Key of a `trade` id (FNV-1a 64; never 0).
+fn trade_key(id: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h.max(1)
+}
+
+/// A `trade` event (README "吃单"): a `MATCHED` trade of an open FAK / FOK order of this process,
+/// counted once per trade id, is a fill at the trade's price; every other trade (a resting order's
+/// fill, a later `MINED` / `CONFIRMED` status, an order the place answer already ended) writes
+/// nothing.
+fn trade_event(
+    rd: &RefData,
+    ctx: &mut GwCtx,
+    ev: &Event<'_>,
+    rx: &RxMeta,
+    out: &mut impl ReportSink,
+    o: &mut ReportOutcome,
+) -> Result<(), DecodeErr> {
+    if ev.status != "MATCHED" {
+        return Ok(());
+    }
+    let Some(h) = parse_hash(ev.taker_order_id) else {
+        return Ok(());
+    };
+    let key = key_of(&h);
+    let Some((t, prev, owner)) = ctx
+        .row(key)
+        .filter(|r| !r.terminal)
+        .and_then(|r| r.taker.map(|t| (t, r.cum, r.owner)))
+    else {
+        return Ok(());
+    };
+    let inst = ctx.inst_of(ev.asset_id.as_bytes());
+    if inst.0 == 0 {
+        return Ok(());
+    }
+    let id = trade_key(ev.id);
+    if t.trades.contains(&id) {
+        return Ok(());
+    }
+    let row = rd.inst(inst);
+    let num = |s: &str, exp, m| parse_round(s.as_bytes(), exp, m).map_err(|_| DecodeErr::Number);
+    let size = num(ev.size, row.qty_exp, RoundMode::Floor)?;
+    let px = num(ev.price, row.px_exp, RoundMode::HalfEven)?;
+    if size <= 0 || px <= 0 {
+        return Err(DecodeErr::Shape);
+    }
+    let ms: i64 = ev.timestamp.parse().map_err(|_| DecodeErr::Number)?;
+    let ex_ts_ns = ms.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
+    let cum = prev.checked_add(size).ok_or(DecodeErr::Overflow)?;
+    let val = t.val + i128::from(size) * i128::from(px);
+    let avg = div_half_even(val, i128::from(cum));
+    if let Some(Some(x)) = ctx.row_mut(key).map(|r| {
+        r.cum = cum;
+        r.px = avg;
+        r.taker.as_mut()
+    }) {
+        x.val = val;
+        if let Some(s) = x.trades.get_mut(usize::from(x.n_trades) % TRADES) {
+            *s = id;
+        }
+        x.n_trades = x.n_trades.wrapping_add(1);
+    }
+    let (epoch, slot, r#gen) = resolve(out, key, owner).unwrap_or((0, SlotId::UNRESOLVED, 0));
+    let mut e = blank(rx.account, rx);
+    // A buy (spend order) is never done by a trade: only its place answer knows whether the
+    // whole maker amount was used.
+    e.what = if t.spec.sell && cum >= t.spec.qty {
+        OrderEventKind::Fill
+    } else {
+        OrderEventKind::PartialFill
+    };
+    e.detail = (if t.spec.sell { Side::Sell } else { Side::Buy }) as u8;
+    e.epoch = epoch;
+    e.slot = slot;
+    e.r#gen = r#gen;
+    e.inst = inst;
+    e.exch_order_id = key;
+    e.ex_ts_ns = ex_ts_ns;
+    e.px = Px(px);
+    e.qty = Qty(size);
+    e.cum_filled = Qty(cum);
+    e.avg_px = Px(avg);
+    out.order(&e);
+    o.events += 1;
     Ok(())
 }

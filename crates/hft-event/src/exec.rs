@@ -64,7 +64,10 @@ impl OrderFlags {
     pub const SMOKE: Self = OrderFlags(1 << 5);
     /// Engine Kill/flatten tail: venue position-close, with exact remaining quantity for accounting.
     pub const POSITION_CLOSE: Self = OrderFlags(1 << 6);
-    /// Bits allowed on the wire (7 reserved for future wire flags).
+    /// BUY by spend amount (IOC/FOK only): the order spends at most `px × qty` of quote and may
+    /// receive more than `qty` when it fills below `px` (semantics: hft-oms).
+    pub const SPEND: Self = OrderFlags(1 << 7);
+    /// Bits allowed on the wire.
     pub const WIRE_MASK: Self = OrderFlags(0x00FF);
 
     #[inline]

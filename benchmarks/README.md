@@ -358,6 +358,10 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `strategies/latency-probe/target_set` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-075 |
 | `strategies/latency-probe/tick_fire` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-073 |
 | `strategies/latency-probe/tick_miss` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-072 |
+| `strategies/pm-taker-probe/exec_update` | pm-taker-probe | [pm-taker-probe 延迟与资源契约](../strategies/pm-taker-probe/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/pm-taker-probe/risk_event` | pm-taker-probe | [pm-taker-probe 延迟与资源契约](../strategies/pm-taker-probe/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/pm-taker-probe/tick_fire` | pm-taker-probe | [pm-taker-probe 延迟与资源契约](../strategies/pm-taker-probe/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/pm-taker-probe/tick_miss` | pm-taker-probe | [pm-taker-probe 延迟与资源契约](../strategies/pm-taker-probe/README.md#延迟与资源契约) | —(策略延迟验收) |
 | `stratlib/confirm` | hft-strat-lib | [hft-strat-lib 延迟与资源契约](../crates/hft-strat-lib/README.md#延迟与资源契约) | SLB-140 |
 | `stratlib/cost_read` | hft-strat-lib | [hft-strat-lib 延迟与资源契约](../crates/hft-strat-lib/README.md#延迟与资源契约) | SLB-137 |
 | `stratlib/dirty` | hft-strat-lib | [hft-strat-lib 延迟与资源契约](../crates/hft-strat-lib/README.md#延迟与资源契约) | SLB-141 |

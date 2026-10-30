@@ -184,6 +184,7 @@ pub struct VenueModel {
     pub gtd_ms: u32,                     // 挂单自到达起的有效期(0 = 无):到期回 Expired
     pub fill_resp_us: Option<u32>,       // 挂单成交的回报延迟;None = 账户的 resp
     pub pools: Option<LatPools>,         // 条件延迟池
+    pub taker_nofill_reject: bool,       // Ioc/Fok 一笔也没成交 → Reject(NoMatch),无 Ack(Polymarket FAK/FOK 的 HTTP 400)
 }
 pub struct TakerDelay { pub base_us: u32, pub slow_us: u32, pub slow_ppm: u32, pub resp_us: u32 }
 pub struct LatPools { pub split_us: u32, pub min_n: u16, pub pools: Vec<Pool> }
@@ -199,7 +200,8 @@ impl SimExchange {
 - **`MakerFill::QueueCap`**:挂单到达时 `ahead` = 该价显示量;此后该档每次更新 `ahead = min(ahead, 显示量)`;同价、对手方向的成交先消耗 `ahead` 再成交本单;穿价成交与对手侧越过本单价格都成交全部剩余(不受成交量或越价档位量限制)。`Queue` 的 500 ms 未解释减少规则不变。
 - **撤单竞速**:撤单的到达延迟取 `cancel_us`(或 `Cancel` 池);`tombstone` 开时,到达时找不到订单记录的撤单不回报、记下 (账户, 槽, gen)(至多 4 096 条),之后该订单到达即以 `CancelAck` 拒绝、不挂(计数 `tombstone_refusals`);订单已到达的撤单照常在到达时下架,其间的成交照常发生;回报延迟取 `cancel_us.1`(有 `Cancel` 池时取 `split_us`)。
 - **吃单延迟**:`taker` 开时,非 PostOnly、非 Gtc 的订单在到达时只做拒单检查,撮合排在到达 + `base_us`(以 `slow_ppm`/10⁶ 的概率为 `slow_us`;有 `Taker` 池时取池中样本)之后,用那一刻的簿(含叠加层)撮合,Ack、成交与剩余的 Expired 在撮合 + `resp_us` 回报。
-- **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。
+- **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。2026-10-30 实盘 FAK 探针的应答金额与 `trade` 事件都不显示费用(`fee_rate_bps "0"`,卖 9.09 份 @ 0.11 收到 0.9999 USDC = 份数 × 价),扣费方式待核实,这里保留按文档的费用(偏保守;方法见 [venue-polymarket 已知限制](../venue-polymarket/README.md#已知限制与后续工作))。
+- **吃单无成交即拒单**:`taker_nofill_reject` 开时,Ioc/Fok 单撮合时一笔也没成交(FOK 不能全部成交同样)→ 只回 `Reject`(`NoMatch`,n = 13),没有 `Ack`、没有 `Expired`,与 venue-polymarket 对 400 应答产出的 `Reject` 同一终态(码不同:实盘码取消息);关时照旧 `Ack` + `Expired`。有成交的吃单不受影响。
 - **GTD**:挂单自到达起 `gtd_ms` 到期,与指令按事件时间排序,到期回 `Expired`(计数 `gtd_expired`);OMS 把交易所的 Expired 当作终态(hft-oms 自己的 `ExpireAt` 只处理 Unknown 槽,不重复终结)。
 - **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出;撮合本身不看条件,条件由下面的 `CondTracker` 从喂给它的行情算出。
 - **自有挂单叠加层**:`hide_own` 登记的量从显示簿中扣除:挂单的 `ahead`/档位量、吃单与越价撮合看到的对手档位都不含它。
@@ -220,7 +222,7 @@ pub mod calib { pub fn apply(text: &[u8], maker_fill: &mut MakerFill, venue: &mu
 - `load`:`venues` 中各 venue 的 `L2Batch`/`L2Snapshot`/`Trade` 以 `sw_rx_ns − ex_ts_ns` 为一个延迟样本(两个戳都 > 0),按接收秒归组取 90 分位(第 ⌊0.9 n⌋ 个),每个 UTC 分钟的各秒值取中位数;上一个结束的分钟的中位数大于几个 `load_thr_ns` 阈值,`load` 就是几;第一个分钟结束前为 1。
 - `mv`:不在 `venues` 中的第一个出现的 inst 的 `Bbo` 是参考报价,保留最近 2 s 的 (记录 tsc, bid + ask);决策时取 1 s 内最早的一条与最新一条比较:变动 ≤ 0.25 bp → 0,≤ 1 bp → 1,否则 2;没有报价 → 0。
 - `phase`:`utc_ns` 所在秒在 `window_s` 窗口内的位置 < `phase_s` → 0,否则 1。
-- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
+- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`;研究侧 `latc_v3.json` 的 `probe_thr`(吃单探针研究的阈值,`bm_sim.py` 也不读)接受并忽略,研究的表可以原样使用。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
 
 ### 重启恢复
 
@@ -338,6 +340,7 @@ sim-gw 按该 venue 的 [`VenueCaps`](../hft-refdata/README.md) 模仿交易所�
 | 9 | 永续增仓:可用保证金 ≥ 新增初始保证金 | 模拟保证金 | `InsufficientMargin`(10) |
 | 10 | 限速(`rate_limit = true`) | `RateLimitTable` | `RateLimited`(11) |
 | 11 | 该 (account, venue) 处于受控故障注入的 `RejectNew`(见"受控故障注入") | `SimFault{RejectNew}` | `Injected`(12) |
+| — | (撮合时,不是撮合前检查)`VenueModel::taker_nofill_reject` 开且 Ioc/Fok 单一笔也没成交 | 簿副本 | `NoMatch`(13) |
 
 各所的边界取值以 refdata 为准;与真实交易所一致性是验收项(见[测试与验收](#测试与验收))。
 
@@ -482,6 +485,7 @@ pub struct StressVerdict {
 2. 每档可得量 = `max(0, 可见量 × take_avail_bp / 10000 − 记忆剩余量(该档, arrive_tsc))`,向下取整到 lot。
 3. 逐档成交 `min(剩余, 可得量)`,价格 = 档位价;每档产生一条成交回报。
 4. 余量:IOC → `Expired`;FOK 总可得 < 数量 → 整单 `Expired` 无成交;可成交的 GTC 限价单余量转为挂单(只供预留的 MakerFirst)。
+6. **按金额买入**(`GwCmd.oflags` 含 `OrderFlags::SPEND` 的买入 Ioc/Fok,语义归 [hft-oms 按金额买入](../hft-oms/README.md#按金额买入)):预算 = `px × qty`;第 3 步每档成交 `min(可得量, 未花预算 / 档位价 向下取整到 lot)`,不受 `qty` 限制(成交价低于限价时总量可超过 `qty`)。某档可得量多于预算能买的量(或预算恰好花完)= 预算先用完:最后一笔为 `Fill`、订单成交完,其余为 `PartialFill`;否则(流动性先用完)全部为 `PartialFill`,其后 `Expired`。FOK 预算没有先用完 → 整单无成交。带该位的卖单或挂单按普通单撮合。
 5. 记忆:对每个被吃的 (账户, inst, 方向, 价) 记 `{qty, t0 = arrive_tsc}`,剩余量在 `consume_decay_ms` 内线性衰减到 0;每 (账户, inst, 方向) 一个 64 项定长环,过期项回收;环满且无过期项时覆盖 `t0` 最早的一项。记忆按账户独立。
 
 ### 4. 挂单(预留给 MakerFirst)

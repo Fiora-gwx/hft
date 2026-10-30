@@ -1,5 +1,5 @@
 ---
-description: "Polymarket 的 hft-core 配置生成器 hft-pmcfg:book-observer 行情模拟、binary-maker 挂单模拟与实盘做市(一个或多个 Live 账户)三种模式,写出 refdata/engine/risk/strategy 四个 blob、principals.toml 与 core.toml;运维在工作站上生成实盘箱与模拟箱的配置"
+description: "Polymarket 的 hft-core 配置生成器 hft-pmcfg:book-observer 行情模拟、binary-maker 挂单模拟、实盘做市(一个或多个 Live 账户)与实盘吃单探针(pm-taker-probe)四种模式,写出 refdata/engine/risk/strategy 四个 blob、principals.toml 与 core.toml;运维在工作站上生成实盘箱与模拟箱的配置"
 kind: crate
 tier: cold
 scope: optional
@@ -30,7 +30,7 @@ status: impl
 ### 命令行
 
 ```text
-hft-pmcfg [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
+hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
           [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...]
           [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...]
           OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]
@@ -43,16 +43,17 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--d
 | (无模式选项) | book-observer 行情模拟(`--dry-run`,16 个槽位 inst,Sim 账户 `sim-pm`);内容归 [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
 | `--maker` | binary-maker 挂单模拟(三对 BTC 槽位 + Binance BTCUSDT 参考,`maker_fill = "queue"`);内容见 [pm-md-probe 挂单模拟](../pm-md-probe/README.md#挂单模拟) |
 | `--live UID KEYS_DIR` | 实盘做市(`order_env = "prod"`):Live 账户 `pm-live`(账户 1,venue UID `UID`),凭据文件 `KEYS_DIR/{api_key,secret,passphrase}`;参数、限额与 `--day-loss-carry`/`--daily-loss`/`--daily-loss-resumes` 的语义归 [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
+| `--taker-probe` | 只用于 `--live`:实盘吃单探针——与 `--live` 相同的 venue、槽位、账户、凭据、限额、预签名、OMS 与 REST 设置,只是策略实例换成 [pm-taker-probe](../../strategies/pm-taker-probe/README.md)(实例名 `pm-taker-probe`,一个 group = 槽位 `btc-up-0`(InstId 1),可开仓,参数为其 schema 默认值,`enabled = 0`)、价格带的 `rr_max_cross` 为 0.5(`PM_PROBE_RR_MAX_CROSS`:卖回在最优买价,半个价差可达价格的数个百分点;做市为 0.01);`--param` 改按 pm-taker-probe 的 schema 检查 |
 | `--no-presign` | 只用于 `--live`:不写 `venues.pm.presign`(缺省写 (2, 2, `0.01`, 60 000),[hft-core 配置键](../../apps/hft-core/README.md)) |
 | `--live-account UID KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `pm-live-<账户号>`,角色 `any`(见[多账户](#多账户)) |
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
-| `--param NAME=RAW` | 只用于 `--maker` 或 `--live`,可重复:在默认值(实盘另在实盘参数)之后把 binary-maker 字段 `NAME` 设为原始值 `RAW` |
+| `--param NAME=RAW` | 只用于 `--maker` 或 `--live`,可重复:在默认值(实盘做市另在实盘参数)之后把 binary-maker(`--taker-probe` 时为 pm-taker-probe)字段 `NAME` 设为原始值 `RAW` |
 | `OUTPUT_DIR` | 输出目录(不存在则创建);写 `core.toml`、`principals.toml`、`refdata.bin`、`engine.bin`、`risk_params.bin`、`strategy_params.bin` |
 | `TMPFS_DIR` | `paths.journal_ram` |
 | `SRC_IP`、`BIND_DEVICE` | venue `pm`(及 `--maker`/`--live` 的 venue `bn`)的出口地址与网卡 |
 | `USER`、`PIPELINE_USER` | 可选:Admin 的 cli 主体;pipeline 主体(发现进程的系统用户,发 `BindSlot`) |
 
-成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
+成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker(`--taker-probe` 时 pm-taker-probe)schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
 
 ### 多账户
 
@@ -76,13 +77,16 @@ pub enum AccountRole { Any }
 pub fn write_polymarket_sim(root, hot, user, pipeline, src_ip, bind_device) -> Result<PathBuf, String>;
 pub fn write_polymarket_maker_sim_with(.., params: &[(String, i64)]) -> Result<PathBuf, String>;
 pub fn write_polymarket_maker_live_with(.., live: &PmLive, params: &[(String, i64)]) -> Result<PathBuf, String>;
+pub fn write_polymarket_taker_probe_live(.., live: &PmLive, params: &[(String, i64)]) -> Result<PathBuf, String>;
+pub enum PmStrategy { Observer, Maker, TakerProbe }   // kind_name(): book-observer | binary-maker | pm-taker-probe
 pub fn parse_param(s: &str) -> Result<(String, i64), String>;
-pub fn check_maker_params(params: &[(String, i64)]) -> Result<(), String>;
+pub fn check_maker_params(params: &[(String, i64)]) -> Result<(), String>;   // = check_params(Maker, ..)
+pub fn check_params(s: PmStrategy, params: &[(String, i64)]) -> Result<(), String>;
 pub fn engine_base(rd: &RefData, caps: &Capacities, ledger: LedgerConfig, venues: Vec<VenueId>) -> EngineSetup;
 pub mod cli { pub fn parse(args: &[String]) -> Result<Cmd, String>; pub fn run(cmd: &Cmd) -> Result<PathBuf, String>; pub fn main(prog: &str) -> ExitCode; }
 ```
 
-另有不带 `_with` 的两个写函数(无参数值)与常量 `PM_CROSSED_TOLERANCE`、`PM_COINS`、`PM_LIVE_PRESIGN`、`PM_LIVE_DAILY_LOSS`、`PM_LIVE_PARAMS`、`PM_REST_TIMEOUT_MS`、`PM_REST_MAX_IDLE_MS`。`LiveAccount.label = None` 即 `pm-live-<账户号>`。
+另有不带 `_with` 的两个写函数(无参数值)与常量 `PM_CROSSED_TOLERANCE`、`PM_COINS`、`PM_LIVE_PRESIGN`、`PM_LIVE_DAILY_LOSS`、`PM_LIVE_PARAMS`、`PM_REST_TIMEOUT_MS`、`PM_REST_MAX_IDLE_MS`、`PM_PROBE_RR_MAX_CROSS`。`LiveAccount.label = None` 即 `pm-live-<账户号>`。
 
 ## 实现说明
 

@@ -20,14 +20,18 @@ use venue_polymarket::{BindErr, FeedCtx, MdClass, PolymarketClob as Pm};
 const V: VenueId = VenueId::POLYMARKET_CLOB;
 const UP: InstId = InstId(1);
 const DN: InstId = InstId(2);
+/// `btc-up-1`: tick 0.001 (FAK / FOK amounts, PMK-038).
+const UP1: InstId = InstId(3);
 /// Up / Down tokens of `btc-updown-5m-1792424100` (recorded).
 const T_UP: &str = "93260813640452160844731182437467962294350968265707341153474211213683765578930";
 const T_DN: &str = "58004665500158711684886517185121669615527317995671495798460764652022651132693";
+/// Up token of the 2026-10-30 FAK probe window (`fak_probe_20261030_clean.json`).
+const T_UP1: &str = "87148390430912983658703674875320811702332834075748673344598728300596111929689";
 const MARKET: RouteId = RouteId(0);
 
-/// `RD-PM`: USDC (AssetId 1, Stable), two outcome-token assets (px_exp −3, qty_exp −6), insts
+/// `RD-PM`: USDC (AssetId 1, Stable), three outcome-token assets (px_exp −3, qty_exp −6), insts
 /// `btc-up-0` = 1 and `btc-dn-0` = 2 on `POLYMARKET_CLOB` (tick 0.01; lot 0.000001, `btc-dn-0` 0.01
-/// as live).
+/// as live) and `btc-up-1` = 3 (tick 0.001, lot 0.01).
 fn rd() -> &'static RefData {
     static RD: OnceLock<&'static RefData> = OnceLock::new();
     RD.get_or_init(|| {
@@ -37,6 +41,7 @@ fn rd() -> &'static RefData {
             (AssetId(1), "USDC", AssetClass::Stable, -6, -6),
             (AssetId(2), "PMBTCUP0", AssetClass::Crypto, -3, -6),
             (AssetId(3), "PMBTCDN0", AssetClass::Crypto, -3, -6),
+            (AssetId(4), "PMBTCUP1", AssetClass::Crypto, -3, -6),
         ] {
             b.asset(AssetSpec {
                 id,
@@ -89,9 +94,10 @@ fn rd() -> &'static RefData {
                 },
             );
         }
-        for (id, sym, asset, lot, lot_str) in [
-            (UP, "btc-up-0", AssetId(2), 1, "0.000001"),
-            (DN, "btc-dn-0", AssetId(3), 10_000, "0.01"),
+        for (id, sym, asset, lot, lot_str, tick, tick_str) in [
+            (UP, "btc-up-0", AssetId(2), 1, "0.000001", 10, "0.01"),
+            (DN, "btc-dn-0", AssetId(3), 10_000, "0.01", 10, "0.01"),
+            (UP1, "btc-up-1", AssetId(4), 10_000, "0.01", 1, "0.001"),
         ] {
             b.inst(InstSpec {
                 id,
@@ -101,7 +107,7 @@ fn rd() -> &'static RefData {
                 kind: InstKind::Spot,
                 asset,
                 quote: AssetId(1),
-                tick: 10,
+                tick,
                 lot,
                 min_qty: Qty(lot),
                 max_qty: Qty(1_000_000_000_000),
@@ -109,7 +115,7 @@ fn rd() -> &'static RefData {
                 book_window: 128,
                 l2_depth: 100,
                 crossed_tolerance: 0,
-                tick_str: "0.01".into(),
+                tick_str: tick_str.into(),
                 lot_str: lot_str.into(),
                 min_qty_str: lot_str.into(),
                 ..InstSpec::default()

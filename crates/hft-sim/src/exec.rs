@@ -236,6 +236,9 @@ impl SimExchange {
         let due = self.resp_due(ai, t);
         let ex_ts = ii.map_or(0, |ii| self.inst_ex_ts(ii));
         let post_only = c.tif == Tif::PostOnly || OrderFlags(c.oflags).contains(OrderFlags::POST_ONLY);
+        let spend = OrderFlags(c.oflags).contains(OrderFlags::SPEND)
+            && c.side == Side::Buy
+            && matches!(c.tif, Tif::Ioc | Tif::Fok);
         let Some(a) = self.accts.get_mut(ai) else {
             return;
         };
@@ -269,6 +272,7 @@ impl SimExchange {
             unexp: 0,
             unexp_ts: 0,
             exp_at: 0,
+            spend,
         };
         let verdict = match ii {
             Some(ii) if in_acct => self.check_place(ai, ii, &c, t),
@@ -416,7 +420,9 @@ impl SimExchange {
         }
     }
 
-    /// Ack, then (non-post-only) the taker match of new order `k`, then rest / finish.
+    /// Ack, then (non-post-only) the taker match of new order `k`, then rest / finish. With
+    /// `VenueModel::taker_nofill_reject` an Ioc/Fok order that matches nothing is rejected
+    /// instead (no Ack).
     fn match_new(&mut self, ai: usize, k: usize, ii: usize, t: u64, due: u64, ex_ts: i64) {
         let o = self.order_at(ai, k);
         let ack = self.order_event(
@@ -432,23 +438,46 @@ impl SimExchange {
             ex_ts,
             due,
         );
-        self.emit(ai, ack, due);
         if o.tif == Tif::PostOnly {
+            self.emit(ai, ack, due);
             self.rest(ai, k);
             return;
         }
         let fok = o.tif == Tif::Fok;
-        let top_only = self.take(ai, ii, o.side, o.px, o.qty, t, fok);
+        // A spend order's budget: `px × qty` (raw product, README "按金额买入").
+        let budget = o.spend.then(|| i128::from(o.px) * i128::from(o.qty));
+        let (top_only, spent) = self.take(ai, ii, o.side, o.px, o.qty, budget, t, fok);
+        if self.fills.is_empty() && self.vm.taker_nofill_reject && o.tif != Tif::Gtc {
+            self.finish(ai, k, st::REJECTED);
+            let o = self.order_at(ai, k);
+            let ev = self.order_event(
+                ai,
+                &o,
+                OrderEventKind::Reject,
+                o.px,
+                o.qty,
+                0,
+                AssetId(0),
+                0,
+                RejectReason::NoMatch.code(),
+                ex_ts,
+                due,
+            );
+            self.emit(ai, ev, due);
+            return;
+        }
+        self.emit(ai, ack, due);
         let fills = core::mem::take(&mut self.fills);
-        for &(px, q) in &fills {
+        let n = fills.len();
+        for (j, &(px, q)) in fills.iter().enumerate() {
             if top_only && let Some(a) = self.accts.get_mut(ai) {
                 a.counters.top_only_fills += 1;
             }
-            self.apply_fill(ai, k, px, q, false, due, ex_ts);
+            self.apply_fill_as(ai, k, px, q, false, spent && j + 1 == n, due, ex_ts);
         }
         self.fills = fills;
         let o = self.order_at(ai, k);
-        if o.remaining() <= 0 {
+        if (o.spend && spent) || (!o.spend && o.remaining() <= 0) {
             self.finish(ai, k, st::FILLED);
             return;
         }
@@ -462,7 +491,7 @@ impl SimExchange {
                     &o,
                     OrderEventKind::Expired,
                     o.px,
-                    o.remaining(),
+                    o.remaining().max(0),
                     0,
                     AssetId(0),
                     0,
@@ -517,6 +546,23 @@ impl SimExchange {
         due: u64,
         ex_ts: i64,
     ) {
+        self.apply_fill_as(ai, k, px, q, maker, false, due, ex_ts);
+    }
+
+    /// [`Self::apply_fill`]; a spend order's fill is a `Fill` only when `spent` (its budget is
+    /// used), else a `PartialFill` whatever its cumulative quantity.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_fill_as(
+        &mut self,
+        ai: usize,
+        k: usize,
+        px: i64,
+        q: i64,
+        maker: bool,
+        spent: bool,
+        due: u64,
+        ex_ts: i64,
+    ) {
         let o = self.order_at(ai, k);
         let ii = usize::from(o.inst);
         let rate = match self.vm.fee {
@@ -553,7 +599,8 @@ impl SimExchange {
                 x.status = st::PARTIAL;
             }
         }
-        let what = if o.remaining() <= 0 {
+        let done = if o.spend { spent } else { o.remaining() <= 0 };
+        let what = if done {
             OrderEventKind::Fill
         } else {
             OrderEventKind::PartialFill
@@ -590,9 +637,21 @@ impl SimExchange {
     }
 
     /// Walks the matching view up to `limit` (README "3. 吃单撮合"); fills land in `self.fills`.
-    /// Returns whether the inst has only the `Bbo` stream.
+    /// `budget` (a spend order, raw px × qty): each level takes the whole lots the unspent budget
+    /// buys there instead of the remaining `qty`. Returns whether the inst has only the `Bbo`
+    /// stream and, for a spend order, whether the budget ran out before the liquidity.
     #[allow(clippy::too_many_arguments)]
-    fn take(&mut self, ai: usize, ii: usize, side: Side, limit: i64, qty: i64, t: u64, fok: bool) -> bool {
+    fn take(
+        &mut self,
+        ai: usize,
+        ii: usize,
+        side: Side,
+        limit: i64,
+        qty: i64,
+        budget: Option<i128>,
+        t: u64,
+        fok: bool,
+    ) -> (bool, bool) {
         let info = self.view_levels(ii, side, limit);
         self.fills.clear();
         let lot = self.insts.get(ii).map_or(1, |r| r.lot);
@@ -615,18 +674,40 @@ impl SimExchange {
             self.fills.push((px, avail.max(0)));
         }
         self.levels = levels;
-        if fok {
-            let total = self.fills.iter().fold(0i64, |s, (_, a)| s.saturating_add(*a));
-            if total < qty {
-                self.fills.clear();
-                return info.top_only;
+        let mut spent = false;
+        if let Some(b) = budget {
+            // Spend order: each level takes the whole lots the unspent budget buys at its price;
+            // `spent` = the budget, not the liquidity, ended the walk.
+            let mut left = b;
+            for f in self.fills.iter_mut() {
+                let cap = if f.0 > 0 {
+                    sat64(floor_to(left / i128::from(f.0), lot))
+                } else {
+                    0
+                };
+                let q = cap.min(f.1).max(0);
+                spent |= cap < f.1;
+                f.1 = q;
+                left -= i128::from(q) * i128::from(f.0);
             }
-        }
-        let mut rem = qty;
-        for f in self.fills.iter_mut() {
-            let q = rem.min(f.1).max(0);
-            f.1 = q;
-            rem -= q;
+            spent |= left <= 0;
+            if fok && !spent {
+                self.fills.clear();
+            }
+        } else {
+            if fok {
+                let total = self.fills.iter().fold(0i64, |s, (_, a)| s.saturating_add(*a));
+                if total < qty {
+                    self.fills.clear();
+                    return (info.top_only, false);
+                }
+            }
+            let mut rem = qty;
+            for f in self.fills.iter_mut() {
+                let q = rem.min(f.1).max(0);
+                f.1 = q;
+                rem -= q;
+            }
         }
         self.fills.retain(|f| f.1 > 0);
         let fills = core::mem::take(&mut self.fills);
@@ -634,7 +715,7 @@ impl SimExchange {
             self.remember(ai, ii, si, px, q, t, decay);
         }
         self.fills = fills;
-        info.top_only
+        (info.top_only, spent)
     }
 
     /// Σ remaining × decay of the live memory entries at `px` (and whether any is live).

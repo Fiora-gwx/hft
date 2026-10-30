@@ -79,7 +79,7 @@ impl Oms {
         if !sl.state.open() {
             return Contrib::OFF;
         }
-        let rem = sl.remaining().0;
+        let rem = sl.open_qty().0;
         let imm_kind = is_immediate(sl);
         let info = self.inst(sl.inst);
         let notional = sl.px.mul_qty(Qty(rem), info.exp, RoundMode::HalfEven).0.0;

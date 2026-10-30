@@ -1,5 +1,6 @@
 //! Polymarket configuration generator (README "使用本组件"): the book-observer sim, the
-//! binary-maker sim and the live maker with one or more Live accounts. Every mode writes
+//! binary-maker sim, the live maker with one or more Live accounts and the live taker probe
+//! (pm-taker-probe instead of binary-maker). Every mode writes
 //! `refdata.bin`, `engine.bin`, `risk_params.bin`, `strategy_params.bin`, `principals.toml` and
 //! `core.toml` (blob paths and SHA-256) into the output directory. The command line is [`cli`].
 use std::path::{Path, PathBuf};
@@ -63,6 +64,33 @@ pub const PM_REST_MAX_IDLE_MS: u32 = 25_000;
 
 /// Label of the first Live account (`--live`).
 pub const PM_LIVE_LABEL: &str = "pm-live";
+
+/// `rr_max_cross` of the taker probe's price band (`--live --taker-probe`): its sell-back is a
+/// risk-reducing Ioc at the best bid, half a spread below mid — 0.005 of 0.105 is 4.8 % — which
+/// the maker's 1 % would refuse; 50 % as `max_px_dev`.
+pub const PM_PROBE_RR_MAX_CROSS: i64 = 500_000_000;
+
+/// The strategy of a generated configuration.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PmStrategy {
+    /// book-observer: one group per slot, never trades (the sim without a mode flag).
+    Observer,
+    /// binary-maker: one group per slot plus the reference group.
+    Maker,
+    /// pm-taker-probe: one group, slot `btc-up-0` (InstId 1).
+    TakerProbe,
+}
+
+impl PmStrategy {
+    /// Registry name of the strategy kind.
+    pub fn kind_name(self) -> &'static str {
+        match self {
+            PmStrategy::Observer => "book-observer",
+            PmStrategy::Maker => "binary-maker",
+            PmStrategy::TakerProbe => "pm-taker-probe",
+        }
+    }
+}
 
 /// Further Live accounts at most (`--live-account` + `--account`): the gw serves
 /// `KillBits::MAX_ACCOUNTS_PER_GW` accounts per venue, one of them is `pm-live`.
@@ -225,7 +253,7 @@ pub fn write_polymarket_sim(
         },
         &PM_COINS,
         2,
-        false,
+        PmStrategy::Observer,
         None,
         &[],
     )
@@ -269,7 +297,7 @@ pub fn write_polymarket_maker_sim_with(
         },
         &["btc"],
         3,
-        true,
+        PmStrategy::Maker,
         None,
         params,
     )
@@ -290,14 +318,21 @@ pub fn parse_param(s: &str) -> Result<(String, i64), String> {
 /// Every `(name, raw)` names a field of the maker's parameter schema and lies within its
 /// `[min, max]`.
 pub fn check_maker_params(params: &[(String, i64)]) -> Result<(), String> {
+    check_params(PmStrategy::Maker, params)
+}
+
+/// Every `(name, raw)` names a field of strategy `s`'s parameter schema and lies within its
+/// `[min, max]`.
+pub fn check_params(s: PmStrategy, params: &[(String, i64)]) -> Result<(), String> {
+    let kind = s.kind_name();
     let desc = Strategies::kinds()
         .iter()
-        .find(|d| d.name == "binary-maker")
-        .ok_or("binary-maker is not registered")?;
+        .find(|d| d.name == kind)
+        .ok_or_else(|| format!("{kind} is not registered"))?;
     for (name, v) in params {
         let f = hft_strategy_sdk::params::field_ix(desc.schema, name)
             .and_then(|i| desc.schema.field(i))
-            .ok_or_else(|| format!("--param {name}: not a binary-maker parameter"))?;
+            .ok_or_else(|| format!("--param {name}: not a {kind} parameter"))?;
         if *v < f.min || *v > f.max {
             return Err(format!("--param {name}={v}: outside [{}, {}]", f.min, f.max));
         }
@@ -350,7 +385,42 @@ pub fn write_polymarket_maker_live_with(
         },
         &["btc"],
         3,
-        true,
+        PmStrategy::Maker,
+        Some(live),
+        params,
+    )
+}
+
+/// The live taker probe (`--live UID KEYS_DIR --taker-probe`): everything of
+/// `write_polymarket_maker_live_with` — venues, slots, accounts, keys, risk limits, presign, OMS
+/// and REST settings — except the strategy: a `pm-taker-probe` instance (`pm-taker-probe`,
+/// StrategyId 1) with one group (slot `btc-up-0`, InstId 1, open allowed), its schema defaults
+/// (`enabled = 0`) and `params` (checked against its schema), and the price band's
+/// `rr_max_cross = PM_PROBE_RR_MAX_CROSS` so that its sell-back at the best bid passes.
+#[allow(clippy::too_many_arguments)]
+pub fn write_polymarket_taker_probe_live(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    live: &PmLive,
+    params: &[(String, i64)],
+) -> Result<PathBuf, String> {
+    live.check()?;
+    write_pm(
+        &Target {
+            root,
+            hot,
+            user,
+            pipeline,
+            src_ip,
+            bind_device,
+        },
+        &["btc"],
+        3,
+        PmStrategy::TakerProbe,
         Some(live),
         params,
     )
@@ -461,16 +531,22 @@ fn write_pm(
     t: &Target<'_>,
     coins: &[&str],
     pairs: usize,
-    maker: bool,
+    strategy: PmStrategy,
     live: Option<&PmLive>,
     params: &[(String, i64)],
 ) -> Result<PathBuf, String> {
     use hft_venue_proto::VenueProtocol;
     let (root, src_ip, bind_device) = (t.root, t.src_ip, t.bind_device);
-    if !maker && !params.is_empty() {
+    // The venues, slots and reference market of the maker (also under the taker probe).
+    let maker = strategy != PmStrategy::Observer;
+    let probe = strategy == PmStrategy::TakerProbe;
+    if strategy == PmStrategy::Observer && !params.is_empty() {
         return Err("parameter values need the maker".into());
     }
-    check_maker_params(params)?;
+    if probe && live.is_none() {
+        return Err("the taker probe needs a live account".into());
+    }
+    check_params(strategy, params)?;
     std::fs::create_dir_all(root).map_err(io(root))?;
     let v = VenueId::POLYMARKET_CLOB;
     let bn = VenueId::BINANCE_SPOT;
@@ -478,7 +554,7 @@ fn write_pm(
     let usdc = AssetId(1);
     let desc = Strategies::kinds()
         .iter()
-        .find(|d| d.name == if maker { "binary-maker" } else { "book-observer" })
+        .find(|d| d.name == strategy.kind_name())
         .ok_or("strategy not registered")?;
     let mut slots = Vec::new();
     for coin in coins {
@@ -705,7 +781,12 @@ fn write_pm(
     b.instance(InstanceSpec {
         id: StrategyId(1),
         kind_id: desc.kind_id,
-        name: if maker { "pm-maker" } else { "pm-observer" }.into(),
+        name: match strategy {
+            PmStrategy::Observer => "pm-observer",
+            PmStrategy::Maker => "pm-maker",
+            PmStrategy::TakerProbe => "pm-taker-probe",
+        }
+        .into(),
     });
     b.account(AccountSpec {
         id: a,
@@ -757,16 +838,21 @@ fn write_pm(
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).map_err(|e| format!("refdata: {e:?}"))?;
     let schema = desc.schema;
-    let n = slots.len() as u16 + u16::from(maker);
+    // Groups: one per slot (and the reference); the probe has one, slot InstId 1.
+    let n = if probe {
+        1
+    } else {
+        slots.len() as u16 + u16::from(maker)
+    };
     let field =
         |name: &str| (0..schema.n_fields()).position(|i| schema.field(i).is_some_and(|f| f.name == name));
     let mut defaults: Vec<_> = (0..schema.n_fields())
         .map(|i| schema.field(i).map_or(0, |f| f.default))
         .collect();
-    if maker {
+    if strategy == PmStrategy::Maker {
         defaults[field("enabled").ok_or("binary-maker has no `enabled`")?] = 1;
     }
-    if live.is_some() {
+    if live.is_some() && strategy == PmStrategy::Maker {
         for (name, value) in PM_LIVE_PARAMS {
             defaults[field(name).ok_or_else(|| format!("binary-maker has no `{name}`"))?] = value;
         }
@@ -816,7 +902,7 @@ fn write_pm(
             id: GroupId::compose(StrategyId(1), i as u32 + 1).ok_or("group id")?,
             asset,
             n_legs: 1,
-            open_allowed: u8::from(maker && i < slots.len()),
+            open_allowed: u8::from((maker && i < slots.len()) || probe),
             legs: [
                 LegDef {
                     inst: InstId(i as u32 + 1),
@@ -839,7 +925,7 @@ fn write_pm(
         // Outcome-token spreads are wide relative to their price (0.01 at 0.10 is 10 %).
         max_px_dev: Rate(if maker { 500_000_000 } else { 30_000_000 }),
         ioc_max_cross: Rate(5_000_000),
-        rr_max_cross: Some(Rate(10_000_000)),
+        rr_max_cross: Some(Rate(if probe { PM_PROBE_RR_MAX_CROSS } else { 10_000_000 })),
     });
     // Live micro limits (USDC, 1e-6): account and venue 55 (two overlapping windows plus resting
     // quotes, below the 82 deposited), one slot group 25, daily loss 15 unless chosen.

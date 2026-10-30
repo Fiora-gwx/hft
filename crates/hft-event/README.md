@@ -203,7 +203,7 @@ impl OrderFlags {
     pub const RISK_REDUCING: Self = 1 << 4;  // 风险递减:非 HARD 的 kill 下放行(gw 只看此位,判定见 hft-types kill 字位)
     pub const SMOKE: Self         = 1 << 5;  // Admin 冒烟单(SmokeOrder 命令建的槽;OMS 按 origin = Command 填写,语义与自动撤单归 hft-oms);gw 照常编码,不另做处理
     pub const POSITION_CLOSE: Self = 1 << 6; // 引擎永续尾仓平仓,来源须为 Exec,同时 RISK_REDUCING/REDUCE_ONLY;协议选择精确量 MARKET 或全持仓端点
-    // bit 7:保留给线上标志,只追加
+    pub const SPEND: Self         = 1 << 7;  // 按金额买入:只用于买入 Ioc/Fok,至多花 px × qty 计价资产,低于 px 成交时可收到多于 qty 的数量(策略经 SDK `OrderIntent::SPEND` 声明,OMS 拷入;成交语义归 hft-oms)
     // bit 8..15:保留不用,恒 0,永不出现在 OrderDecision/GwCmd 上(OMS 的槽内部状态位是独立的 SlotFlags,见 hft-oms)
     pub const WIRE_MASK: Self     = 0x00FF;
 }

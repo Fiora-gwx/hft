@@ -513,7 +513,7 @@ Simultaneous 第一腿在第 5 步前预计算第二腿的实际数量、限价�
 
 所有来源的意图(策略 `Ctx`、执行层 `ExecOut.orders`、OMS 的 `Second`/`SecondRetry`/`Reverse`、命令)走同一条管线:
 
-0. **链接结构**(只对策略 `place` 的带 `LegLink` 意图):`hft_oms::link_valid(&link)` 为假 → 只写 `OrderDecision{reject = INVALID}`,结果 `Rejected(INVALID)`(有效模式 Shadow 时记录另带 SHADOW,结果 Shadowed),不经后续各步(规则归 [hft-oms LegLink 与 HedgePlan](../hft-oms/README.md#leglink-与-hedgeplan))。
+0. **链接结构与按金额买入的形态**(只对策略 `place`):带 `LegLink` 且 `hft_oms::link_valid(&link)` 为假,或 `hft_oms::spend_valid(&intent)` 为假(带 `OrderIntent::SPEND` 却不是无链接的买入 `Ioc`/`Fok`)→ 只写 `OrderDecision{reject = INVALID}`,结果 `Rejected(INVALID)`(有效模式 Shadow 时记录另带 SHADOW,结果 Shadowed),不经后续各步(规则归 [hft-oms LegLink 与 HedgePlan](../hft-oms/README.md#leglink-与-hedgeplan)、[按金额买入](../hft-oms/README.md#按金额买入))。通过的带 `SPEND` 意图的 `OrderDecision.oflags` 含 `OrderFlags::SPEND`。
 
 1. **对冲定价**(OMS 的对冲请求):`oms::price_hedge(req, plan, bbo, now, &risk.hedge_px_limits(account, venue, inst), …)`(签名以 hft-oms 为准,含该 inst 的 tick)——`HedgePxLimits`(hft-types)的连接健康阈值 `conn_liveness_ms` 与越价上限 `rr_max_cross`(该 inst 所属价格带类别)只在 `RiskParams` 里配置(与检查链 #5 同值同源;报价可用 = `BboView::quote_live`,盘口不变不算过期);限价按 hft-types `cap_cross_px` 取对手价越价与 `rr_max_cross` 上限中更近的一个(仍是 IOC)。`Err(StaleQuote | BeyondCross)` 是门控:调 `oms.hedge_gated(link_id, HedgeGate::Px(err), …)`(登记 HedgeRetry、不计次、截止照算),本条不出环。
 2. **模式门**:只对策略 `place` 的意图与执行层 `origin = Target` 的增仓订单,读 `risk.mode.effective(cell)`;Shadow → 标记只评估,继续完整风控检查链;Live 但 `open_allowed = false` 的 Open → `MODE_SHADOW`;行为表归 [hft-strategy-sdk](../hft-strategy-sdk/README.md)。OMS 的对冲单、执行层的 Engine 订单与减仓订单不经模式门,只受 HARD 约束;**命令产生的冒烟单(`SmokeOrder`)不经模式门**,走完整检查链(检查链对它的口径归 [hft-risk](../hft-risk/README.md))。

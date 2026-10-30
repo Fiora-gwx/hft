@@ -3,13 +3,13 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive};
+use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 
 /// The usage line of program `prog`.
 pub fn usage(prog: &str) -> String {
     format!(
-        "usage: {prog} [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] \
-         [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...] \
+        "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...] \
          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
@@ -24,13 +24,16 @@ pub enum Mode {
     Maker,
     /// `--live UID KEYS_DIR`: the live maker.
     Live(PmLive),
+    /// `--live UID KEYS_DIR --taker-probe`: the live configuration with pm-taker-probe.
+    LiveProbe(PmLive),
 }
 
 /// One parsed command line.
 #[derive(Clone, Debug)]
 pub struct Cmd {
     pub mode: Mode,
-    /// `--param NAME=RAW`, in order (checked against the binary-maker schema).
+    /// `--param NAME=RAW`, in order (checked against the binary-maker schema; with
+    /// `--taker-probe` against pm-taker-probe's).
     pub params: Vec<(String, i64)>,
     pub root: PathBuf,
     pub hot: PathBuf,
@@ -95,6 +98,7 @@ pub fn parse_account(spec: &str, keys_dir: PathBuf) -> Result<LiveAccount, Strin
 /// Parses the arguments after the program name.
 pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut maker = false;
+    let mut probe = false;
     let mut live: Option<(String, PathBuf)> = None;
     let mut carry = None;
     let mut daily_loss = None;
@@ -121,6 +125,10 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             "--maker" => {
                 once(maker, "--maker")?;
                 maker = true;
+            }
+            "--taker-probe" => {
+                once(probe, "--taker-probe")?;
+                probe = true;
             }
             "--live" => {
                 once(live.is_some(), "--live")?;
@@ -179,8 +187,16 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             _ => pos.push(a),
         }
     }
-    crate::check_maker_params(&params)?;
+    crate::check_params(
+        if probe {
+            PmStrategy::TakerProbe
+        } else {
+            PmStrategy::Maker
+        },
+        &params,
+    )?;
     let needs_live = [
+        (probe, "--taker-probe"),
         (no_presign, "--no-presign"),
         (!extra.is_empty(), "--live-account/--account"),
         (carry.is_some(), "--day-loss-carry"),
@@ -222,7 +238,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 extra_accounts: extra,
             };
             l.check()?;
-            Mode::Live(l)
+            if probe { Mode::LiveProbe(l) } else { Mode::Live(l) }
         }
         None if maker => Mode::Maker,
         None => Mode::Sim,
@@ -249,6 +265,9 @@ pub fn run(cmd: &Cmd) -> Result<PathBuf, String> {
     match &cmd.mode {
         Mode::Live(l) => {
             crate::write_polymarket_maker_live_with(root, hot, user, pipeline, ip, dev, l, &cmd.params)
+        }
+        Mode::LiveProbe(l) => {
+            crate::write_polymarket_taker_probe_live(root, hot, user, pipeline, ip, dev, l, &cmd.params)
         }
         Mode::Maker => {
             crate::write_polymarket_maker_sim_with(root, hot, user, pipeline, ip, dev, &cmd.params)

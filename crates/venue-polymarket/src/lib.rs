@@ -4,8 +4,9 @@
 //! `last_trade_price` → `Trade`) with synthetic per-inst sequence ids, the text `PING`/`PONG`
 //! heartbeat, `subscribe`/`unsubscribe` frames rendered from the token binding table of
 //! `FeedCtx`, capability and rate defaults; order entry over REST (Deposit Wallet signed,
-//! post-only GTD orders, cancels, order query), the authenticated user channel (`order` events →
-//! fills and cancels) and the warm account baseline. Pure functions: no I/O, no threads, no
+//! post-only / GTD orders and FAK / FOK taker orders, cancels, order query), the authenticated
+//! user channel (`order` events → fills and cancels; `trade` events → fills of FAK / FOK orders)
+//! and the warm account baseline. Pure functions: no I/O, no threads, no
 //! global state. Specification: `crates/venue-polymarket/README.md`.
 #![forbid(unsafe_code)]
 #![deny(

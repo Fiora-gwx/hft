@@ -157,6 +157,9 @@ pub(crate) struct Order {
     pub unexp_ts: i64,
     /// `VenueModel::gtd_ms`: event time at which the resting order expires (0 = never).
     pub exp_at: u64,
+    /// A BUY by spend amount (`OrderFlags::SPEND` on a buy Ioc/Fok, README "按金额买入"): spends at
+    /// most `px × qty`, may fill more than `qty`.
+    pub spend: bool,
 }
 
 impl Order {
@@ -187,6 +190,7 @@ impl Order {
         unexp: 0,
         unexp_ts: 0,
         exp_at: 0,
+        spend: false,
     };
 
     pub fn remaining(&self) -> i64 {

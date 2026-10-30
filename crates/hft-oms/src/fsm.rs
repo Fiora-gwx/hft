@@ -31,6 +31,8 @@ pub(crate) struct FillIn {
     pub(crate) execution_cash: bool,
     /// QueryResult / reconciliation: without `avg_px` the order price is used (`PX_EST`).
     pub(crate) query: bool,
+    /// The report is a `Fill` (the venue says the order is done): ends a spend order.
+    pub(crate) done: bool,
     pub(crate) seq: u64,
 }
 
@@ -125,6 +127,9 @@ impl Oms {
         let smoke = it.origin == Origin::Command && it.smoke_ttl_ms > 0;
         if smoke {
             oflags |= OrderFlags::SMOKE.0;
+        }
+        if crate::price::spend_valid(oi) && oi.spend() {
+            oflags |= OrderFlags::SPEND.0;
         }
         let group = if smoke { GROUP_NONE } else { oi.group };
         let leg_ix = self.leg_ix_of(oi.account, group, oi.inst);
@@ -529,6 +534,7 @@ impl Oms {
                     .is_some_and(|x| x.filled.0 >= x.qty.0);
                 let to = if filled_all { S::Filled } else { S::Cancelled };
                 self.transition(ti, s, to, cause, now, seq, out);
+                self.spend_done_update(ti, s, out);
             }
             OrderEventKind::CancelReject => {
                 let gone = ev.detail == REJECT_GONE;
@@ -664,6 +670,7 @@ impl Oms {
             OrderState::Unknown
         };
         self.transition(ti, s, to, cause, now, seq, out);
+        self.spend_done_update(ti, s, out);
         // The rejected cancel/amend was answered: it is no longer in flight (scenarios FP-4).
         // `Unknown` otherwise keeps both bits for a request the connection loss left unanswered.
         if to == OrderState::Unknown {
@@ -807,6 +814,7 @@ impl Oms {
             cash_sum: ev.cash_sum,
             execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
+            done: false,
             seq,
         };
         if let Some(fd) = self.apply_fill(ti, s, &f, now, out) {
@@ -836,6 +844,7 @@ impl Oms {
             cash_sum: ev.cash_sum,
             execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
+            done: ev.what == OrderEventKind::Fill,
             seq,
         };
         self.fill_to_state(ti, s, &f, None, now, seq, out);
@@ -869,13 +878,19 @@ impl Oms {
                 && to != st
             {
                 self.transition(ti, s, to, cause, now, seq, out);
+                self.spend_done_update(ti, s, out);
+            } else if forced.is_none() && sl.spend() && f.done && st.open() {
+                // A spend order's `Fill` ends it even without a new increment (README "按金额买入").
+                self.transition(ti, s, OrderState::Filled, TransitionCause::Fill, now, seq, out);
+                self.spend_done_update(ti, s, out);
             }
             return;
         };
         if st == OrderState::PendingNew {
             self.or_flag(ti, s, SlotFlags::FILL_BEFORE_ACK);
         }
-        let full = f.cum.0 >= sl.qty.0;
+        // A spend order ends when the venue says so (README "按金额买入"), not at `qty`.
+        let full = if sl.spend() { f.done } else { f.cum.0 >= sl.qty.0 };
         use OrderState as S;
         let (to, cause) = match forced {
             Some(x) => x,
@@ -946,6 +961,39 @@ impl Oms {
         let _ = out.updates.push(u);
     }
 
+    /// Owner `OrderUpdate::Filled{d: 0, done: true}` of a spend slot that has just become
+    /// `Filled` without a fill increment (`Fill` or `QueryResult{Filled}` repeating the known
+    /// cumulative, `Expired` after more than `qty`): its owner learns the end (README "按金额买入").
+    /// Call right after a transition that had no increment; no-op for any other slot or state.
+    pub(crate) fn spend_done_update(&mut self, ti: usize, s: u32, out: &mut OmsOut) {
+        let Some(t) = self.t(ti) else { return };
+        let (Some(sl), Some(ex)) = (t.slot(s), t.ext.get(s as usize)) else {
+            return;
+        };
+        if !sl.spend() || sl.state != OrderState::Filled || ex.origin == Origin::Command as u8 {
+            return;
+        }
+        let px = if sl.filled.0 > 0 {
+            Px(div_half_even(sl.filled_notional, i128::from(sl.filled.0)))
+        } else {
+            Px(0)
+        };
+        let u = OrderUpdate {
+            r: sl.handle(),
+            group: sl.group,
+            tag: ex.tag,
+            kind: OrderUpdateKind::Filled {
+                d: Qty(0),
+                px,
+                fee: sl.fee_accum,
+                fee_asset: sl.fee_asset,
+                cum: sl.filled,
+                done: true,
+            },
+        };
+        let _ = out.updates.push(u);
+    }
+
     /// Applies a fill increment to the slot, the in-flight book, the LegTracker and `FillOut`.
     /// `None` when the cumulative quantity does not increase.
     pub(crate) fn apply_fill(
@@ -977,10 +1025,6 @@ impl Oms {
         }
         let info = *self.inst(sl.inst);
         let mut flags = 0u8;
-        let overfill = f.cum.0 > sl.qty.0;
-        if overfill {
-            flags |= fill_flags::OVERFILL;
-        }
         let hedge_gross = f
             .cum
             .0
@@ -998,6 +1042,21 @@ impl Oms {
             let i = i128::from(px.0) * i128::from(d);
             (i, sl.filled_notional + i)
         };
+        // A spend order may receive more than `qty`: it overfills only when it spent more than
+        // `px × qty` beyond the rounding of an average price (half a price unit per unit of
+        // `cum`); an estimated price (`PX_EST`) proves nothing (README "按金额买入").
+        let overfill = if sl.spend() {
+            flags & fill_flags::PX_EST == 0
+                && new_notional.saturating_mul(2)
+                    > (i128::from(sl.px.0) * i128::from(sl.qty.0))
+                        .saturating_mul(2)
+                        .saturating_add(i128::from(f.cum.0))
+        } else {
+            f.cum.0 > sl.qty.0
+        };
+        if overfill {
+            flags |= fill_flags::OVERFILL;
+        }
         let px = Px(div_half_even(incr, i128::from(d)));
         let fee_asset = if f.fee_asset.0 != 0 {
             f.fee_asset

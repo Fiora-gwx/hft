@@ -1,6 +1,6 @@
 //! `price_hedge` (README "对冲定价") and `link_valid` (strategy link structure check).
 
-use hft_strategy_sdk::{BboView, HedgeKind, HedgePlan, LegLink, LinkRole, OnFail, PxMode};
+use hft_strategy_sdk::{BboView, HedgeKind, HedgePlan, LegLink, LinkRole, OnFail, OrderIntent, PxMode};
 use hft_types::{HedgePxLimits, Px, RoundMode, Side, Tif, Tsc, cap_cross_px};
 
 use crate::types::{HedgePx, HedgePxErr, HedgeRequest};
@@ -78,6 +78,12 @@ pub fn price_hedge(
         touch,
         cap,
     })
+}
+
+/// Shape check of a strategy's spend order (README "按金额买入"): an intent without
+/// `OrderIntent::SPEND` is valid; with it, only an unlinked `Buy` with `Tif::Ioc`/`Tif::Fok`.
+pub fn spend_valid(it: &OrderIntent) -> bool {
+    !it.spend() || (it.side == Side::Buy && matches!(it.tif, Tif::Ioc | Tif::Fok) && it.link.get().is_none())
 }
 
 /// Structure check of a strategy's link (README "策略链接的结构校验").

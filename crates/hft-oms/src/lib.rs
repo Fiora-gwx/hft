@@ -54,7 +54,7 @@ use hft_types::{AccountId, AssetExp, GroupId, Rate, StrategyId, Tsc, VenueId};
 pub use config::{OmsConfig, PerTable, PerVenue};
 pub use config_blob::{OMS_CONFIG_ROW_VERSION, OmsConfigRow};
 pub use inflight::InflightBook;
-pub use price::{link_valid, price_hedge};
+pub use price::{link_valid, price_hedge, spend_valid};
 pub use table::VenueBook;
 pub use types::*;
 

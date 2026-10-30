@@ -152,12 +152,12 @@ fn reg_004_ledger() {
         ),
         (
             "REG-004.8",
-            append_row("| 8 | [future](../future/README.md) | core | 默认 |"),
+            append_row("| 9 | [future](../future/README.md) | core | 默认 |"),
             true,
         ),
         (
             "REG-004.9",
-            append_row("| 9 | [future](../future/README.md) | core | 默认 |"),
+            append_row("| 10 | [future](../future/README.md) | core | 默认 |"),
             false,
         ),
         ("REG-004.10", edit_row("0xFF00–0xFFFF", |_| None), true),
