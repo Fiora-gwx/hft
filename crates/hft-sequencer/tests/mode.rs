@@ -109,6 +109,37 @@ fn seq_199_shadow_deferred_notes() {
     assert_eq!(n.v[0], 1 | (1 << 8));
     assert_eq!(n.v[1], u64::from(G1.0));
     assert_eq!(n.v[2], 0);
+    // 2. the engine's reduce IOC ends unfilled, then the venue delivers the position
+    // (settlement: `ExternalFill{Delivery}` takes a1 to 0): the cell lands in Shadow in that Input.
+    for d in risk_kit::decs_since(&h, m) {
+        risk_kit::expire_order(&mut h, &d);
+    }
+    assert_eq!(
+        h.mode(S1, AC1, G1),
+        Effective::CloseOnly {
+            deferred_shadow: true
+        }
+    );
+    let m = h.mark();
+    h.push(
+        RingId::Rep(0),
+        &risk_kit::external_fill(
+            &h,
+            AC1,
+            A1,
+            Side::Sell,
+            "0.010",
+            hft_event::ExternalCause::Delivery,
+        ),
+    );
+    h.run();
+    assert_eq!(h.mode(S1, AC1, G1), Effective::Shadow, "SEQ-199 step 2");
+    let n = h
+        .notes_since(m)
+        .into_iter()
+        .find(|n| n.code == hft_sequencer::codes::seq_note(8))
+        .expect("ShadowDeferred on landing");
+    assert_eq!((n.v[1], n.v[2]), (u64::from(G1.0), 1), "SEQ-199 step 2");
 }
 
 #[test]

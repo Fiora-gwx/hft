@@ -3008,10 +3008,10 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 - 前置:B0 稳态;g1 有仓位(a1 +0.010、b1 −0.010)
 - 步骤:
   1. 投递 `SetMode{(1, 1, g1) → Shadow}`
-  2. 两腿平到 0
+  2. 引擎的减仓 IOC 以 `Expired` 结束(无成交),随后 `ExternalFill{Delivery}`(结算交割)把 a1 平到 0
 - 期望:
   - 步骤 1:`CmdResult{Applied, detail = ShadowDeferred}`;有效模式 `CloseOnly{deferred_shadow: true}`;`Note{Sequencer, ShadowDeferred}` `v[0] = 1 | 1 << 8`、`v[1] = g1`、`v[2] = 0`
-  - 步骤 2:落到 Shadow 的那个 Input 内一条 `ShadowDeferred`,`v[2] = 1`
+  - 步骤 2:IOC 结束后仍为 `CloseOnly{deferred_shadow: true}`;交割那条 Input 内有效模式落到 `Shadow`,并有一条 `ShadowDeferred`,`v[1] = g1`、`v[2] = 1`
 - 实现:`crates/hft-sequencer/tests/mode.rs::seq_199_shadow_deferred_notes`
 
 ### SEQ-200 ② 撤单范围与 open_only 原样转交 OMS
