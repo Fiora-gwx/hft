@@ -77,7 +77,7 @@ cargo xtask decoupling-gate --base <sha> --head <sha> [--pr <n>]
 PR 级的解耦检查,上线门槛 ⑧ 的一部分([testing §8](../docs/testing.md#8-上线门槛))。**不构建、不测试**,只读 git 与 GitHub:
 
 1. 按 `tools/xtask/deps.toml` 的分层表把 `git diff --name-only <base>..<head>` 的文件归类;同时改了 `strategies/*`(含 `strategies/registry`)与任何引擎 crate(`crates/*`)或 app(`apps/*`)→ 失败,列出两边的文件。
-2. **豁免**:`--pr` 给出的 PR 带 `engine-change` 标签,**且**有一位 Admin(名单 `.github/hft-admins.txt`)的批准评审——经 `GITHUB_TOKEN`(`pull-requests: read`)读评审列表核对批准人;只有标签、或批准人不在名单里 → 仍失败。
+2. **豁免**:`--pr` 给出的 PR 带 `engine-change` 标签,**且**有一位 Admin(名单 `.github/hft-admins.txt`)的批准评审,或 PR 作者本人就是 Admin(GitHub 不允许批准自己的 PR,Admin 自己提的 PR 以打标签作为确认,批准人记为 `<login> (author)`)——经 `GITHUB_TOKEN`(`pull-requests: read`)读 PR 与评审列表核对;只有标签而作者与批准人都不在名单里 → 仍失败。
 3. 每次豁免写进 `$GITHUB_STEP_SUMMARY` 与 `target/xtask/decoupling-gate.json`(PR 号、批准人、改动的引擎 crate 与 app 列表),供每夜摘要汇总。
 4. 退出 2:读不到 PR 评审(无 token、API 失败)、`base`/`head` 不存在。
 

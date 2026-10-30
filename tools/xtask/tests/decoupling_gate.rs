@@ -127,6 +127,28 @@ fn tool_013_admin_exemption() {
     for w in ["17", "owner1", "hft-oms"] {
         assert!(s.contains(w), "summary lacks {w}: {s}");
     }
+    // .2 an Admin's own PR with the label and no review: exempt, the author named as approver.
+    let f = layers("dg-013-2");
+    let pull = r#"{"number":17,"user":{"login":"owner1"},"labels":[{"name":"engine-change"}]}"#;
+    let (r, _) = gate(&f, &MIXED, Some((pull, "[]")), &[]);
+    assert_eq!(r.code, 0, "TOOL-013.2: {}", r.stderr);
+    assert_eq!(
+        r.json.unwrap()["exemption"]["approver"],
+        "owner1 (author)",
+        "TOOL-013.2"
+    );
+    assert!(f.read("summary.md").contains("owner1 (author)"), "TOOL-013.2");
+    // .3 a non-Admin author with the label and no review: not exempt.
+    let f = layers("dg-013-3");
+    let pull = r#"{"number":17,"user":{"login":"dev2user"},"labels":[{"name":"engine-change"}]}"#;
+    let (r, _) = gate(&f, &MIXED, Some((pull, "[]")), &[]);
+    assert_eq!(r.code, 1, "TOOL-013.3: {}", r.stderr);
+    assert!(r.json.unwrap().get("exemption").is_none(), "TOOL-013.3");
+    // .4 an Admin author without the label: not exempt.
+    let f = layers("dg-013-4");
+    let pull = r#"{"number":17,"user":{"login":"owner1"},"labels":[]}"#;
+    let (r, _) = gate(&f, &MIXED, Some((pull, "[]")), &[]);
+    assert_eq!(r.code, 1, "TOOL-013.4: {}", r.stderr);
 }
 
 #[test]
