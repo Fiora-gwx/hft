@@ -100,7 +100,9 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         Err(e @ (SnapshotCheckError::RoundTrip { .. } | SnapshotCheckError::Size))
             if std::env::var_os("HFT_REPLAY_COMPAT_SNAPSHOT").is_some_and(|v| v == "1") =>
         {
-            eprintln!("replayer: start snapshot not byte-exact ({e:?}); accepted (HFT_REPLAY_COMPAT_SNAPSHOT)");
+            eprintln!(
+                "replayer: start snapshot not byte-exact ({e:?}); accepted (HFT_REPLAY_COMPAT_SNAPSHOT)"
+            );
         }
         Err(e) => return Err(format!("start snapshot: {e:?}")),
     }
@@ -146,6 +148,83 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         mask.clone()
     };
     let cmd_ids = inject_variant::<S>(&mut seq, &targets, &cfg.variant)?;
+    if std::env::var_os("HFT_REPLAY_RESEARCH_RISK").is_some_and(|v| v == "1") {
+        // Research option: the recorded account's live risk limits (daily loss, order / group /
+        // account / venue notional, position size) do not stop the simulated strategy, so a
+        // variant is judged by its own rules (its losses are not truncated, its size not capped):
+        // SetRisk (admin, issuer `research`) with those limits lifted, before any Input.
+        let mut p = seq.engine().risk.params().clone();
+        let big = hft_types::Notional(i64::MAX / 4);
+        let lift = |g: &mut hft_risk::GroupLimits| {
+            g.max_group_notional = big;
+            g.max_pos_qty = hft_types::Qty(i64::MAX / 4);
+        };
+        for a in p.accounts.as_mut_slice() {
+            a.daily_loss_abs = big;
+            a.daily_loss_kill = hft_types::Rate(1_000_000_000_000);
+            a.max_order_notional = big;
+            a.max_account_notional = big;
+            a.account_notional_from_equity = hft_types::Rate(1_000_000_000_000);
+            lift(&mut a.default_group);
+        }
+        for g in p.groups.as_mut_slice() {
+            lift(&mut g.l);
+        }
+        for v in p.venues.as_mut_slice() {
+            v.max_venue_notional = big;
+        }
+        p.version = p.version.wrapping_add(1);
+        let content = p.encode_blob().map_err(err("no daily loss"))?;
+        let r = hft_event::BlobRef {
+            kind: BlobKind::RiskParams,
+            encoding: 1,
+            len: u32::try_from(content.len()).map_err(|_| "risk blob length")?,
+            version: p.version,
+            sha256: <sha2::Sha256 as sha2::Digest>::digest(&content).into(),
+        };
+        let scope = CmdScope {
+            strategy: StrategyId(0),
+            venue: VenueId(0),
+            account: AccountId(0),
+            _pad: 0,
+            group: GroupId(0),
+            inst: InstId(0),
+            _pad2: 0,
+        };
+        let mut h = CmdHdr::zeroed();
+        h.cmd_id[..8].copy_from_slice(b"nodayls0");
+        h.cmd_id[15] = 0x5B;
+        h.issuer[..8].copy_from_slice(b"research");
+        h.role = CmdHdr::ROLE_ADMIN | CmdHdr::ROLE_TRADER;
+        h.cmd_ver = 1;
+        h.confirmed = 1;
+        h.expect_state_version = seq.engine().risk.mode.ctl_state_version();
+        let mut buf = vec![0u8; 1024];
+        let n = (ControlCmd::SetRisk { blob: r })
+            .encode(&h, &mut buf)
+            .map_err(err("SetRisk"))?;
+        buf.truncate(n);
+        let bi = blob_input(r, scope, &content);
+        let tsc = seq.driver().start_tsc();
+        seq.driver_mut().push_variant(r, content, bi, buf, tsc);
+    }
+    if std::env::var_os("HFT_REPLAY_FORCE_LIVE").is_some_and(|v| v == "1") {
+        let t: Vec<(StrategyId, AccountId)> = seq
+            .instances()
+            .slots
+            .iter()
+            .filter(|s| targets.contains(&s.account) && s.blob.kind == BlobKind::StrategyParams)
+            .map(|s| (s.id, s.account))
+            .collect();
+        // every 10 s of journal time (tsc_hz_milli = ticks per 1000 s)
+        let every = hz.saturating_mul(10) / 1000;
+        seq.driver_mut().force_live = Some(crate::driver::ForceLive {
+            targets: t,
+            every,
+            next: 0,
+            n: 0,
+        });
+    }
     loop {
         match seq.step() {
             StepOutcome::Busy => {
@@ -165,6 +244,33 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
     let drv = seq.driver();
     if let Some(e) = &drv.err {
         return Err(format!("journal: {e}"));
+    }
+    if drv.force_live.is_some() {
+        let mut tally = std::collections::BTreeMap::<(u16, u32), u32>::new();
+        for r in drv
+            .sink
+            .captured
+            .iter()
+            .filter(|c| c.kind == EventKind::CMD_RESULT)
+            .filter_map(|c| read_body::<CmdResult>(&c.body))
+            .filter(|r| r.cmd_id[..8] == *b"forcelve")
+        {
+            *tally.entry((u16::from(r.status), r.detail as u32)).or_default() += 1;
+        }
+        eprintln!("replayer: force-live SetMode results (status, detail) -> count: {tally:?}");
+    }
+    if let Some(r) = drv
+        .sink
+        .captured
+        .iter()
+        .filter(|c| c.kind == EventKind::CMD_RESULT)
+        .filter_map(|c| read_body::<CmdResult>(&c.body))
+        .find(|r| r.cmd_id[..8] == *b"nodayls0")
+    {
+        eprintln!(
+            "replayer: no-daily-loss SetRisk status {} detail {:#x}",
+            r.status, r.detail
+        );
     }
     for id in cmd_ids {
         let r = drv

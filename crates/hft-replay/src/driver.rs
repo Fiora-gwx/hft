@@ -4,7 +4,10 @@
 
 use std::collections::VecDeque;
 
-use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, HostProfile, RecordFlags, Role, Timer};
+use hft_event::{
+    BlobHdr, BlobKind, BlobRef, ClockStatus, CmdHdr, CmdScope, ControlCmd, EventKind, HostProfile,
+    RecordFlags, Role, Timer,
+};
 use hft_journal::{AppendErr, RollAt, RollErr, RollReason};
 use hft_rt::CalibPair;
 use hft_sequencer::driver::{Driver, DriverMode, DriverView, ParseCx, RollInfo, replay::Log};
@@ -12,7 +15,7 @@ use hft_sequencer::journal::{BootSink, JournalSink, RollMeta, role_of};
 use hft_sequencer::parsed::{ParsedConfig, parse_blob};
 use hft_sequencer::{ConfigErr, EmitResult, InputSlot, MemRecord, OutRecord, SegClock};
 use hft_strategy_sdk::StrategySet;
-use hft_types::{GroupId, KillBits, Seq, Tsc};
+use hft_types::{AccountId, GROUP_ALL, GroupId, InstId, KillBits, RunMode, Seq, StrategyId, Tsc, VenueId};
 use sha2::{Digest, Sha256};
 use zerocopy::IntoBytes;
 
@@ -161,6 +164,21 @@ pub struct DriverStats {
     pub engine_timers: u64,
     pub sim_inputs: u64,
     pub variant_inputs: u64,
+    /// Force-live research option: logged `SetMode` (not Live) dropped, `SetMode Live` inserted.
+    pub log_mode_dropped: u64,
+    pub force_live_inputs: u64,
+}
+
+/// Research option (HFT_REPLAY_FORCE_LIVE=1): the simulated strategies quote as if they had been
+/// Live for the whole journal. The journal's operator `SetMode` other than Live on a simulated
+/// account is dropped, and `SetMode Live` (issuer `pipeline`) is inserted every `every` TSC ticks
+/// of journal time (refused while the startup gate is closed, a no-op once Live).
+#[derive(Clone, Debug)]
+pub struct ForceLive {
+    pub targets: Vec<(StrategyId, AccountId)>,
+    pub every: u64,
+    pub next: u64,
+    pub n: u32,
 }
 
 /// What the driver does with the journal's records.
@@ -205,6 +223,7 @@ pub struct ResearchDriver {
     /// `ConfigBlob` records seen (prefix and stream), newest last; plus the variants' blobs.
     blobs: Vec<(BlobRef, Vec<u8>)>,
     pub stats: DriverStats,
+    pub force_live: Option<ForceLive>,
     pub err: Option<SourceErr>,
     eof: bool,
     /// The simulated venue's order events and deliveries, stamped like `sink.captured`.
@@ -288,6 +307,7 @@ impl ResearchDriver {
             cont_checked: true,
             blobs,
             stats: DriverStats::default(),
+            force_live: None,
             err: None,
             eof: false,
             obs: Vec::new(),
@@ -442,6 +462,17 @@ impl ResearchDriver {
             }
             venue.on_record(&r);
         }
+        if let Some(f) = &self.force_live
+            && r.kind == EventKind::CONTROL_CMD
+            && let Ok((_, ControlCmd::SetMode { scope, mode })) = ControlCmd::decode(&r.body)
+            && mode != RunMode::Live
+            && f.targets
+                .iter()
+                .any(|(_, a)| *a == scope.account || scope.account.0 == 0)
+        {
+            self.stats.log_mode_dropped += 1;
+            return None;
+        }
         if let Some(b) = blob_of(&r) {
             self.blobs.push(b);
         }
@@ -551,6 +582,54 @@ impl<S: StrategySet> Driver<S> for ResearchDriver {
                 self.eof = true;
                 return false;
             };
+            if let Some(f) = &mut self.force_live
+                && t_log >= f.next
+            {
+                f.next = t_log.saturating_add(f.every);
+                let version = v.engine().risk.mode.ctl_state_version();
+                for (k, (sid, account)) in f.targets.clone().into_iter().enumerate() {
+                    f.n = f.n.wrapping_add(1);
+                    let scope = CmdScope {
+                        strategy: sid,
+                        venue: VenueId(0),
+                        account,
+                        _pad: 0,
+                        group: GROUP_ALL,
+                        inst: InstId(0),
+                        _pad2: 0,
+                    };
+                    let mut h = CmdHdr::zeroed();
+                    h.cmd_id[..8].copy_from_slice(b"forcelve");
+                    h.cmd_id[8..12].copy_from_slice(&f.n.to_le_bytes());
+                    h.cmd_id[12] = k as u8;
+                    h.cmd_id[15] = 0x5A;
+                    // a trader (pipeline may only lower the mode)
+                    h.issuer[..8].copy_from_slice(b"research");
+                    h.role = CmdHdr::ROLE_TRADER;
+                    h.account = account;
+                    h.cmd_ver = 1;
+                    h.confirmed = 1;
+                    h.expect_state_version = version;
+                    let mut buf = vec![0u8; 512];
+                    if let Ok(n) = (ControlCmd::SetMode {
+                        scope,
+                        mode: RunMode::Live,
+                    })
+                    .encode(&h, &mut buf)
+                    {
+                        buf.truncate(n);
+                        self.stats.force_live_inputs += 1;
+                        self.queue.push_back(Pending {
+                            kind: EventKind::CONTROL_CMD,
+                            flags: RecordFlags(0),
+                            tsc: t_log.max(self.last_tsc),
+                            body: buf,
+                            origin: Origin::Variant,
+                        });
+                    }
+                }
+                continue;
+            }
             let heap = if self.cfg.engine_timers && self.venue.is_some() {
                 v.heap_top().filter(|h| h.deadline <= t_log)
             } else {
