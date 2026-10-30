@@ -283,6 +283,28 @@ fn rsk_101_gate_bit_conditions() {
         assert_eq!(w.out.released.as_slice(), &[acc(3)], "RSK-101.16 released");
     }
     {
+        // .18 a Sim account has no standby: `standby_up = false` still sets ORDER_CONNS while
+        // `allow_missing_standby = false` (a prod instance with Sim accounts).
+        let mut w = r0();
+        w.ok(auto(CapSource::RECOVERY, sc_acct(3)));
+        w.ok(ModeInput::RecoveryFlags {
+            account: acc(3),
+            flags: RecoveryFlags(0),
+        });
+        let steps = [
+            Step::Feeds(true),
+            Step::Conns(A, true, false),
+            Step::Conns(B, true, false),
+            Step::Unknown(0),
+            Step::Clock(true),
+        ];
+        for s in &steps {
+            w.step(3, s).unwrap();
+        }
+        assert!(has(&w, 3, gate_bits::ORDER_CONNS), "RSK-101.18 order conns");
+        assert_eq!(w.out.released.as_slice(), &[acc(3)], "RSK-101.18 released");
+    }
+    {
         let mut w = r0();
         w.ok(auto(CapSource::RECOVERY, sc_acct(3)));
         w.ok(ModeInput::RecoveryFlags {
