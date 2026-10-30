@@ -245,3 +245,15 @@ pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, 
 - 与 `bm_sim.py` 的对账(M1 验收 (b))需要研究机上的实盘 journal 与同参数、同固定延迟的 `bm_sim.py` 输出。
 
 </details>
+
+## 研究开关
+
+环境变量，缺省关；只用于 `replayer research`/`parity` 的规则研究，不影响实盘与 `verify`：
+
+| 变量 | 作用 |
+|---|---|
+| `HFT_REPLAY_COMPAT_SNAPSHOT=1` | 读旧引擎构建的 journal：启动快照能恢复但不能逐字节再生（旧节格式）时照常回放；账本配置缺 USDT 计价来源（2026-10-24 之前）时补 USDT 平价与稳定币备选。2026-10-23 14:58 以后的实盘 journal 与 10-24 以后的模拟 journal 可读；更早的有 `SnapshotUndecodable{5}`/`Config(Params)`，不支持 |
+| `HFT_REPLAY_FORCE_LIVE=1` | 被模拟账户的策略按整份 journal 都在 Live 回放：丢弃日志里非 Live 的 `SetMode`，每 10 s 日志时间插入一条 `SetMode Live`（trader 角色、group 全部；闸门未放开时被拒，之后为空操作） |
+| `HFT_REPLAY_RESEARCH_RISK=1` | 第一条 Input 之前插入 `SetRisk`（admin）放开日亏、单笔 / 组 / 账户 / 场所名义与持仓上限：变体按自己的规则跑，亏损不被日亏截断、规模不被实盘账户上限限制 |
+
+stderr 打印插入命令的结果计数。对账（2026-10-31，研究机）：同一 245 个窗口上 Rust 与研究侧 `bm_sim.py` 逐窗盈亏相关 0.78–0.85、份数 0.73–0.84；2026-10-30 实盘 7 个 `/one` 窗口 Rust 逐窗与实盘相关 0.74，决策 6577/6577 一致。
