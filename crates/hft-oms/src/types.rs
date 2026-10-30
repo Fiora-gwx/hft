@@ -363,7 +363,7 @@ impl OrderSlot {
             return self.remaining();
         }
         let px = i128::from(self.px.0);
-        let used = (self.filled_notional.max(0) + px - 1) / px;
+        let used = self.filled_notional.max(0).saturating_add(px - 1) / px;
         let rem = i128::from(self.qty.0).saturating_sub(used).max(0);
         Qty(i64::try_from(rem).unwrap_or(0))
     }
