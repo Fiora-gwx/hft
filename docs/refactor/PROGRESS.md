@@ -15,6 +15,23 @@
 | `replayer research`:同一 sequencer + 策略回放 journal,被模拟账户由 hft-sim 撮合,变体 × 种子,Parquet | RPL-300–303、RSR-001–003 绿;replayer 全量 62/62;不模拟时与日志决策逐字段一致(RPL-301);release 约 23 万记录/秒(4.3 µs/记录,DST 负载) | 研究机:与 `bm_sim.py` 同参数同固定延迟对账、10 M 事件计时 | DST 负载不等于 PM 负载 |
 | `hft-feature` + binary-maker 迁移 | BMK-034(旧代码先录 4 组参数的决策轨迹哈希,迁移后不变)、BMK 35/35、FEA 10/10;`tick_comp` 2.06 µs(旧 2.18) | `replayer verify` 对最近 7 天实盘 journal | 无 binary-maker 回放样本在仓内 |
 
+## 待负责人决定(2026-10-30 汇总)
+
+| # | 事项 | 为什么要决定 | 卡住的工作项 |
+|---|---|---|---|
+| 1 | Router 的 `FastestFor`/`RoundRobin`/`Split` | 滚动 RTT 与轮转计数要进快照,`route_reason` 要写进 `OrderDecision._pad`:journal 字节变化 | `feat/router-stp-agg-risk` |
+| 2 | 互补 token 的 STP | refdata 需要互补关系字段(blob 布局) | 同上 |
+| 3 | 实例聚合限额 | RiskParams `RKP1` 格式变化 | 同上 |
+| 4 | bm 多账户的配对规则(Side 角色、聚合口径) | 策略语义 | `strat/bm-multi-account` |
+| 5 | Polymarket FAK 线上格式 | 需要 py-clob-client-v2 `create_market_order` BUY/SELL 金样;实盘探针需批准 | `feat/pm-fak-gw` |
+| 6 | hft-pmcfg 成为 registry 第三个使用方 | 改了依赖方向规则(deps.toml、AGENTS.md、architecture §7 已同步) | 已合入,待确认 |
+| 7 | refdata `LimitBucket::Cancels` | 旧二进制读到会拒绝加载:实盘箱升级须整体换 bundle | 已合入,待确认 |
+| 8 | 基线文档"prod 不含 Sim 账户"的表述 | 根/apps AGENTS.md、Note `2026-10-03-sim-only-instance`、deploy README、glossary、defensive-patterns、journal-format、design 01/07 仍写旧规则;代码已允许(Shadow 变体) | `docs/baseline-v2` |
+| 9 | prod 内 Sim 账户的名字前缀 | 与 sim 实例同为 `sim-`,ops_bot 按账户名路由可能撞名;是否改 `shadow-` | `feat/prod-sim-accounts` |
+| 10 | Shadow 变体容量 | prod `max_instances` 8 限制变体数;每个 Sim 账户约 4 KiB × inst,接近 64 账户时重算内存表 | 同上 |
+| 11 | 待批准用例 | 见下文"待批准用例" | — |
+| 12 | 服务器验收与实盘 Shadow | 研究机 parity/对账/计时、sim 48 h、预签名 A/B、实盘 2 账户 Shadow ≥ 2 天 | 各"待验收"项 |
+
 ## 约定
 
 - 一条分支,里程碑只是分支内的阶段;每周把 `main` merge 进本分支。
