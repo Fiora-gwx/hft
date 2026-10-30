@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 6, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 7, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -126,6 +126,9 @@ hft_strategy_sdk::define_params! {
         /// no quoting while the previous UTC minute's median of the per-second median feed lag is
         /// above this (ns); 0 = off
         mdslow_gate_ns: Count [min = 0, max = 1_000_000_000, default = 0, since = 6, relax = None],
+        /// true: a token whose composite score is above comp_dir completes pairs without the pair-cost
+        /// limit (two-mode rule: the favoured side pairs off inventory left on the other side)
+        dir_pair_free: Bool [default = 0, since = 7, relax = None],
     }
 }
 
