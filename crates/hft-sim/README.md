@@ -222,7 +222,7 @@ pub mod calib { pub fn apply(text: &[u8], maker_fill: &mut MakerFill, venue: &mu
 - `load`:`venues` 中各 venue 的 `L2Batch`/`L2Snapshot`/`Trade` 以 `sw_rx_ns − ex_ts_ns` 为一个延迟样本(两个戳都 > 0),按接收秒归组取 90 分位(第 ⌊0.9 n⌋ 个),每个 UTC 分钟的各秒值取中位数;上一个结束的分钟的中位数大于几个 `load_thr_ns` 阈值,`load` 就是几;第一个分钟结束前为 1。
 - `mv`:不在 `venues` 中的第一个出现的 inst 的 `Bbo` 是参考报价,保留最近 2 s 的 (记录 tsc, bid + ask);决策时取 1 s 内最早的一条与最新一条比较:变动 ≤ 0.25 bp → 0,≤ 1 bp → 1,否则 2;没有报价 → 0。
 - `phase`:`utc_ns` 所在秒在 `window_s` 窗口内的位置 < `phase_s` → 0,否则 1。
-- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
+- `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`;研究侧 `latc_v3.json` 的 `probe_thr`(吃单探针研究的阈值,`bm_sim.py` 也不读)接受并忽略,研究的表可以原样使用。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
 
 ### 重启恢复
 

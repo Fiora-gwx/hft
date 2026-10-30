@@ -52,6 +52,10 @@ struct CalibJson {
     /// Provenance written by `replayer calib` (not interpreted).
     #[allow(dead_code)]
     meta: Option<serde_json::Value>,
+    /// Research `latc_v3.json`: thresholds of the taker-probe study (`bm_sim.py` does not read
+    /// them either). Accepted and ignored so the research table is usable as is.
+    #[allow(dead_code)]
+    probe_thr: Option<serde_json::Value>,
 }
 
 fn leg_of(s: &str) -> Option<PoolLeg> {

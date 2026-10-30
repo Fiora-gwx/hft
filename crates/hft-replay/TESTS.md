@@ -84,7 +84,7 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| RSR-004.1 | 含全部字段与 `pools`(`ack\|1\|0\|0`、`cxl\|2`、`take`、未知 leg `other`)的表 | 64 位 SHA-256;`QueueCap`、墓碑、撤单延迟、吃单延迟、`BinaryTaker{7×10⁷}`、GTD、成交回报延迟、吃单无成交即拒单、阈值换成 ns;三个池(未知 leg 忽略),样本秒换成 µs、键的通配为 `None` |
+| RSR-004.1 | 含全部字段(含研究侧 `latc_v3.json` 的 `probe_thr`,接受并忽略)与 `pools`(`ack\|1\|0\|0`、`cxl\|2`、`take`、未知 leg `other`)的表 | 64 位 SHA-256;`QueueCap`、墓碑、撤单延迟、吃单延迟、`BinaryTaker{7×10⁷}`、GTD、成交回报延迟、吃单无成交即拒单、阈值换成 ns;三个池(未知 leg 忽略),样本秒换成 µs、键的通配为 `None` |
 | RSR-004.2 | 未知字段;`maker_fill` 非法;`fee_k` 2.0 | 都拒绝 |
 
 ### RSR-005 可空特征列与字段元数据
