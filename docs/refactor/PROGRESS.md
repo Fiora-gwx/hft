@@ -23,7 +23,7 @@
 | 2 | 互补 token 的 STP | refdata 需要互补关系字段(blob 布局) | 同上 |
 | 3 | 实例聚合限额 | RiskParams `RKP1` 格式变化 | 同上 |
 | 4 | bm 多账户的配对规则(Side 角色、聚合口径) | 策略语义 | `strat/bm-multi-account` |
-| 5 | Polymarket FAK 线上格式 | 需要 py-clob-client-v2 `create_market_order` BUY/SELL 金样;实盘探针需批准 | `feat/pm-fak-gw` |
+| 5 | Polymarket FAK 线上格式 | 已由 2026-10-30 实盘探针解决(见 #13 的后续决定) | — |
 | 6 | hft-pmcfg 成为 registry 第三个使用方 | 改了依赖方向规则(deps.toml、AGENTS.md、architecture §7 已同步) | 已合入,待确认 |
 | 7 | refdata `LimitBucket::Cancels` | 旧二进制读到会拒绝加载:实盘箱升级须整体换 bundle | 已合入,待确认 |
 | 8 | 基线文档"prod 不含 Sim 账户"的表述 | 根/apps AGENTS.md、Note `2026-10-03-sim-only-instance`、deploy README、glossary、defensive-patterns、journal-format、design 01/07 仍写旧规则;代码已允许(Shadow 变体) | `docs/baseline-v2` |
@@ -31,6 +31,7 @@
 | 10 | Shadow 变体容量 | prod `max_instances` 8 限制变体数;每个 Sim 账户约 4 KiB × inst,接近 64 账户时重算内存表 | 同上 |
 | 11 | 待批准用例 | 见下文"待批准用例" | — |
 | 12 | 服务器验收与实盘 Shadow | 研究机 parity/对账/计时、sim 48 h、预签名 A/B、实盘 2 账户 Shadow ≥ 2 天 | 各"待验收"项 |
+| 13 | Polymarket FAK 的语义差异与实盘验证 | (a) FAK 买单花完 `px × qty` USDC,成交价低于 `px` 时收到的份数多于 `qty`,OMS 记 `OmsOverfill`(P0):接受、改 OMS/SDK 语义,或实测"限价单金额的 FAK"是否不超量;(b) 吃单费报 0,扣费方式待核实(方法:吃单后持仓与余额核对);(c) hft-sim 的 Ioc 零成交为 `Ack`+`Expired`(Cancelled),实盘为 400 `Reject`(Rejected);(d) 引擎级实盘验证要新增一个一次性吃单探针策略(现有策略都发不出单张 PM Ioc) | `feat/pm-fak-gw` 验收 |
 
 ## 约定
 
@@ -67,7 +68,7 @@
 | `feat/venue-sim-pm`:hft-sim `VenueModel`(默认全关,默认下回报与 `state_hash` 不变):`MakerFill::QueueCap`、撤单竞速与墓碑(`cancel_us`、`tombstone`)、吃单延迟与慢尾(`taker`)、二元吃单费 `FeeModel::BinaryTaker`、GTD 到期、条件延迟池(`set_condition`);hft-replay 的条件计算(上一完整分钟 md lag p90 三分位、1 s 参考价变动、窗口相位)与 `--own` 叠加层 | 待验收 | 648ea1ce、5452840a(并行代理,合并 76a8bd8f) | SIM-232–239、RSR-004、RPL-305–306;**待**(研究机):§5.2 对账(88 窗每窗 \|Δ\| ≤ 0.3、撤单后成交比例 ≥ 6 %)。顺带修复 M1 的驱动从未调用 `on_utc`(区间重播种未生效) |
 | `feat/replay-calib`:`replayer calib`(Ack/CancelAck 延迟池 + 条件标签 + 三分位阈值)、`--calib`(含研究侧 `latc.json` 格式) | 待验收 | 67ed01fe | RPL-307;吃单延迟、成交回报延迟与费率不由它估计 |
 | `feat/paper-venue-sim`:sim-gw 用同一个 hft-sim `VenueModel` 与 `CondTracker`;`[sim] calib` 引用校准表(与 `research --calib` 同一份解析) | 待验收 | 965f20ba、94c7ef08 | SIM-240、CORE-447;"行情旁路环"不做:sim-gw 已从 seq journal 尾读行情,顺序与引擎一致,另开环只省一次读;**待**:`sim` 实例带校准表 2 账户 × 2 变体 48 h 长跑(服务器)
-| `feat/pm-fak-gw` | blocked | | 仓内没有可核实的 Polymarket marketable/FAK 线上格式(金额/份额取整、`orderType`、过期);需要 py-clob-client-v2 `create_market_order` 的 BUY/SELL 金样(按 tick 的金额与份额取整及请求体)。实盘探针需负责人批准 |
+| `feat/pm-fak-gw`:venue-polymarket 把 `Tif::Ioc`(= `FAK`)/`Fok` 编码为 FAK/FOK 市价单(官方客户端金额取整、`expiration` "0"、无 `postOnly`、不用预签名);应答 `matched` → `Ack` + 成交 + `QueryResult{Filled}`/`Expired`,400 → `Reject`;`trade` 事件(`MATCHED`,按 id 去重)为 FAK 单的成交;GTD 请求体逐字节不变 | 待验收 | b39261af | PMK-038–040(新增)、PMK-024.2(改写);venue-polymarket 39/39、hft-venue/hft-oms/hft-sim 全绿,clippy(含 WSL Ubuntu-22.04)、`xtask hot-check`/`deps`/`test-trace`/`doc-check` PASS(doc-check 问题 0、警告数不变);金额对照 2026-10-30 实盘探针。**待**:引擎级实盘验证(单张约 1 USDC)(需一个能发单张 Ioc 的策略,现有策略都不行,见负责人决定 #13);负责人决定:FAK 买单按金额成交可超量(`OmsOverfill`)、吃单费报 0、扣费方式待核实(方法:吃单后持仓与余额核对)、hft-sim 零成交为 Ack+Expired 而实盘为 Reject |
 
 ### M3 特征层
 
@@ -131,6 +132,7 @@
 | CORE-449、CORE-450、RSK-101.18、RPL-309(新增);CORE-040.3/.4、CORE-045.1/.2、SIM-002、SIM-003.17/.18(改写) | M4 | `prod` 实例内的 Sim 账户与 sim-venue、决策屏障只对 Sim 账户、Sim 账户不要求热备、含 Sim 账户的 prod journal verify、`MAX_SIM_ACCOUNTS` 64 |
 | BMK-034、BMK-035 | M3 | 决策轨迹哈希、特征导出行 |
 | PMC-001–PMC-006(新增);TOOL-021(期望扩展:hft-pmcfg 清单副本) | M6 | hft-pmcfg 命令行、`--account`、多账户输出、工具 = 库逐字节、引擎基底 = SeqRig |
+| PMK-038、PMK-039、PMK-040(新增);PMK-024.2(改写:IOC/FOK 不再 `Unsupported`) | M2 | FAK/FOK 请求体与金额、三种实测应答、`trade` 与应答按累计量收敛 |
 
 ## 执行中的技术决定
 
