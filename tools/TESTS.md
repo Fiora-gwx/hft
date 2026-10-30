@@ -2035,7 +2035,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-131.2 | Live 账户 `label = "sim-live"` | 退出 1;`AccountNamePrefix` |
 | TOOL-131.3 | Live 账户 venues 含 `binance-spot` 与 `binance-usdm` | 退出 1;`SameExchangeMarkets` |
 | TOOL-131.4 | Sim 账户 venues 含 `okx-spot` 与 `okx-swap` | 退出 1;`SameExchangeMarkets` |
-| TOOL-131.5 | 两个账户 `bound_instance = "pc-main"` | 退出 1;`InstanceMultiBound` |
+| TOOL-131.5 | 两个账户 `bound_instance = "pc-main"` | 退出 0(一个实例绑定账户集合,`InstanceMultiBound` 不再产生,hft-refdata REF-019) |
 | TOOL-131.6 | Live 账户缺 `bitget-uta-spot` 的 UID | 退出 1;`MissingVenueUid` |
 | TOOL-131.7 | `is_prod = true` 的 Live 账户写 `uid_policy = "unverifiable"` | 退出 1;`UidPolicyProd` |
 | TOOL-131.8 | Sim 账户写 `uid_policy = "unverifiable"` | 退出 1;`UidPolicyProd` |
