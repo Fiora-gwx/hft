@@ -24,6 +24,7 @@ status: impl
   - [输出](#输出)
   - [parity](#parity)
   - [特征导出](#特征导出)
+  - [规则研究工作流](#规则研究工作流)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -171,6 +172,20 @@ pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, 
 - 采样点:`at_decisions` —— 一个 Input 处理完后,本 Input 上发出过 `OrderDecision` 的每个实例一行(`cause` 0);`every_ms` > 0 —— 引擎 UTC 越过下一个 `every_ms` 整数倍时,每个已创建的实例一行(`cause` 1,`grid_utc_ns` = 越过的格点;一次跳过多个格点只写一行)。第一个格点从运行的第一个 Input 之后开始。导出时每轮只取一个 Input(`per_round = 1`),输入序列与不导出时相同,决策因此不变。
 - 列:`variant`、`seed`、`utc_ns`、`engine_ns`(采样时的 `Now`)、`grid_utc_ns`(决策行 0)、`seq`(回放 seq)、`log_seq`(该 Input 的日志 seq,插入的 Input 为 0)、`cause`、`strategy`、`account`(主账户)、`kind_id`,然后是策略集合全部 kind 的特征列按名字合并的并集(同名列的单位与指数不同 → 报错);一个 kind 没有的列为 null,`NA` 也写成 null。特征列是可空 Int64,Arrow 字段元数据带 `unit`(`ratio`/`px`/`qty`/`ns`/`count`/`minute`)与 `exp`;研究侧按 `值 × 10^exp` 换成浮点。没有特征列的 kind 不出行。
 - `features.json`(也作为 `features.parquet` 的 `hft.run` 元数据):`version`、`code_sha`、`journal`、`every_ms`、`at_decisions`、`columns[]`(`name`、`unit`、`exp`)、`runs[]`(`variant`、`set`、`params_sha`、`start_snapshot`、`rows`)。不含耗时,同一 journal 两次运行的 Parquet 逐字节相同。
+
+### 规则研究工作流
+
+负责人 2026-10-30 决定:策略规则研究直接在 Rust 上做,不再先在研究侧 Python(`bm_port.py`/`bm_sim.py`)实现再移植。研究里跑的就是将来上线的代码,回放决策与实盘逐字节一致(`replayer verify`/`parity`)。
+
+1. **加规则**:在策略 crate(如 `strategies/binary-maker`)里实现规则,用一个新参数开关,缺省值 = 关(实盘与已有 journal 的决策不变,BMK-034 决策轨迹哈希守住);参数 schema 版本照常递增,`define_params!` 的 `since` 标新版本;规则的单元测试照常写。
+2. **构建**:x86_64 `replayer` 由 CI `research-build.yml`(`workflow_dispatch(sha)`)产出,或在 Windows 工作站的 WSL Ubuntu-22.04 交叉构建(`cargo build --release -p replayer`,glibc 2.35 的产物可在研究机运行);研究机上放在固定位置(`~/hft-research/bin/replayer`,同目录 `SHA` 记代码版本)。
+3. **跑变体**:变体文件 `[[variant]] name = "…" set = { 新参数 = 原始值, … }`,基线(不改参数)总是第 0 个;在 bundle 6f6f 及以后的实盘 journal 上:
+   `replayer research --journal <seq 段目录> --out <dir> --variants v.toml --seeds 1,2,3 --jobs 8 --calib latc.json --own --maker-fill queue-cap --tombstone --fill-resp-us 12000`。
+   单个窗口的成交随机性大,结论看多个种子与多份 journal 的平均,不看单次。
+4. **分析**:读 `<dir>/windows.parquet`(已交割窗口的盈亏;journal 在交割前结束的窗口 `end_s = −1`,份数改看 `fills.parquet`)、`orders.parquet`、`decisions.parquet`,按 `variant`、`seed` 分组比较;`run.json` 记下代码 SHA、参数 SHA-256 与校准表哈希,结论附上它们。
+5. **上线**:规则有效后把缺省值或实盘参数打开,走 PR;不需要再移植一遍。
+
+保真度(2026-10-30 对账,6f6f 的两份实盘 journal,同一延迟池、`--own`、`queue-cap`、墓碑):逐窗盈亏与实盘的相关 Rust 0.71、`bm_sim.py` 0.12,逐窗份数相关 Rust 0.94/0.56、`bm_sim.py` 0.44/0.44,撤单后成交比例实盘 1.7 %、Rust 2.1 %、`bm_sim.py` 2.6 %;每窗 \|Δ\| ≤ 0.3 的窗口 Rust 43 %(设计门槛 100 %,两个模型都未达到);速度约为研究侧流程(解码 + `bm_sim.py`)的 4–5 倍。
 
 ## 实现说明
 
