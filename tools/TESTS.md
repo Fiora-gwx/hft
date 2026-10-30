@@ -213,7 +213,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-012.8 | `strategies/x/src/lib.rs`、`docs/testing.md` | 退出 0 |
 | TOOL-012.9 | `strategies/x/src/lib.rs`、`python/pipeline/README.md` | 退出 0 |
 
-### TOOL-013 engine-change 标签加 Admin 批准评审豁免并写出摘要
+### TOOL-013 engine-change 标签加 Admin 批准评审(或 Admin 本人提的 PR)豁免并写出摘要
 
 - 规则:[cargo xtask decoupling-gate](README.md#cargo-xtask-decoupling-gate)
 - 级别:unit
@@ -225,6 +225,9 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   - 退出 0
   - JSON 的 `exemption` = `{pr: 17, approver: "owner1", engine: ["crates/hft-oms"]}`(另含 app 列表 `[]`)
   - 摘要文件含 `17`、`owner1`、`hft-oms`
+- TOOL-013.2:PR 作者 `owner1`(在名单中)、带 `engine-change`、评审列表为空 → 退出 0,`exemption.approver` = `"owner1 (author)"`,摘要含该串
+- TOOL-013.3:作者 `dev2user`(不在名单)、带标签、无评审 → 退出 1,无 `exemption`
+- TOOL-013.4:作者 `owner1`、无标签、无评审 → 退出 1
 - 实现:`tools/xtask/tests/decoupling_gate.rs::tool_013_admin_exemption`
 
 ### TOOL-014 只有 engine-change 标签没有评审仍失败

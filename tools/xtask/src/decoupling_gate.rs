@@ -5,8 +5,9 @@
 //! 2. `git diff --name-only <base>..<head>`, classified by the `[layers]` table of `tools/xtask/deps.toml`
 //!    (`strategy`, `engine`, `app`; `tool` and everything else are neutral);
 //! 3. strategy files together with engine or app files → fail, unless `--pr` carries the
-//!    `engine-change` label and an Admin (`.github/hft-admins.txt`) approved it: `gh api` reads the PR
-//!    (labels) and its reviews; a reviewer's latest non-comment review decides (`APPROVED`).
+//!    `engine-change` label and an Admin (`.github/hft-admins.txt`) approved it — or an Admin authored
+//!    it (an Admin cannot approve their own PR): `gh api` reads the PR (labels, author) and its
+//!    reviews; a reviewer's latest non-comment review decides (`APPROVED`).
 //!    No `GITHUB_TOKEN`/`GH_TOKEN`, an API failure or a missing admin list → exit 2.
 //!
 //! Exemptions (and failures) are appended to `$GITHUB_STEP_SUMMARY` and written to
@@ -195,15 +196,24 @@ fn exemption(root: &Path, exec: &mut dyn Exec, env: &GateEnv, pr: u64) -> Result
             eprintln!("decoupling-gate: approval by {u} does not count: {u} 不在 Admin 名单 ({ADMINS})");
         }
     }
+    let author = pull
+        .get("user")
+        .and_then(|u| u.get("login"))
+        .and_then(Value::as_str)
+        .filter(|a| admins.iter().any(|x| x == a));
+    // An Admin's own PR: the label is the Admin's confirmation (GitHub refuses self-approval).
     let admin = approvers
         .iter()
         .find(|u| admins.contains(u))
-        .map(|u| u.to_string());
+        .map(|u| u.to_string())
+        .or_else(|| author.map(|a| format!("{a} (author)")));
     if !labeled {
         eprintln!("decoupling-gate: PR {pr} has no `{LABEL}` label");
     }
     if admin.is_none() {
-        eprintln!("decoupling-gate: PR {pr} has no approving review by an Admin ({ADMINS})");
+        eprintln!(
+            "decoupling-gate: PR {pr} has no approving review by an Admin and no Admin author ({ADMINS})"
+        );
     }
     Ok(if labeled { admin } else { None })
 }
