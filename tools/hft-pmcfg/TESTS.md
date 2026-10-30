@@ -149,7 +149,7 @@ spec: README.md
 |---|---|---|
 | PMC-007.1 | 两个 `core.toml` 去掉 `sha256` 行;`engine.bin`;refdata 的 inst 数与实例 1 的账户 | 相同 |
 | PMC-007.2 | refdata 实例 | 恰一个:kind 8、名 `pm-taker-probe` |
-| PMC-007.3 | `strategy_params.bin`(`parse_spb1` + `decode_body`) | kind 8、账户 1、一个 group(一腿:InstId 1、Polymarket,`open_allowed = 1`);字段值 `[enabled 0, spend_usdc 1 500 000, sell_back 1]` |
+| PMC-007.3 | `strategy_params.bin`(`parse_spb1` + `decode_body`) | kind 8、账户 1、一个 group(一腿:InstId 1、Polymarket,`open_allowed = 1`);字段值 `[enabled 0, spend_usdc 1 500 000, sell_back 1, sell_delay_ms 0, sell_retries 0]` |
 | PMC-007.4 | `risk_params.bin` | 价格带含 `rr_max_cross = PM_PROBE_RR_MAX_CROSS`(做市配置不含);账户与 venue 限额行逐项相同 |
 | PMC-007.5 | 参数 `clip_shares=5` | `Err`,含 `not a pm-taker-probe parameter` |
 

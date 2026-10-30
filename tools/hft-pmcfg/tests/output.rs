@@ -406,7 +406,7 @@ fn pmc_007_taker_probe_live_output() {
         .find(|k| k.kind_id == 8)
         .unwrap();
     let raw = hft_strategy_sdk::params::decode_body(desc.schema, h.schema_ver, 1, body).unwrap();
-    assert_eq!(raw.defaults, vec![0, 1_500_000, 1], "PMC-007.3");
+    assert_eq!(raw.defaults, vec![0, 1_500_000, 1, 0, 0], "PMC-007.3");
     // .4 risk: the maker's limits with rr_max_cross 0.5 in the price band.
     let risk = |dir: &Path, rd: &RefData| {
         hft_risk::RiskParams::decode_blob(&std::fs::read(dir.join("risk_params.bin")).unwrap(), rd).unwrap()

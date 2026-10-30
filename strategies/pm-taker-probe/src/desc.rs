@@ -36,6 +36,8 @@ pub mod skip {
     pub const NO_BID: u64 = 2;
     /// Nothing to sell back (position rounds to zero).
     pub const NO_POSITION: u64 = 3;
+    /// No timer room for the delayed / retried sell-back (the position stays).
+    pub const NO_TIMER: u64 = 4;
 }
 
 const fn note(code: u32, name: &'static str, v: &'static [&'static str], doc: &'static str) -> NoteDesc {
@@ -88,7 +90,7 @@ pub static NOTES: [NoteDesc; 5] = [
         SKIPPED,
         "Skipped",
         &[
-            "reason (1 buy qty 0, 2 no bid, 3 no position)",
+            "reason (1 buy qty 0, 2 no bid, 3 no position, 4 no timer)",
             "value",
             "ctx full",
             "round",

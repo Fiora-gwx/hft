@@ -12,11 +12,11 @@ use common::{CAPACITY, D, G1, U, VB, X, filled, fixture, g1, params, position, r
 use hft_strategy_sdk::params::SchemaView;
 use hft_strategy_sdk::{
     EvMask, GroupTable, IntentClass, IntentOutcome, OrderIntent, OrderUpdateKind, ParamError, ParamSet, Part,
-    Strategy, SubsBuilder,
+    Strategy, SubsBuilder, Views,
 };
 use hft_types::{Notional, Px, Qty, RejectBits, Side, Tif};
 use pm_taker_probe::desc::{self, end, skip};
-use pm_taker_probe::fast::{Phase, TAG_BUY, TAG_SELL};
+use pm_taker_probe::fast::{Phase, SELL_RETRY_MS, TAG_BUY, TAG_SELL, TAG_SELL_TIMER};
 use pm_taker_probe::{PmTakerProbe, PmTakerProbeParams};
 
 #[global_allocator]
@@ -345,4 +345,77 @@ fn ptp_009_group_shape() {
         "PTP-009.3"
     );
     let _ = Notional(0);
+}
+
+#[test]
+fn ptp_010_sell_delay_and_retries() {
+    // .1 sell_delay_ms 3000: the buy ends → BuyEnd and a timer 3 s ahead, no sell yet (SellWait).
+    let mut d = armed(&[(3, 3_000), (4, 2)]);
+    let r = d.book().refs[0];
+    position(&mut d.v, 9_090_910);
+    let o = d.order(r, filled(9_090_910, true));
+    assert_eq!(o.codes(), vec![desc::BUY_END], "PTP-010.1");
+    assert!(o.places.is_empty(), "PTP-010.1");
+    let now = d.v.now();
+    let at = now.tsc_of(now.engine_ns + 3_000_000_000);
+    assert_eq!(
+        o.timers
+            .iter()
+            .map(|t| (t.tag, t.at, t.group))
+            .collect::<Vec<_>>(),
+        vec![(TAG_SELL_TIMER, at, G1)],
+        "PTP-010.1"
+    );
+    assert_eq!(d.s.fast.phase, Phase::SellWait, "PTP-010.1");
+    // .2 quotes while waiting send nothing; the timer sends the sell-back at the bid then.
+    assert!(d.book().places.is_empty(), "PTP-010.2");
+    d.quote(95, 110);
+    let o = d.timer(TAG_SELL_TIMER);
+    assert_eq!(o.codes(), vec![desc::SELL_SENT], "PTP-010.2");
+    assert_eq!(
+        (o.places[0].side, o.places[0].px, o.places[0].qty),
+        (Side::Sell, Px(95), Qty(9_090_000)),
+        "PTP-010.2"
+    );
+    // .3 a venue-refused sell (tokens not credited yet) waits 1 s and goes again, `sell_retries` times.
+    let rej = OrderUpdateKind::Rejected {
+        bits: RejectBits(0),
+        venue_code: 9,
+    };
+    let mut r = o.refs[0];
+    for k in 0..2 {
+        let o = d.order(r, rej);
+        assert_eq!(o.codes(), vec![desc::SELL_END], "PTP-010.3");
+        assert_eq!(o.notes[0].v[0], end::REJECTED, "PTP-010.3");
+        let now = d.v.now();
+        let at = now.tsc_of(now.engine_ns + SELL_RETRY_MS * 1_000_000);
+        assert_eq!(
+            o.timers.iter().map(|t| t.at).collect::<Vec<_>>(),
+            vec![at],
+            "PTP-010.3 retry {k}"
+        );
+        assert_eq!(d.s.fast.phase, Phase::SellWait, "PTP-010.3");
+        let o = d.timer(TAG_SELL_TIMER);
+        assert_eq!(o.places.len(), 1, "PTP-010.3");
+        r = o.refs[0];
+    }
+    // .4 retries used up: the round ends.
+    let o = d.order(r, rej);
+    assert!(o.timers.is_empty(), "PTP-010.4");
+    assert_eq!(d.s.fast.phase, Phase::Done, "PTP-010.4");
+    // .5 other timer tags and timers outside SellWait do nothing; a fill ends the round at once.
+    assert!(d.timer(TAG_SELL_TIMER).places.is_empty(), "PTP-010.5");
+    let mut d = armed(&[(4, 3)]);
+    let r = d.book().refs[0];
+    position(&mut d.v, 2_000_000);
+    let o = d.order(r, filled(2_000_000, true));
+    assert_eq!(
+        o.codes(),
+        vec![desc::BUY_END, desc::SELL_SENT],
+        "PTP-010.5 delay 0: sell at once"
+    );
+    assert!(d.timer(99).places.is_empty(), "PTP-010.5");
+    let o = d.order(o.refs[0], filled(2_000_000, true));
+    assert!(o.timers.is_empty(), "PTP-010.5");
+    assert_eq!(d.s.fast.phase, Phase::Done, "PTP-010.5");
 }

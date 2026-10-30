@@ -225,7 +225,7 @@ pub fn position(v: &mut MockViews, qty: i64) {
 
 // ------------------------------------------------------------------------------- driver
 
-use hft_strategy_sdk::ctx::{CtxBufs, NoteReq, Op};
+use hft_strategy_sdk::ctx::{CtxBufs, NoteReq, Op, TimerReq};
 use hft_strategy_sdk::params::{RawParams, SchemaView};
 use hft_strategy_sdk::{
     EventRef, IntentOutcome, OrderIntent, OrderRef, OrderUpdate, OrderUpdateKind, Strategy, StrategyInstance,
@@ -264,6 +264,7 @@ pub fn params(set: &[(usize, i64)]) -> PmTakerProbeParams {
 pub struct Out {
     pub places: Vec<OrderIntent>,
     pub notes: Vec<NoteReq>,
+    pub timers: Vec<TimerReq>,
     /// Handles given to `places` (in order) as `Placed` outcomes.
     pub refs: Vec<OrderRef>,
 }
@@ -328,6 +329,8 @@ impl D {
             (0, i64::from(self.s.fast.enabled)),
             (1, self.s.fast.spend.0),
             (2, i64::from(self.s.fast.sell_back)),
+            (3, self.s.fast.sell_delay_ms),
+            (4, i64::from(self.s.fast.sell_retries)),
         ];
         all.extend_from_slice(set);
         let p = params(&all);
@@ -349,9 +352,13 @@ impl D {
         let mut out = Out::default();
         let mut handles = Vec::new();
         for (h, op) in self.bufs.ops() {
-            if let Op::Place(p) = op {
-                out.places.push(*p);
-                handles.push(h);
+            match op {
+                Op::Place(p) => {
+                    out.places.push(*p);
+                    handles.push(h);
+                }
+                Op::Timer(t) => out.timers.push(*t),
+                _ => {}
             }
         }
         out.notes = self.bufs.notes().to_vec();
@@ -374,6 +381,15 @@ impl D {
     /// A book update of `U`.
     pub fn book(&mut self) -> Out {
         self.feed(&EventRef::Book { inst: U, gix: 0 })
+    }
+
+    /// The timer `tag` fires.
+    pub fn timer(&mut self, tag: u32) -> Out {
+        self.feed(&EventRef::Timer {
+            tag,
+            group: G1,
+            gix: 0,
+        })
     }
 
     /// An update of order `r`.

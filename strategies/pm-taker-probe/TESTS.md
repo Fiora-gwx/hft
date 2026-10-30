@@ -18,11 +18,11 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | group 形态 | PTP-009 |
-| 参数 | PTP-002、PTP-005 |
+| 参数 | PTP-002、PTP-005、PTP-010 |
 | 订阅 | PTP-001 |
-| 规则 | PTP-002–PTP-007 |
-| 事件处理 | PTP-003、PTP-007 |
-| Note 码表与报表字段 | PTP-003–PTP-007 |
+| 规则 | PTP-002–PTP-007、PTP-010 |
+| 事件处理 | PTP-003、PTP-007、PTP-010 |
+| Note 码表与报表字段 | PTP-003–PTP-007、PTP-010 |
 | 实现说明 | PTP-008 |
 | 延迟与资源契约 | PTP-003 |
 | 测试与验收 | 不适用:非规范 |
@@ -165,6 +165,22 @@ spec: README.md
 | PTP-009.1 | `G1` | `Ok` |
 | PTP-009.2 | 一个 group 两腿 (U, X) | `Err(GroupShape{gix 0, code 1})` |
 | PTP-009.3 | 两个 group | `Err(GroupShape{gix 1, code 2})` |
+
+### PTP-010 卖回延迟与重试
+
+- 规则:[规则](README.md#规则) 第 3、4 条;[参数](README.md#参数)
+- 级别:table
+- 里程碑:M3
+- 前置:武装,`sell_delay_ms 3000`、`sell_retries 2`(.5 为 `sell_retries 3`、无延迟)
+- 实现:`strategies/pm-taker-probe/tests/scenario.rs::ptp_010_sell_delay_and_retries`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PTP-010.1 | 买单成交完、持仓 9.09 | `BuyEnd`;无下单;一个定时器(标签 3、group `G1`、时刻 = 现在 + 3 s);`SellWait` |
+| PTP-010.2 | 等待中簿更新;买价改 0.095 后定时器到 | 簿更新无下单;到时 `SellSent`,卖单 `px 0.095, qty 9.09` |
+| PTP-010.3 | 卖单交易所 `Rejected`,两次;每次后定时器到 | 每次 `SellEnd{3}` + 1 s 后的定时器、`SellWait`;到时再发一张卖单 |
+| PTP-010.4 | 第三次 `Rejected` | 无定时器;`Done` |
+| PTP-010.5 | `Done` 后定时器;另一实例无延迟:买单成交完 → 卖单;标签 99 的定时器;卖单成交完 | 无下单;`BuyEnd`、`SellSent` 同一事件;无下单;无定时器、`Done` |
 
 ## 验收
 

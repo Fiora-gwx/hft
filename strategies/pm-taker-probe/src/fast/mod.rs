@@ -17,6 +17,10 @@ use crate::params::PmTakerProbeParams;
 pub const TAG_BUY: u32 = 1;
 /// Order tag of the sell-back.
 pub const TAG_SELL: u32 = 2;
+/// Timer tag of the delayed / retried sell-back.
+pub const TAG_SELL_TIMER: u32 = 3;
+/// Wait before a refused sell-back is sent again (ms).
+pub const SELL_RETRY_MS: i64 = 1_000;
 
 /// The book of the leg (the BBO view is read from it; the engine also subscribes the BBO stream
 /// where the venue has one).
@@ -47,6 +51,8 @@ pub enum Phase {
     SellLive = 5,
     /// Round over while `enabled` is still 1: waits for `enabled` 0.
     Done = 6,
+    /// The buy ended: the sell-back waits for its timer (`sell_delay_ms`, or a retry).
+    SellWait = 7,
 }
 
 impl Phase {
@@ -59,6 +65,7 @@ impl Phase {
             4 => Phase::Selling,
             5 => Phase::SellLive,
             6 => Phase::Done,
+            7 => Phase::SellWait,
             _ => return None,
         })
     }
@@ -75,6 +82,11 @@ pub struct Fast {
     pub enabled: bool,
     pub spend: Notional,
     pub sell_back: bool,
+    /// `sell_delay_ms` and `sell_retries` as last applied.
+    pub sell_delay_ms: i64,
+    pub sell_retries: u32,
+    /// Sell-back attempts left in this round.
+    pub retries_left: u32,
     pub phase: Phase,
     /// `IntentHandle` of the order placed in the previous event.
     pub handle: u16,
@@ -98,6 +110,9 @@ impl Fast {
             enabled: p.defaults().enabled,
             spend: Notional(0),
             sell_back: true,
+            sell_delay_ms: 0,
+            sell_retries: 0,
+            retries_left: 0,
             phase: Phase::Idle,
             handle: 0,
             r: None,
@@ -114,6 +129,8 @@ impl Fast {
         let d = p.defaults();
         self.spend = d.spend_usdc;
         self.sell_back = d.sell_back;
+        self.sell_delay_ms = i64::from(d.sell_delay_ms);
+        self.sell_retries = d.sell_retries;
         if let Some((gix, g)) = groups.iter().next()
             && let Some(l) = g.legs.first().filter(|_| g.n_legs > 0)
         {
@@ -141,6 +158,9 @@ impl Fast {
                 self.buy(v, ctx);
             }
             EventRef::Order { u, .. } if self.r == Some(u.r) => self.order(u, v, ctx),
+            EventRef::Timer { tag, .. } if tag == TAG_SELL_TIMER && self.phase == Phase::SellWait => {
+                self.sell(v, ctx)
+            }
             _ => {}
         }
     }
@@ -201,11 +221,38 @@ impl Fast {
         let c = if selling { desc::SELL_END } else { desc::BUY_END };
         self.note(ctx, c, [e, self.cum.0 as u64, code]);
         self.cum = Qty(0);
-        if selling || !self.sell_back {
+        if selling {
+            // A refused sell-back (e.g. tokens not credited yet) goes again after 1 s.
+            if e == end::REJECTED && self.retries_left > 0 {
+                self.retries_left -= 1;
+                self.wait_sell(SELL_RETRY_MS, v, ctx);
+                return;
+            }
             self.finish();
             return;
         }
-        self.sell(v, ctx);
+        if !self.sell_back {
+            self.finish();
+            return;
+        }
+        self.retries_left = self.sell_retries;
+        if self.sell_delay_ms > 0 {
+            self.wait_sell(self.sell_delay_ms, v, ctx);
+        } else {
+            self.sell(v, ctx);
+        }
+    }
+
+    /// Arms the sell-back timer `ms` from now (`SellWait`); no timer room ends the round.
+    fn wait_sell<V: Views>(&mut self, ms: i64, v: &V, ctx: &mut Ctx<'_>) {
+        let now = v.now();
+        let at = now.tsc_of(now.engine_ns.saturating_add(ms.saturating_mul(1_000_000)));
+        if ctx.timer_at(at, TAG_SELL_TIMER, self.group).is_ok() {
+            self.phase = Phase::SellWait;
+        } else {
+            self.note(ctx, desc::SKIPPED, [skip::NO_TIMER, ms as u64, 1]);
+            self.finish();
+        }
     }
 
     /// The spend buy at the best ask (README "规则" 2); waits while the quote is missing or

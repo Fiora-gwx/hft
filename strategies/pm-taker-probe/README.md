@@ -35,6 +35,8 @@ status: impl
 | `enabled` | Bool | 0 | `manual_only`;从 0 变为 1 时武装一轮;实例创建(含重启)时为 1 也不武装 | 否 |
 | `spend_usdc` | Notional | 1 000 000(1 个计价单位,暂定) | 买单至多花费的计价资产(指数 −6);schema 上限 2 000 000 是硬上限;`relax = Up` | 否 |
 | `sell_back` | Bool | 1 | 买单终结后卖回该腿持仓 | 否 |
+| `sell_delay_ms` | DurationMs | 0 | 买单终结后等这么久再卖回(0 = 立即);链上结算的 venue 买入后要等成交上链(约 2 s)才可卖,之前卖单被拒(余额 0);上限 60 000 | 否 |
+| `sell_retries` | Count | 0 | 卖单被交易所拒(订单更新 `Rejected`)后 1 s 再发,至多这么多次;上限 20 | 否 |
 
 ### 订阅
 
@@ -44,9 +46,9 @@ status: impl
 
 1. **武装**:`on_params` 看到 `enabled` 0 → 1 且处于空闲 → `Ready`;`enabled` 变 0 时 `Ready` 与 `Done` 回到空闲;进行中的一轮照常走完。
 2. **买入**:`Ready` 时该腿的簿更新(或 BBO)到达,且 `Views::quote_ok` 为真、最优卖价 > 0 → `OrderIntent::spend_buy(Ioc, px = 最优卖价, qty = OrderIntent::spend_qty(spend_usdc, px, 该 inst))`(`spend_qty` 向下取整到 lot,所以 `px × qty ≤ spend_usdc`;成交价更低时交易所可能给出多于 `qty` 的数量);报价缺失或不健康时继续等待;`qty` 为 0 → `Skipped`,这一轮结束。
-3. **买单终结**:放行结果为 `Shadowed`/`Rejected(bits)`,或订单更新 `Filled{done}`、`Cancelled`、`Rejected` → `BuyEnd`;`sell_back = 0` 时这一轮结束;否则卖回:持仓 = `group_pos(账户, group).legs[0].qty`(含此前已持有的数量),向下取整到 lot;为 0 → `Skipped`;无买价 → `Skipped`;否则 `Sell`、`Ioc`、`IntentClass::Reduce`、`px = 最优买价`、无 SPEND。
-4. **卖单终结**:同第 3 条的终结方式 → `SellEnd`,这一轮结束。
-5. **这一轮结束**:`enabled` 仍为 1 → `Done`(不再下单,直到 `enabled` 先变 0);否则回到空闲。任何时刻至多一张在途订单,没有重试、没有第二张买单。
+3. **买单终结**:放行结果为 `Shadowed`/`Rejected(bits)`,或订单更新 `Filled{done}`、`Cancelled`、`Rejected` → `BuyEnd`;`sell_back = 0` 时这一轮结束;否则(`sell_delay_ms > 0` 时先登记 `sell_delay_ms` 后的定时器、进入 `SellWait`,定时器到时再做)卖回:持仓 = `group_pos(账户, group).legs[0].qty`(含此前已持有的数量),向下取整到 lot;为 0 → `Skipped`;无买价 → `Skipped`;否则 `Sell`、`Ioc`、`IntentClass::Reduce`、`px = 最优买价`、无 SPEND。
+4. **卖单终结**:同第 3 条的终结方式 → `SellEnd`;订单更新 `Rejected` 且这一轮还剩重试次数(每轮从 `sell_retries` 起算)→ 次数减一,登记 1 s 后的定时器、进入 `SellWait`,到时按第 3 条重新卖回;否则这一轮结束。定时器登记失败 → `Skipped{4}`,这一轮结束。
+5. **这一轮结束**:`enabled` 仍为 1 → `Done`(不再下单,直到 `enabled` 先变 0);否则回到空闲。任何时刻至多一张在途订单,只有第 4 条的卖单重试,没有第二张买单。
 
 ### 事件处理
 
@@ -55,7 +57,8 @@ status: impl
 | 该腿的 `Book`/`Bbo` | `Ready` 时按规则 2 买入;其他阶段忽略 |
 | `Order`(本策略在途订单) | 规则 3、4;`Acked`、`Unknown`、`Aged` 与 `done = false` 的成交只记累计量 |
 | 每个事件开头 | 读取上一事件下单的放行结果(`Placed` → 记下 `OrderRef`;其他 → 该步终结) |
-| 其他(`Risk`、`External`、`Notice`、`Mode`、`Timer` 等) | 忽略:账户限额、kill 与对账归引擎;本策略不持续持仓,一轮之后的残余由人工处理 |
+| `Timer`(标签 3) | `SellWait` 时按规则 3 卖回;其他阶段忽略 |
+| 其他(`Risk`、`External`、`Notice`、`Mode`、其他标签的 `Timer` 等) | 忽略:账户限额、kill 与对账归引擎;本策略不持续持仓,一轮之后的残余由人工处理 |
 
 ### Note 码表与报表字段
 
@@ -66,8 +69,8 @@ status: impl
 | 1 | `BuySent` | `px`、`qty`、`spend` | 买单放出 |
 | 2 | `BuyEnd` | 终结方式(1 成交完、2 撤销/余量撤、3 交易所拒、4 Shadow、5 门控拒)、累计成交、交易所码或 `RejectBits` | 买单终结 |
 | 3 | `SellSent` | `px`、`qty`、持仓 | 卖单放出 |
-| 4 | `SellEnd` | 同 `BuyEnd` | 卖单终结,这一轮结束 |
-| 5 | `Skipped` | 原因(1 买量为 0、2 无买价、3 无持仓)、数值 | 某步没有发出,这一轮结束 |
+| 4 | `SellEnd` | 同 `BuyEnd` | 卖单终结;还要重试时这一轮继续,否则结束 |
+| 5 | `Skipped` | 原因(1 买量为 0、2 无买价、3 无持仓、4 无定时器容量)、数值 | 某步没有发出,这一轮结束 |
 
 无报表字段、无策略命令。
 
@@ -75,8 +78,8 @@ status: impl
 
 <details><summary>实现要点</summary>
 
-- 状态:`Phase`(`Idle`、`Ready`、`Buying`、`BuyLive`、`Selling`、`SellLive`、`Done`)、在途订单的 `OrderRef`、累计成交、轮数;`enabled` 记最近一次参数值,武装只看它的 0 → 1 变化。
-- 快照:`phase: u8`、`rounds: u32`、`cum: i64`、`has_r: u8`,有在途订单时再 `venue: u8, account: u8, slot: u32, gen: u32`。恢复:在途订单继续跟踪;`Ready` 回到空闲(重启解除武装);`Buying`/`Selling`(放行结果未读)按这一轮结束处理。
+- 状态:`Phase`(`Idle`、`Ready`、`Buying`、`BuyLive`、`Selling`、`SellLive`、`Done`、`SellWait`)、在途订单的 `OrderRef`、累计成交、轮数;`enabled` 记最近一次参数值,武装只看它的 0 → 1 变化。
+- 快照:`phase: u8`、`rounds: u32`、`cum: i64`、`has_r: u8`,有在途订单时再 `venue: u8, account: u8, slot: u32, gen: u32`。恢复:在途订单继续跟踪;`Ready` 回到空闲(重启解除武装);`Buying`/`Selling`(放行结果未读)与 `SellWait`(定时器不随快照恢复)按这一轮结束处理。
 
 | 文件 | 职责 |
 |---|---|
