@@ -94,19 +94,54 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         .map(|r| r.seq)
         .ok_or("no StateSnapshot")?;
     // HFT_REPLAY_COMPAT_SNAPSHOT=1 (research on journals of older engine builds): a start snapshot that
-    // restores but does not re-serialize byte for byte (older section layout) is accepted.
+    // restores but does not re-serialize byte for byte (older section layout) is accepted; a ledger
+    // config of builds before the par-asset rule (2026-10-24, no par / fallback asset) gets the
+    // defaults (USDT par, USDC / USD1 / FDUSD stable fallback).
+    let compat = std::env::var_os("HFT_REPLAY_COMPAT_SNAPSHOT").is_some_and(|v| v == "1");
     match check_snapshot::<S>(&prefix, at) {
         Ok(_) => {}
-        Err(e @ (SnapshotCheckError::RoundTrip { .. } | SnapshotCheckError::Size))
-            if std::env::var_os("HFT_REPLAY_COMPAT_SNAPSHOT").is_some_and(|v| v == "1") =>
-        {
+        Err(
+            e @ (SnapshotCheckError::RoundTrip { .. }
+            | SnapshotCheckError::Size
+            | SnapshotCheckError::Restore(hft_sequencer::BootError::Config(
+                hft_sequencer::ConfigErr::Component("ledger"),
+            ))),
+        ) if compat => {
             eprintln!(
                 "replayer: start snapshot not byte-exact ({e:?}); accepted (HFT_REPLAY_COMPAT_SNAPSHOT)"
             );
         }
         Err(e) => return Err(format!("start snapshot: {e:?}")),
     }
-    let setup = EngineSetup::from_snapshot(&prefix, at).map_err(err("start snapshot"))?;
+    let mut setup = EngineSetup::from_snapshot(&prefix, at).map_err(err("start snapshot"))?;
+    if compat {
+        // older builds: the venue quote assets may have no USDT rate source (README "USDT 统一计价",
+        // 2026-10-24); stablecoins count at par
+        for n in ["USDT"] {
+            if !setup
+                .ledger
+                .par_assets
+                .iter()
+                .any(|x| x.0 == hft_ledger::AssetName::new(n).0)
+            {
+                setup.ledger.par_assets.push(hft_ledger::AssetName::new(n));
+            }
+        }
+        for n in ["USDC", "pUSD", "PUSD", "USD", "USDC.e", "USD1", "FDUSD"] {
+            if !setup
+                .ledger
+                .stable_par_fallback
+                .iter()
+                .any(|x| x.0 == hft_ledger::AssetName::new(n).0)
+                && setup.ledger.stable_par_fallback.len() < 8
+            {
+                setup
+                    .ledger
+                    .stable_par_fallback
+                    .push(hft_ledger::AssetName::new(n));
+            }
+        }
+    }
     let mut dcfg = cfg.driver;
     let mut sampler = match cfg.features {
         Some(f) => {
