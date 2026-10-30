@@ -9,7 +9,7 @@ use hft_event::{
 };
 use hft_refdata::RefData;
 use hft_rt::Heartbeat;
-use hft_sequencer::driver::replay_snapshot::check_snapshot;
+use hft_sequencer::driver::replay_snapshot::{SnapshotCheckError, check_snapshot};
 use hft_sequencer::{
     BootSource, EngineSetup, RecoverPlan, RecoveryFlags, Sequencer, SnapshotSel, StepOutcome, read_body,
 };
@@ -93,7 +93,17 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
         .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
         .map(|r| r.seq)
         .ok_or("no StateSnapshot")?;
-    check_snapshot::<S>(&prefix, at).map_err(err("start snapshot"))?;
+    // HFT_REPLAY_COMPAT_SNAPSHOT=1 (research on journals of older engine builds): a start snapshot that
+    // restores but does not re-serialize byte for byte (older section layout) is accepted.
+    match check_snapshot::<S>(&prefix, at) {
+        Ok(_) => {}
+        Err(e @ (SnapshotCheckError::RoundTrip { .. } | SnapshotCheckError::Size))
+            if std::env::var_os("HFT_REPLAY_COMPAT_SNAPSHOT").is_some_and(|v| v == "1") =>
+        {
+            eprintln!("replayer: start snapshot not byte-exact ({e:?}); accepted (HFT_REPLAY_COMPAT_SNAPSHOT)");
+        }
+        Err(e) => return Err(format!("start snapshot: {e:?}")),
+    }
     let setup = EngineSetup::from_snapshot(&prefix, at).map_err(err("start snapshot"))?;
     let mut dcfg = cfg.driver;
     let mut sampler = match cfg.features {
