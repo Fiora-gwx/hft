@@ -534,6 +534,7 @@ impl Oms {
                     .is_some_and(|x| x.filled.0 >= x.qty.0);
                 let to = if filled_all { S::Filled } else { S::Cancelled };
                 self.transition(ti, s, to, cause, now, seq, out);
+                self.spend_done_update(ti, s, out);
             }
             OrderEventKind::CancelReject => {
                 let gone = ev.detail == REJECT_GONE;
@@ -669,6 +670,7 @@ impl Oms {
             OrderState::Unknown
         };
         self.transition(ti, s, to, cause, now, seq, out);
+        self.spend_done_update(ti, s, out);
         // The rejected cancel/amend was answered: it is no longer in flight (scenarios FP-4).
         // `Unknown` otherwise keeps both bits for a request the connection loss left unanswered.
         if to == OrderState::Unknown {
@@ -876,9 +878,11 @@ impl Oms {
                 && to != st
             {
                 self.transition(ti, s, to, cause, now, seq, out);
+                self.spend_done_update(ti, s, out);
             } else if forced.is_none() && sl.spend() && f.done && st.open() {
                 // A spend order's `Fill` ends it even without a new increment (README "按金额买入").
                 self.transition(ti, s, OrderState::Filled, TransitionCause::Fill, now, seq, out);
+                self.spend_done_update(ti, s, out);
             }
             return;
         };
@@ -952,6 +956,39 @@ impl Oms {
                 fee_asset: sl.fee_asset,
                 cum: sl.filled,
                 done: sl.state == OrderState::Filled,
+            },
+        };
+        let _ = out.updates.push(u);
+    }
+
+    /// Owner `OrderUpdate::Filled{d: 0, done: true}` of a spend slot that has just become
+    /// `Filled` without a fill increment (`Fill` or `QueryResult{Filled}` repeating the known
+    /// cumulative, `Expired` after more than `qty`): its owner learns the end (README "按金额买入").
+    /// Call right after a transition that had no increment; no-op for any other slot or state.
+    pub(crate) fn spend_done_update(&mut self, ti: usize, s: u32, out: &mut OmsOut) {
+        let Some(t) = self.t(ti) else { return };
+        let (Some(sl), Some(ex)) = (t.slot(s), t.ext.get(s as usize)) else {
+            return;
+        };
+        if !sl.spend() || sl.state != OrderState::Filled || ex.origin == Origin::Command as u8 {
+            return;
+        }
+        let px = if sl.filled.0 > 0 {
+            Px(div_half_even(sl.filled_notional, i128::from(sl.filled.0)))
+        } else {
+            Px(0)
+        };
+        let u = OrderUpdate {
+            r: sl.handle(),
+            group: sl.group,
+            tag: ex.tag,
+            kind: OrderUpdateKind::Filled {
+                d: Qty(0),
+                px,
+                fee: sl.fee_accum,
+                fee_asset: sl.fee_asset,
+                cum: sl.filled,
+                done: true,
             },
         };
         let _ = out.updates.push(u);

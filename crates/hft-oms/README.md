@@ -567,7 +567,7 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 
 槽带 `OrderFlags::SPEND`(`place` 时意图带 SDK `OrderIntent::SPEND` 且 `spend_valid` 为真才置位;位值归 [hft-event](../hft-event/README.md#orderflags))= 买入 `Ioc`/`Fok`、无链接,至多花 `px × qty` 的计价资产,成交价低于 `px` 时 `cum_filled` 可以超过 `qty`。与其他槽的差别只有三处,其余规则(增量、入账、费用、墓碑、Unknown 收敛)不变:
 
-1. **何时成交完**:不按 `cum_filled ≥ qty` 判定;`Fill` 回报(交易所说该单已成交完,无新增量也一样)或 `QueryResult{Filled}` 才 → `Filled`;`PartialFill` 即使 `cum_filled > qty` 也只应用增量、保持原状态;`Expired`/`CancelAck` 照表处理(`filled ≥ qty` → `Filled`,否则 `Cancelled`)。
+1. **何时成交完**:不按 `cum_filled ≥ qty` 判定;`Fill` 回报(交易所说该单已成交完,无新增量也一样)或 `QueryResult{Filled}` 才 → `Filled`;`PartialFill` 即使 `cum_filled > qty` 也只应用增量、保持原状态;`Expired`/`CancelAck` 照表处理(`filled ≥ qty` → `Filled`,否则 `Cancelled`)。不带增量地进入 `Filled`(上述各路径与撤改 `GONE`)时,拥有者收到一条 `OrderUpdate::Filled{d: 0, px: 累计均价, cum: filled, done: true}`,所以每张按金额买入单都以恰一条 `done` 更新(或 `Cancelled`/`Rejected`)告诉拥有者终结。
 2. **超量**:`2 × filled_notional > 2 × px × qty + cum_filled`(`filled_notional` 为本条增量入账后的累计名义,i128 原始积;容差是均价取整的每单位半个价格单位)时才算超量(第 6 条的 `OVERFILL`、`Note{OmsOverfill}`);价格为估计值(`PX_EST`)的增量不判超量。`cum_filled > qty` 本身是正常成交,仓位与账本按实际数量记。
 3. **在途**:InflightBook 的剩余量取 `open_qty()` = `qty − ⌈filled_notional / px⌉`(≥ 0,未花的金额按委托价折成的数量,不小于 `qty − filled`),名义 = 该量 × `px`;风控的下单名义仍按 `px × qty`([hft-risk](../hft-risk/README.md))。
 

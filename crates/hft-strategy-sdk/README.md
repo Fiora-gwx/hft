@@ -1005,7 +1005,7 @@ pub struct HedgePlan {                   // 48 B
 #[repr(C)] pub struct OrderRef { pub venue: VenueId, pub account: AccountId, pub _pad: [u8; 2], pub slot: u32, pub gen: u32 } // 12 B;= hft-oms 的槽句柄(代码中写作 r#gen,2024 版保留字)
 ```
 
-**按金额买入(`OrderIntent::SPEND`)**:只用于无链接的买入 `Ioc`/`Fok`(其他组合 → `Rejected(INVALID)`,判定归 [hft-sequencer 意图管线](../hft-sequencer/README.md#意图管线) 第 0 步);订单至多花 `px × qty` 的计价资产,成交价低于 `px` 时收到的数量可以多于 `qty`(这是正常成交,不是超量),何时终结由交易所回报决定。有的交易所只能按金额下吃单买入(该交易所的 venue 协议拒绝不带此位的吃单买入),策略只读 `VenueCaps`/回报,不按交易所名分支。风控按 `px × qty` 计名义与在途;仓位检查 #7 按 `qty` 计,实际成交多出的数量在成交后计入仓位([hft-risk](../hft-risk/README.md#已知限制与后续工作))。成交语义归 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量)。构造:
+**按金额买入(`OrderIntent::SPEND`)**:只用于无链接的买入 `Ioc`/`Fok`(其他组合 → `Rejected(INVALID)`,判定归 [hft-sequencer 意图管线](../hft-sequencer/README.md#意图管线) 第 0 步);订单至多花 `px × qty` 的计价资产,成交价低于 `px` 时收到的数量可以多于 `qty`(这是正常成交,不是超量),何时终结由交易所回报决定。有的交易所只能按金额下吃单买入(该交易所的 venue 协议拒绝不带此位的吃单买入),策略只读 `VenueCaps`/回报,不按交易所名分支。风控按 `px × qty` 计名义与在途;仓位检查 #7 按 `qty` 计,实际成交多出的数量在成交后计入仓位([hft-risk](../hft-risk/README.md#已知限制与后续工作))。成交语义归 [hft-oms 按金额买入](../hft-oms/README.md#按金额买入);这类单的终结也可能是一条 `d = 0` 的 `OrderUpdate::Filled{done: true}`(交易所在已报的成交之后才说成交完)。构造:
 
 ```rust
 impl OrderIntent {

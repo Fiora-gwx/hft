@@ -10,7 +10,7 @@ use common::*;
 use hft_event::{NoteLevel, OrderEventKind};
 use hft_oms::notes;
 use hft_oms::*;
-use hft_strategy_sdk::OrderRef;
+use hft_strategy_sdk::{OrderRef, OrderUpdate, OrderUpdateKind};
 use hft_types::{Px, Qty, Side, SlotId, Tif};
 
 /// A foreign/unresolved report on a1@VS.
@@ -449,6 +449,20 @@ fn spend_slot(h: &mut H, spend: bool) -> OrderRef {
     r
 }
 
+/// `(d, cum)` of the owner's `Filled{done: true}` updates of the last call.
+fn done_updates(h: &H) -> Vec<(Qty, Qty)> {
+    h.out
+        .updates
+        .iter()
+        .filter_map(|u| match u.kind {
+            OrderUpdateKind::Filled {
+                d, cum, done: true, ..
+            } => Some((d, cum)),
+            _ => None,
+        })
+        .collect()
+}
+
 fn spend_fill(h: &mut H, r: OrderRef, what: OrderEventKind, cum: &str) {
     let mut e = h.oe(r, what);
     e.cum_filled = q(cum);
@@ -473,10 +487,22 @@ fn oms_490_spend_buy() {
     assert_eq!(h.n_notes(notes::OVERFILL), 0, "OMS-490.1");
     assert_eq!(h.slot(r).state, OrderState::Live, "OMS-490.1");
     assert_eq!(h.slot(r).filled, q("0.012"), "OMS-490.1");
-    // .2 the venue's Fill ends it.
+    assert!(
+        matches!(
+            h.out.updates.as_slice(),
+            [OrderUpdate {
+                kind: OrderUpdateKind::Filled { done: false, .. },
+                ..
+            }]
+        ),
+        "OMS-490.1 {:?}",
+        h.out.updates
+    );
+    // .2 the venue's Fill ends it; the owner hears the end once.
     spend_fill(&mut h, r, OrderEventKind::Fill, "0.012");
     assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.2");
     assert!(h.out.fills.is_empty(), "OMS-490.2");
+    assert_eq!(done_updates(&h), vec![(Qty(0), q("0.012"))], "OMS-490.2");
     // .3 605 spent: overfill.
     let mut h = H::new();
     let r = spend_slot(&mut h, true);
@@ -497,12 +523,20 @@ fn oms_490_spend_buy() {
     spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.012");
     h.what(r, OrderEventKind::Expired, 2);
     assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.5");
+    assert_eq!(done_updates(&h), vec![(Qty(0), q("0.012"))], "OMS-490.5");
     // .6 QueryResult{Filled} ends it.
     let mut h = H::new();
     let r = spend_slot(&mut h, true);
     spend_fill(&mut h, r, OrderEventKind::PartialFill, "0.012");
     h.query(r, 3, q("0.012"), p("50000.00"), 2);
     assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.6");
+    assert_eq!(done_updates(&h), vec![(Qty(0), q("0.012"))], "OMS-490.6");
+    // .6 a Fill with an increment ends it with that one update.
+    let mut h = H::new();
+    let r = spend_slot(&mut h, true);
+    spend_fill(&mut h, r, OrderEventKind::Fill, "0.012");
+    assert_eq!(h.slot(r).state, OrderState::Filled, "OMS-490.6");
+    assert_eq!(done_updates(&h), vec![(q("0.012"), q("0.012"))], "OMS-490.6");
     // .7 shape.
     let base = intent(VS, A1, X, Side::Sell, Tif::Ioc, p("60000.00"), q("0.01"), g1()).intent;
     let with = |side, tif, link: bool| {

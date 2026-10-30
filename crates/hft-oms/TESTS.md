@@ -4533,11 +4533,11 @@ POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜�
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| OMS-490.1 | `PartialFill{cum 0.012, avg_px 50000.00}`(花 600) | s 的 `oflags` 含 `SPEND`;`FillOut{qty 0.012}` 不带 `OVERFILL`;无 `Note{OmsOverfill}`;s 仍 `Live`、`filled = 0.012` |
-| OMS-490.2 | .1 之后 `Fill{cum 0.012}` | s → `Filled`;无新 `FillOut` |
+| OMS-490.1 | `PartialFill{cum 0.012, avg_px 50000.00}`(花 600) | s 的 `oflags` 含 `SPEND`;`FillOut{qty 0.012}` 不带 `OVERFILL`;无 `Note{OmsOverfill}`;s 仍 `Live`、`filled = 0.012`;拥有者一条 `Filled{done: false}` |
+| OMS-490.2 | .1 之后 `Fill{cum 0.012}` | s → `Filled`;无新 `FillOut`;拥有者恰一条 `Filled{d 0, cum 0.012, done: true}` |
 | OMS-490.3 | `PartialFill{cum 0.0121, avg_px 50000.00}`(花 605) | `FillOut.flags ⊇ OVERFILL`;`Note{OmsOverfill}` 一条 |
 | OMS-490.4 | `PartialFill{cum 0.006, avg_px 50000.00}`(花 300) | `open_buy(a1, X)` = 0.005(未花的 300 按 60000 折算),不是 `qty − filled` = 0.004;再 `Expired` → s `Cancelled`,`open_buy` = 0 |
-| OMS-490.5 | .1 之后 `Expired` | s → `Filled` |
-| OMS-490.6 | .1 之后 `QueryResult{Filled, cum 0.012, avg_px 50000.00}` | s → `Filled` |
+| OMS-490.5 | .1 之后 `Expired` | s → `Filled`;拥有者恰一条 `Filled{d 0, cum 0.012, done: true}` |
+| OMS-490.6 | .1 之后 `QueryResult{Filled, cum 0.012, avg_px 50000.00}`;另从前置直接 `Fill{cum 0.012}` | 前者 s → `Filled`,拥有者恰一条 `Filled{d 0, done: true}`;后者 s → `Filled`,恰一条 `Filled{d 0.012, done: true}` |
 | OMS-490.7 | `spend_valid`:不带 `SPEND` 的卖单;带 `SPEND` 的买入 `Fok`;带 `SPEND` 的卖出 `Ioc`;带 `SPEND` 的买入 `Gtc`;带 `SPEND` 与 L1 链接的买入 `Ioc`;另以带 `SPEND` 的卖出 `Ioc` 意图直接 `place` | 真、真、假、假、假;直接 `place` 的槽 `oflags` 不含 `SPEND` |
 | OMS-490.8 | 不带 `SPEND` 的同一买单,`Fill{cum 0.012, avg_px 50000.00}` | `OVERFILL` 与 `Note{OmsOverfill}`(其他槽的超量规则不变) |
