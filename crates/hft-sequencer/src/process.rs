@@ -976,16 +976,7 @@ pub(crate) fn after_oms<D: Driver<S>, S: StrategySet>(
     let result = (|| {
         for g in &groups {
             crate::mode_glue::on_legs(e, inst, drv, a, *g)?;
-            let cell = crate::strategies::cell(e.rd.account(a).bound_instance, a, *g);
-            let flat = {
-                let ad = crate::views::ModeAdapter {
-                    oms: &e.oms,
-                    ledger: &e.ledger,
-                    exec: &e.exec,
-                };
-                hft_risk::ModeView::cell_flat(&ad, cell)
-            };
-            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::CellFlat { cell, flat })?;
+            cell_flat(e, inst, drv, a, *g)?;
         }
         unknown_gate(e, inst, drv, a)
     })();
@@ -993,6 +984,26 @@ pub(crate) fn after_oms<D: Driver<S>, S: StrategySet>(
     e.cmd.legs_spare = groups;
     result?;
     refresh_flat_margin(e, inst, drv, a, v)
+}
+
+/// `CellFlat` of the cell of (`a`, `g`) (README "模式与 cap 的驱动": flat may have changed).
+fn cell_flat<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+    g: GroupId,
+) -> R<()> {
+    let cell = crate::strategies::cell(e.rd.account(a).bound_instance, a, g);
+    let flat = {
+        let ad = crate::views::ModeAdapter {
+            oms: &e.oms,
+            ledger: &e.ledger,
+            exec: &e.exec,
+        };
+        hft_risk::ModeView::cell_flat(&ad, cell)
+    };
+    crate::mode_glue::apply_mode(e, inst, drv, ModeInput::CellFlat { cell, flat })
 }
 
 fn refresh_flat_margin<D: Driver<S>, S: StrategySet>(
@@ -1188,6 +1199,8 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     pnl(e, inst, drv, d)?;
     if app.group != GROUP_NONE {
         crate::mode_glue::on_legs(e, inst, drv, a, app.group)?;
+        // e.g. a delivery that takes a deferred-Shadow cell to 0 lands it in Shadow
+        cell_flat(e, inst, drv, a, app.group)?;
     }
     for (g, v) in views {
         let gix = crate::strategies::gix_for(inst, a, g);
