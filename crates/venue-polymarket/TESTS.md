@@ -583,7 +583,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-038.2 | 同上;`Place{UP, Buy, 0.45, 5 份, PostOnly}` | 请求体逐字节 = GTD 布局把 `expiration` 换成 "0"、`orderType` 换成 FAK、去掉 `postOnly`;GTD 请求体逐字节 = 原布局(`…"orderType":"GTD","deferExec":false,"postOnly":true}`) |
 | PMK-038.3 | `Place{UP, Buy, 0.31, 3.225807 份, Fok}` | 1000000 / 3225800(探针未成交单),`orderType` FOK,签名相符 |
 | PMK-038.4 | `Place{UP, Sell, 0.35, 2.914286 份, FAK}` | 2910000 / 1018500,`side` SELL,签名相符 |
-| PMK-038.5 | `btc-up-1`(tick 0.001):买 0.355 × 3 份;卖 0.355 × 3.005 份 | 1060000 / 2985910(份数 5 位小数);3000000 / 1065000 |
+| PMK-038.5 | `btc-up-1`(tick 0.001):买 0.355 × 3 份;卖 0.355 × 3.005 份 | 1060000 / 2985900(份数至多 4 位小数);3000000 / 1065000 |
 | PMK-038.6 | `UP` 价 0.355(不在 tick 上);买 0.35 × 0.02 份(0.007 USDC);卖 0.35 × 0.009 份 | 均 `FieldOverflow` |
 | PMK-038.7 | 预签名开启:`Gtc` 0.35 × 3 份下单、空闲到底;同价同量 FAK;新 `GwCtx` 只下 FAK 后空闲 | 预签 3 张;FAK 当场签名(`timestamp` = 当时时钟、`salt` 低 20 位 = 7),`presigned()` 仍为 3;`gw_idle` 返回 `false`(FAK 不设锚) |
 | PMK-038.8 | 不带 `SPEND` 的 FAK 买;带 `SPEND` 的 FAK 卖;带 `SPEND` 的 `Gtc` 买;不带 `SPEND` 的 FOK 买 | 均 `Unsupported(Place)` |

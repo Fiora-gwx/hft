@@ -1571,13 +1571,13 @@ fn pmk_038_fak_and_fok_bodies() {
         "PMK-038.4"
     );
     assert!(body_order(&r).2, "PMK-038.4");
-    // .5 tick 0.001: shares of a buy to 5 decimals; a sell's USDC is exact.
+    // .5 tick 0.001: shares of a buy at most 4 decimals (the exchange's market-order cap); a sell's USDC is exact.
     let mut c1 = ctx();
     Pm::bind_order_wire(&mut c1, UP1, &parse_u256(T_UP1).unwrap()).unwrap();
     let r = encode(&c1, &taker_cmd(UP1, Side::Buy, 355, 3_000_000, Tif::FAK), &tgt(0)).unwrap();
     assert_eq!(
         amounts_of(&r),
-        amts("1060000", "2985910", "BUY", "0", "FAK"),
+        amts("1060000", "2985900", "BUY", "0", "FAK"),
         "PMK-038.5"
     );
     let r = encode(

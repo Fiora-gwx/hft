@@ -324,7 +324,7 @@ fn tick_decimals(tick: i64, px_exp: i8) -> Option<u32> {
 /// Side code and amounts (1e-6) of a FAK / FOK order of `qty` at worst price `px` (README "吃单",
 /// the official clients' market-order amounts): a buy pays `makerAmount` = px·qty USDC rounded
 /// down to 0.01 for at least `takerAmount` = makerAmount / px shares rounded down to the tick's
-/// amount decimals (tick decimals + 2); a sell gives `makerAmount` = qty shares rounded down to
+/// amount decimals (tick decimals + 2, at most 4); a sell gives `makerAmount` = qty shares rounded down to
 /// 0.01 for at least `takerAmount` = makerAmount · px USDC. `None` when `px` is off the inst tick,
 /// the tick is not a power of ten, or an amount rounds to 0.
 pub(crate) fn taker_amounts(
@@ -339,8 +339,10 @@ pub(crate) fn taker_amounts(
         return None;
     }
     let dp = tick_decimals(row.tick, row.px_exp)?;
-    // Amount decimals dp + 2 ≤ 6: the amount's step in 1e-6 units.
-    let step = 10u64.checked_pow(6u32.checked_sub(dp + 2)?)?;
+    // Amount decimals: the tick's dp + 2, but at most 4 — the exchange refuses a market order whose
+    // taker amount has more ("taker amount a max of 4 decimals", live 2026-10-30 on a 0.01-tick
+    // market whose refdata slot tick is 0.001). The amount's step in 1e-6 units.
+    let step = 10u64.checked_pow(6u32.checked_sub((dp + 2).min(4))?)?;
     let pe = i32::from(row.px_exp);
     let qe = i32::from(row.qty_exp);
     let p10 = 10i128.checked_pow(pe.unsigned_abs())?;

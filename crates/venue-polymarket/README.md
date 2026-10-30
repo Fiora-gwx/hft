@@ -218,7 +218,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 **请求**:`POST /order`,`order` 对象与 GTD 挂单相同(同一签名、同一 `timestamp`/`salt` 规则),但 `"expiration":"0"`;顶层只有 `order`、`owner`、`"orderType":"FAK"`/`"FOK"`、`"deferExec":false`,没有 `postOnly`(官方客户端的市价单)。总是当场签名:不用、也不锚定[预签名](#预签名)订单(预签名只为挂单)。
 
-**金额**(官方客户端市价单的取整;以 1e-6 为单位;inst 的 tick 必须是 10 的幂 0.1–0.0001,金额小数位 = tick 小数位 + 2,tick 0.01 → 4 位,0.001 → 5 位;tick 取 refdata):
+**金额**(官方客户端市价单的取整;以 1e-6 为单位;inst 的 tick 必须是 10 的幂 0.1–0.0001,金额小数位 = min(tick 小数位 + 2, 4):交易所对市价单的份数(买)与 USDC(卖)最多收 4 位小数,2026-10-30 实盘在 0.01 tick 市场上以 5 位小数被拒 "taker amount a max of 4 decimals";tick 取 refdata):
 
 | 方向 | `makerAmount` | `takerAmount`(最少收到) |
 |---|---|---|
@@ -362,7 +362,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 - 吃单手续费(0.07·p·(1 − p)):FAK/FOK 成交报 `fee = 0`;交易所实际是否、以何种资产扣费待核实(方法:吃单后的持仓、余额与应答的 `takingAmount`/`makingAmount` 核对),不符时仓位由对账校正。
 - FAK 买单按金额成交:成交价低于 `px` 时收到的份数多于订单量,OMS 记为超量成交(`OmsOverfill`,P0,[hft-oms 回报匹配](../hft-oms/README.md#回报匹配与成交增量));是否有不超量的买单形式(如按限价单金额 `px × qty` / `qty` 发 FAK)待核实(方法:最优卖价低于限价时发一张这种 FAK 买单,看 `takingAmount` 是否等于 `qty`)。
 - FAK 部分成交、`delayed` 应答与 `trade` 的 `FAILED`(链上失败,成交已按 `MATCHED` 报出)未实测;后者由对账校正。
-- refdata 的槽位 inst 以 tick 0.001 建(见下条),FAK 买单的份数因此取 5 位小数;交易所是否按市场当前 tick(多为 0.01,对应 4 位)校验份数的小数位待核实(方法:tick 0.01 的市场上发一张份数为 5 位小数的 FAK 买单)。
+- refdata 的槽位 inst 以 tick 0.001 建(见下条),而市场多为 0.01 tick:FAK 金额的小数位因此按 4 位封顶(实盘已核实 5 位会被拒),限价仍须落在市场当前的 tick 上(由策略取簿上价格保证)。
 - 重启后的订单哈希:`GwCtx` 不进快照,重启前的挂单只能按代币撤(`/cancel-market-orders`),查单 → `UnknownTarget`(交 reconciler)。
 - `tick_size_change` 不解码:每个 5 分钟市场在价格接近 0 或 1 时(约开盘 4 分钟后)把 tick 从 0.01 改为 0.001,之后出现三位小数价格。解码按 px_exp −3 照常解析;hft-core 的 Polymarket 槽位 inst 以 tick 0.001 建 refdata(`pm_sim_config`),所以三位小数的档位照常应用。
 - 吃单扫过时公开簿会在 1–3 条消息内锁住或交叉(新挂单档位先于撮合后的删除推送);hft-core 的 Polymarket 槽位 inst 以 `crossed_tolerance = 3` 建 refdata,簿在其内保持 Live(此前 0:每次扫单都 `Stale(Crossed)` 到下一个整簿,做市策略随之撤单)。
