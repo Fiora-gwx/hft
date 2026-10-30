@@ -73,8 +73,9 @@ hft_strategy_sdk::define_params! {
         /// forecast weight of the 15 s signed efficiency, sum / sum of absolute one-second returns (1e-9)
         pred_w_ser: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 187_200_000, since = 5, relax = None],
         /// a token whose composite direction score is below −comp_skip is not quoted (its resting
-        /// bid is cancelled); score in standard deviations (1e-9); 0 = off
-        comp_skip: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
+        /// bid is cancelled); score in standard deviations (1e-9); 0 = off; negative: only a token
+        /// whose score is above −comp_skip is quoted (directional maker)
+        comp_skip: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 6, relax = None],
         /// a token whose composite direction score is above comp_dir may hold up to
         /// dir_cap_shares net (instead of inv_max_shares); 1e-9 standard deviations; 0 = off
         comp_dir: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],

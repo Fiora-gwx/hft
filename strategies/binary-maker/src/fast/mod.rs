@@ -202,7 +202,7 @@ impl Fast {
     /// Composite score on (`comp_skip` or `comp_dir` set).
     pub fn comp_on(&self) -> bool {
         let d = self.p.defaults();
-        d.comp_skip.0 > 0 || d.comp_dir.0 > 0
+        d.comp_skip.0 != 0 || d.comp_dir.0 > 0
     }
 
     /// Venue-load gates on.
@@ -614,7 +614,8 @@ impl Fast {
             let z = (comp.ok && comp.win == start && i / 2 == up / 2)
                 .then(|| comp.z.get(i % 2).copied())
                 .flatten();
-            let skip = d.comp_skip.0 > 0 && z.is_some_and(|z| z < -d.comp_skip.0);
+            // A negative comp_skip skips every token not favoured by more than −comp_skip.
+            let skip = d.comp_skip.0 != 0 && z.is_some_and(|z| z < -d.comp_skip.0);
             let cap_shares = if d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0) {
                 d.dir_cap_shares
             } else {
