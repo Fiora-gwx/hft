@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 hft-types.workspace = true
+hft-risk.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
 hft-journal.workspace = true
