@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 11, "BMK-024.1");
+    assert_eq!(schema.version(), 12, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1037,6 +1037,15 @@ fn bmk_024_schema_v6() {
     for (k, name) in ["open_max_px", "pair_stop_ms"].iter().enumerate() {
         let f = schema.field(68 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 11, 0), "BMK-024.7");
+    }
+    // .8 schema v12 appends the pairing phases (0 = off).
+    assert_eq!(n_fields_at(schema, 12), Some(73), "BMK-024.8");
+    for (k, name) in ["pair_prio_age_ms", "pair_late_ms", "pair_late_margin"]
+        .iter()
+        .enumerate()
+    {
+        let f = schema.field(70 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 12, 0), "BMK-024.8");
     }
 }
 
@@ -2167,4 +2176,59 @@ fn bmk_041_expensive_side_and_pairing_priority() {
     let g = [("sigma_min", 1_000_000_000), ("pair_stop_ms", 10_000)];
     assert_eq!(run(&g, 5), vec![SLOTS[2]], "BMK-041.3");
     assert_eq!(run(&g, 0), vec![], "BMK-041.3");
+}
+
+#[test]
+fn bmk_042_pairing_phases() {
+    // 399.5 s = 99.5 s into the window; long Down at 0.400; comp_skip / comp_dir 5 (no direction).
+    let run = |extra: &[(&str, i64)], long_dn: i64| {
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 10),
+            ("comp_skip", 5_000_000_000),
+            ("comp_dir", 5_000_000_000),
+        ];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, long_dn, 400);
+        let out = warm_sized(&mut h, 100, 100);
+        placed(&out)
+    };
+    // .1 pairing priority inside stop_before (250 000 ms): only while younger than pair_prio_age_ms.
+    let p = [("stop_before_ms", 250_000), ("pair_stop_ms", 10_000)];
+    assert_eq!(
+        run(&[p[0], p[1], ("pair_prio_age_ms", 120_000)], 5),
+        vec![(SLOTS[2], Px(450))],
+        "BMK-042.1"
+    );
+    assert_eq!(
+        run(&[p[0], p[1], ("pair_prio_age_ms", 60_000)], 5),
+        vec![],
+        "BMK-042.1"
+    );
+    // .2 long 10 Down: the Up pairing bid at min(0.450, 1 - 0.400 - 0) = 0.450; from pair_late_ms
+    // 60 000 with pair_late_margin 0.2 at 1 - 0.4 - 0.2 = 0.400; margin 1: no pairing bid.
+    assert_eq!(run(&[], 10), vec![(SLOTS[2], Px(450))], "BMK-042.2");
+    assert_eq!(
+        run(&[("pair_late_ms", 60_000), ("pair_late_margin", 200_000_000)], 10),
+        vec![(SLOTS[2], Px(400))],
+        "BMK-042.2"
+    );
+    assert_eq!(
+        run(
+            &[("pair_late_ms", 60_000), ("pair_late_margin", 1_000_000_000)],
+            10
+        ),
+        vec![],
+        "BMK-042.2"
+    );
+    // .3 before pair_late_ms (120 000): the normal limit.
+    assert_eq!(
+        run(
+            &[("pair_late_ms", 120_000), ("pair_late_margin", 1_000_000_000)],
+            10
+        ),
+        vec![(SLOTS[2], Px(450))],
+        "BMK-042.3"
+    );
 }

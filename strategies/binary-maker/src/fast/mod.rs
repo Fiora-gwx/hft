@@ -627,10 +627,18 @@ impl Fast {
             let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
             // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z.
             let hedge = hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0);
-            let pairing = pair_window && other_q > own_q;
+            let pairing = pair_window
+                && other_q > own_q
+                && (d.pair_prio_age_ms == 0 || age_ms < i64::from(d.pair_prio_age_ms));
             let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
+            let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let lim = (other_q > own_q && !(d.dir_pair_free && favoured) && !hedge).then(|| {
-                let margin = (i128::from(d.pair_margin.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+                let pm = if late_pair {
+                    d.pair_late_margin.0
+                } else {
+                    d.pair_margin.0
+                };
+                let margin = (i128::from(pm) * i128::from(unit_px) / i128::from(ONE)) as i64;
                 let cent = (unit_px / 100).max(1);
                 (unit_px - other_c - margin).div_euclid(cent) * cent
             });
