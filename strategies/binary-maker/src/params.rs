@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 10, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 11, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -159,6 +159,13 @@ hft_strategy_sdk::define_params! {
         /// absorb_shares count as directional; beyond them a token skipped by comp_skip still bids to
         /// pair the excess (pairing only, pair-cost limit as usual); 0 = off
         absorb_shares: Count [min = 0, max = 1_000_000, default = 0, since = 10, relax = None],
+        /// (schema v11) no opening on a leg whose best bid is at or above this price (expensive side;
+        /// same exemptions as the other opening rules); 0 = off
+        open_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 11, relax = None],
+        /// pairing priority: until pair_stop_ms before the window end a leg that is short bids to pair
+        /// (pair-cost limit as usual) regardless of the volatility and venue-load gates, the fair-value
+        /// limit and cancel, the cooldowns and the streak pause, also inside stop_before_ms; 0 = off
+        pair_stop_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 11, relax = None],
     }
 }
 

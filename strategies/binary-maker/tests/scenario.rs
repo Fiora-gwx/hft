@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 10, "BMK-024.1");
+    assert_eq!(schema.version(), 11, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1032,6 +1032,12 @@ fn bmk_024_schema_v6() {
         ("absorb_shares", 10, 0),
         "BMK-024.6"
     );
+    // .7 schema v11 appends open_max_px and pair_stop_ms (0 = off).
+    assert_eq!(n_fields_at(schema, 11), Some(70), "BMK-024.7");
+    for (k, name) in ["open_max_px", "pair_stop_ms"].iter().enumerate() {
+        let f = schema.field(68 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 11, 0), "BMK-024.7");
+    }
 }
 
 #[test]
@@ -2121,4 +2127,44 @@ fn bmk_040_absorption_pairs_the_excess() {
         vec![(SLOTS[3], Px(450))],
         "BMK-040.3"
     );
+}
+
+#[test]
+fn bmk_041_expensive_side_and_pairing_priority() {
+    let run = |extra: &[(&str, i64)], long_dn: i64| {
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 10),
+            ("comp_skip", 5_000_000_000),
+            ("comp_dir", 5_000_000_000),
+        ];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        if long_dn > 0 {
+            hold(&mut h, 3, long_dn, 400);
+        }
+        let out = warm_sized(&mut h, 100, 100);
+        let mut got: Vec<InstId> = out.places().map(|it| it.inst).collect();
+        got.sort();
+        got
+    };
+    // .1 open_max_px 0.45 (bids 0.450): neither opens; long 5 Down: Up pairs.
+    assert_eq!(run(&[("open_max_px", 450_000_000)], 0), vec![], "BMK-041.1");
+    assert_eq!(
+        run(&[("open_max_px", 450_000_000)], 5),
+        vec![SLOTS[2]],
+        "BMK-041.1"
+    );
+    // .2 stop_before_ms 250 000 puts 399.5 s inside the last stretch: no quoting; long 5 Down with
+    // pair_stop_ms 10 000: Up pairs (Down does not open).
+    assert_eq!(run(&[("stop_before_ms", 250_000)], 5), vec![], "BMK-041.2");
+    assert_eq!(
+        run(&[("stop_before_ms", 250_000), ("pair_stop_ms", 10_000)], 5),
+        vec![SLOTS[2]],
+        "BMK-041.2"
+    );
+    // .3 the volatility gate closed (sigma_min huge): pairing still bids; flat: nothing.
+    let g = [("sigma_min", 1_000_000_000), ("pair_stop_ms", 10_000)];
+    assert_eq!(run(&g, 5), vec![SLOTS[2]], "BMK-041.3");
+    assert_eq!(run(&g, 0), vec![], "BMK-041.3");
 }

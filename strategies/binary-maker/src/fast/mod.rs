@@ -502,6 +502,8 @@ impl Fast {
         let (load, slow) = self.feat.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
         let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms) && !load && !slow;
         // Last-minute stop-loss (late_hedge_ms): only pairing bids by the leg the score favours.
+        // Pairing priority (pair_stop_ms): a short leg pairs until pair_stop_ms before the end.
+        let pair_window = ok && d.pair_stop_ms > 0 && left_ms > i64::from(d.pair_stop_ms);
         let hedging = ok
             && d.late_hedge_ms > 0
             && left_ms <= i64::from(d.stop_before_ms)
@@ -555,7 +557,7 @@ impl Fast {
         } else {
             None
         };
-        self.comp_update(v, quoting || hedging, start, up, now.utc_ns);
+        self.comp_update(v, quoting || hedging || pair_window, start, up, now.utc_ns);
         let comp = self.comp;
         // Up-mid path over the last 60 s (fraction of one), for mm_min_path: sum of |Δ 2 × mid| / 2 of
         // consecutive recorded seconds.
@@ -625,7 +627,8 @@ impl Fast {
             let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
             // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z.
             let hedge = hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0);
-            let mine = (quoting || hedge) && i / 2 == up / 2;
+            let pairing = pair_window && other_q > own_q;
+            let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
             let lim = (other_q > own_q && !(d.dir_pair_free && favoured) && !hedge).then(|| {
                 let margin = (i128::from(d.pair_margin.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
                 let cent = (unit_px / 100).max(1);
@@ -670,12 +673,16 @@ impl Fast {
                 && age_ms < i64::from(d.early_ms)
                 && own_q.saturating_sub(other_q).saturating_add(clip)
                     > i64::from(d.early_cap_shares).saturating_mul(unit_qty);
+            let dear = d.open_max_px.0 > 0
+                && bid.is_some_and(|b| {
+                    i128::from(b) * i128::from(ONE) >= i128::from(d.open_max_px.0) * i128::from(unit_px)
+                });
             let cheap = d.open_min_px.0 > 0
                 && bid.is_some_and(|b| {
                     i128::from(b) * i128::from(ONE) < i128::from(d.open_min_px.0) * i128::from(unit_px)
                 });
             let against = d.open_skip_z.0 > 0 && z.is_some_and(|z| z < -d.open_skip_z.0);
-            let no_open = opens && (quiet || thick || early || cheap || against);
+            let no_open = opens && (quiet || thick || early || cheap || dear || against);
             let target = match (mine && live && !no_open, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
@@ -683,10 +690,14 @@ impl Fast {
                         && b >= lo
                         && b <= hi
                         && own_q.saturating_sub(other_q).saturating_add(clip) <= cap
-                        && (!d.fv_limit || fv_cap.is_some() || hedge) =>
+                        && (!d.fv_limit || fv_cap.is_some() || hedge || pairing) =>
                 {
                     let t = lim.map_or(b, |l| b.min(l));
-                    let t = if hedge { t } else { fv_cap.map_or(t, |f| t.min(f)) };
+                    let t = if hedge || pairing {
+                        t
+                    } else {
+                        fv_cap.map_or(t, |f| t.min(f))
+                    };
                     (t >= lo).then_some(t)
                 }
                 _ => None,
@@ -696,7 +707,7 @@ impl Fast {
                 QState::Live => {
                     let mut cancel = !(mine && live) || (skip && !hedge) || no_open;
                     let mut cooled = false;
-                    if !cancel && d.fv_cancel.0 > 0 {
+                    if !cancel && d.fv_cancel.0 > 0 && !pairing {
                         let x = self.dfv(&q);
                         if (is_up && x <= -d.fv_cancel.0) || (!is_up && x >= d.fv_cancel.0) {
                             cancel = true;
@@ -711,7 +722,7 @@ impl Fast {
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
-                    cancel |= !hedge && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
+                    cancel |= !hedge && !pairing && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
@@ -730,9 +741,10 @@ impl Fast {
                 QState::None => {
                     let Some(px) = target else { continue };
                     if since < requote
-                        || now.engine_ns < q.cool_until
+                        || (!pairing && now.engine_ns < q.cool_until)
                         || cost_full
-                        || q.streak_paused(now.engine_ns, d.streak_k, streak_window, streak_pause)
+                        || (!pairing
+                            && q.streak_paused(now.engine_ns, d.streak_k, streak_window, streak_pause))
                     {
                         continue;
                     }
