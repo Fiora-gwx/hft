@@ -577,15 +577,9 @@ impl Fast {
             });
         let age_ms = i64::from(d.window_s) * 1_000 - left_ms;
         // Early fast phase (fast_until_ms): shorter quote change interval, optionally no no-chase
-        // cooldown and no streak pause.
-        let fast = d.fast_until_ms > 0 && age_ms < i64::from(d.fast_until_ms);
-        let requote = i64::from(if fast { d.fast_requote_ms } else { d.requote_ms }) * 1_000_000;
+        // cooldown and no streak pause; with fast_pair_only only for a short leg (below).
+        let fast_phase = d.fast_until_ms > 0 && age_ms < i64::from(d.fast_until_ms);
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
-        let nochase = if fast && d.fast_free {
-            0
-        } else {
-            i64::from(d.nochase_ms) * 1_000_000
-        };
         let streak_window = i64::from(d.streak_window_ms) * 1_000_000;
         let streak_pause = i64::from(d.streak_pause_ms) * 1_000_000;
         let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
@@ -626,6 +620,13 @@ impl Fast {
             // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
             // floored to a whole cent.
             let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
+            let fast = fast_phase && (!d.fast_pair_only || other_q > own_q);
+            let requote = i64::from(if fast { d.fast_requote_ms } else { d.requote_ms }) * 1_000_000;
+            let nochase = if fast && d.fast_free {
+                0
+            } else {
+                i64::from(d.nochase_ms) * 1_000_000
+            };
             // Composite score (README "规则" 10): skip the token it is against; the one it favours
             // may hold up to dir_cap_shares net and, with dir_pair_free, pairs without the limit.
             let z = (comp.ok && comp.win == start && i / 2 == up / 2)

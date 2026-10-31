@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 14, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 15, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -185,6 +185,9 @@ hft_strategy_sdk::define_params! {
         fast_requote_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 14, relax = None],
         /// true: no no-chase cooldown and no streak pause in the fast phase
         fast_free: Bool [default = 0, since = 14, relax = None],
+        /// (schema v15) true: the fast phase applies only to a leg that is short (its bid pairs);
+        /// opening legs keep requote_ms, the no-chase cooldown and the streak pause
+        fast_pair_only: Bool [default = 0, since = 15, relax = None],
     }
 }
 
