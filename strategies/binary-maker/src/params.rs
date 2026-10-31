@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 8, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 9, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -140,6 +140,21 @@ hft_strategy_sdk::define_params! {
         late_hedge_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 8, relax = None],
         /// score the pairing leg needs in the last-minute stop-loss
         late_hedge_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 8, relax = None],
+        /// opening rules (schema v9; a leg "opens" when it is not short, i.e. a fill would raise the
+        /// net; pairing bids are never affected; a token the score favours (z > comp_dir) is exempt):
+        /// no opening while the Up mid travelled less than mm_min_path over the last 60 s (quiet,
+        /// drifting market); 0 = off
+        mm_min_path: Rate [min = 0, max = 100_000_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose best-bid size is above this many shares (long queue); 0 = off
+        mm_max_bq: Count [min = 0, max = 100_000_000, default = 0, since = 9, relax = None],
+        /// in the first early_ms of the window the opening net cap is early_cap_shares; 0 = off
+        early_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 9, relax = None],
+        /// opening net cap in the first early_ms
+        early_cap_shares: Count [min = 0, max = 1_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose best bid is below this price (cheap side); 0 = off
+        open_min_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose composite score is below -open_skip_z (it may still pair); 0 = off
+        open_skip_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 9, relax = None],
     }
 }
 

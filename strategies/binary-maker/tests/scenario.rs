@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 8, "BMK-024.1");
+    assert_eq!(schema.version(), 9, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1009,6 +1009,20 @@ fn bmk_024_schema_v6() {
     {
         let f = schema.field(57 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 8, 0), "BMK-024.4");
+    }
+    // .5 schema v9 appends the opening rules (all 0 = off).
+    assert_eq!(n_fields_at(schema, 9), Some(67), "BMK-024.5");
+    let v9 = [
+        "mm_min_path",
+        "mm_max_bq",
+        "early_ms",
+        "early_cap_shares",
+        "open_min_px",
+        "open_skip_z",
+    ];
+    for (k, name) in v9.iter().enumerate() {
+        let f = schema.field(61 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 9, 0), "BMK-024.5");
     }
 }
 
@@ -2013,5 +2027,61 @@ fn bmk_038_last_minute_stop_loss_pairs_on_the_signal() {
         run(&[("late_hedge_ms", 250_000), ("late_hedge_z", 500_000_000)]),
         vec![],
         "BMK-038.4"
+    );
+}
+
+#[test]
+fn bmk_039_opening_rules() {
+    // comp_skip / comp_dir 5 (no skip, no favoured token), clip 5, cap 10; books 0.450 / 0.470.
+    let run = |extra: &[(&str, i64)], up: i64, dn: i64, long_dn: i64| {
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 10),
+            ("comp_skip", 5_000_000_000),
+            ("comp_dir", 5_000_000_000),
+        ];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        if long_dn > 0 {
+            hold(&mut h, 3, long_dn, 400);
+        }
+        let out = warm_sized(&mut h, up, dn);
+        let mut got: Vec<InstId> = out.places().map(|it| it.inst).collect();
+        got.sort();
+        got
+    };
+    let both = vec![SLOTS[2], SLOTS[3]];
+    // .1 rules off: both legs.
+    assert_eq!(run(&[], 100, 100, 0), both, "BMK-039.1");
+    // .2 open_min_px 0.50 (bids 0.450): neither leg opens; long 5 Down: Up pairs, Down does not open.
+    assert_eq!(
+        run(&[("open_min_px", 500_000_000)], 100, 100, 0),
+        vec![],
+        "BMK-039.2"
+    );
+    assert_eq!(
+        run(&[("open_min_px", 500_000_000)], 100, 100, 5),
+        vec![SLOTS[2]],
+        "BMK-039.2"
+    );
+    // .3 mm_max_bq 50 with 100-share best bids: neither opens; 150: both open.
+    assert_eq!(run(&[("mm_max_bq", 50)], 100, 100, 0), vec![], "BMK-039.3");
+    assert_eq!(run(&[("mm_max_bq", 150)], 100, 100, 0), both, "BMK-039.3");
+    // .4 early_ms 120 000 (399.5 s is 99.5 s into the window), early_cap 5: flat, both open; long
+    // 5 Down: Down may not open (5 + 5 > 5), Up pairs.
+    let e = [("early_ms", 120_000), ("early_cap_shares", 5)];
+    assert_eq!(run(&e, 100, 100, 0), both, "BMK-039.4");
+    assert_eq!(run(&e, 100, 100, 5), vec![SLOTS[2]], "BMK-039.4");
+    // .5 open_skip_z 0.5, Up 10 vs Down 190 shares (Up score < -0.5): flat, only Down opens; long 5
+    // Down: Up still pairs (comp_skip would not quote it), Down opens up to the cap.
+    assert_eq!(
+        run(&[("open_skip_z", 500_000_000)], 10, 190, 0),
+        vec![SLOTS[3]],
+        "BMK-039.5"
+    );
+    assert_eq!(
+        run(&[("open_skip_z", 500_000_000)], 10, 190, 5),
+        both,
+        "BMK-039.5"
     );
 }

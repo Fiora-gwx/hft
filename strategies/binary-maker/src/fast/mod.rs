@@ -202,7 +202,7 @@ impl Fast {
     /// Composite score on (`comp_skip` or `comp_dir` set).
     pub fn comp_on(&self) -> bool {
         let d = self.p.defaults();
-        d.comp_skip.0 != 0 || d.comp_dir.0 > 0
+        d.comp_skip.0 != 0 || d.comp_dir.0 > 0 || d.open_skip_z.0 > 0 || d.mm_min_path.0 > 0
     }
 
     /// Venue-load gates on.
@@ -557,6 +557,23 @@ impl Fast {
         };
         self.comp_update(v, quoting || hedging, start, up, now.utc_ns);
         let comp = self.comp;
+        // Up-mid path over the last 60 s (fraction of one), for mm_min_path: sum of |Δ 2 × mid| / 2 of
+        // consecutive recorded seconds.
+        let quiet = d.mm_min_path.0 > 0
+            && self.feat.hist.get(up).is_some_and(|h| {
+                let sec = now.utc_ns.div_euclid(1_000_000_000);
+                let unit = self.quotes.get(up).map_or(1, |q| {
+                    10i64.saturating_pow(u32::from(v.inst(q.inst).px_exp.unsigned_abs()))
+                });
+                let mut path = 0i128;
+                for k in 0..60 {
+                    if let (Some(a), Some(b)) = (h.mid_x2.at(sec - k), h.mid_x2.at(sec - k - 1)) {
+                        path += i128::from((a - b).abs());
+                    }
+                }
+                path * i128::from(ONE) / (2 * i128::from(unit.max(1))) < i128::from(d.mm_min_path.0)
+            });
+        let age_ms = i64::from(d.window_s) * 1_000 - left_ms;
         let requote = i64::from(d.requote_ms) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
         let nochase = i64::from(d.nochase_ms) * 1_000_000;
@@ -640,7 +657,23 @@ impl Fast {
                 d.clip_shares
             };
             let clip = i64::from(clip_shares).saturating_mul(unit_qty);
-            let target = match (mine && live, bid, ask) {
+            // Opening rules (schema v9): a leg that is not short may not raise the net when one holds.
+            let opens = own_q >= other_q && !favoured;
+            let thick = d.mm_max_bq > 0
+                && book
+                    .best(Side::Buy)
+                    .is_some_and(|l| l.qty.0 > i64::from(d.mm_max_bq).saturating_mul(unit_qty));
+            let early = d.early_ms > 0
+                && age_ms < i64::from(d.early_ms)
+                && own_q.saturating_sub(other_q).saturating_add(clip)
+                    > i64::from(d.early_cap_shares).saturating_mul(unit_qty);
+            let cheap = d.open_min_px.0 > 0
+                && bid.is_some_and(|b| {
+                    i128::from(b) * i128::from(ONE) < i128::from(d.open_min_px.0) * i128::from(unit_px)
+                });
+            let against = d.open_skip_z.0 > 0 && z.is_some_and(|z| z < -d.open_skip_z.0);
+            let no_open = opens && (quiet || thick || early || cheap || against);
+            let target = match (mine && live && !no_open, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
                         && (!skip || hedge)
@@ -658,7 +691,7 @@ impl Fast {
             let since = now.engine_ns.saturating_sub(q.last_ens);
             match q.state {
                 QState::Live => {
-                    let mut cancel = !(mine && live) || (skip && !hedge);
+                    let mut cancel = !(mine && live) || (skip && !hedge) || no_open;
                     let mut cooled = false;
                     if !cancel && d.fv_cancel.0 > 0 {
                         let x = self.dfv(&q);
