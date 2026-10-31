@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 13, "BMK-024.1");
+    assert_eq!(schema.version(), 14, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1054,7 +1054,15 @@ fn bmk_024_schema_v6() {
         (f.name, f.since, f.default),
         ("pair_late_all", 13, 0),
         "BMK-024.9"
-    );
+    ); // .10 schema v14 appends the early fast phase (0 = off).
+    assert_eq!(n_fields_at(schema, 14), Some(77), "BMK-024.10");
+    for (k, name) in ["fast_until_ms", "fast_requote_ms", "fast_free"]
+        .iter()
+        .enumerate()
+    {
+        let f = schema.field(74 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 14, 0), "BMK-024.10");
+    }
 }
 
 #[test]

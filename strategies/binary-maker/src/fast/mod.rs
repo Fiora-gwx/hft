@@ -576,9 +576,16 @@ impl Fast {
                 path * i128::from(ONE) / (2 * i128::from(unit.max(1))) < i128::from(d.mm_min_path.0)
             });
         let age_ms = i64::from(d.window_s) * 1_000 - left_ms;
-        let requote = i64::from(d.requote_ms) * 1_000_000;
+        // Early fast phase (fast_until_ms): shorter quote change interval, optionally no no-chase
+        // cooldown and no streak pause.
+        let fast = d.fast_until_ms > 0 && age_ms < i64::from(d.fast_until_ms);
+        let requote = i64::from(if fast { d.fast_requote_ms } else { d.requote_ms }) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
-        let nochase = i64::from(d.nochase_ms) * 1_000_000;
+        let nochase = if fast && d.fast_free {
+            0
+        } else {
+            i64::from(d.nochase_ms) * 1_000_000
+        };
         let streak_window = i64::from(d.streak_window_ms) * 1_000_000;
         let streak_pause = i64::from(d.streak_pause_ms) * 1_000_000;
         let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
@@ -753,6 +760,7 @@ impl Fast {
                         || (!pairing && now.engine_ns < q.cool_until)
                         || cost_full
                         || (!pairing
+                            && !(fast && d.fast_free)
                             && q.streak_paused(now.engine_ns, d.streak_k, streak_window, streak_pause))
                     {
                         continue;

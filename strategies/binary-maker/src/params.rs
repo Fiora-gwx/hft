@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 13, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 14, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -177,6 +177,14 @@ hft_strategy_sdk::define_params! {
         /// (schema v13) true: from pair_late_ms on the favoured token's pairing bid (dir_pair_free) also
         /// uses pair_late_margin (no late pairing at any price)
         pair_late_all: Bool [default = 0, since = 13, relax = None],
+        /// (schema v14) early fast phase: while the window is younger than fast_until_ms the quote
+        /// change interval is fast_requote_ms and, with fast_free, no no-chase cooldown and no streak
+        /// pause (the fair-value cooldown stays); 0 = off
+        fast_until_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 14, relax = None],
+        /// quote change interval in the fast phase
+        fast_requote_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 14, relax = None],
+        /// true: no no-chase cooldown and no streak pause in the fast phase
+        fast_free: Bool [default = 0, since = 14, relax = None],
     }
 }
 
