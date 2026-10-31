@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 7, "BMK-024.1");
+    assert_eq!(schema.version(), 8, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1001,6 +1001,15 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 7), Some(57), "BMK-024.3");
     let f = schema.field(56).unwrap();
     assert_eq!((f.name, f.since, f.default), ("dir_pair_free", 7, 0), "BMK-024.3");
+    // .4 schema v8 appends the tilt and the last-minute stop-loss (all 0 = off).
+    assert_eq!(n_fields_at(schema, 8), Some(61), "BMK-024.4");
+    for (k, name) in ["tilt_z", "tilt_clip_shares", "late_hedge_ms", "late_hedge_z"]
+        .iter()
+        .enumerate()
+    {
+        let f = schema.field(57 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 8, 0), "BMK-024.4");
+    }
 }
 
 #[test]
@@ -1932,5 +1941,77 @@ fn bmk_036_favoured_side_pairs_without_the_limit() {
         run(&[("dir_pair_free", 1), ("comp_dir", 0)]),
         vec![(SLOTS[2], Px(390))],
         "BMK-036.3"
+    );
+}
+
+#[test]
+fn bmk_037_tilt_quotes_the_leaning_side_larger() {
+    // Balanced books but Up bid 140 vs Down 60 shares: Up leans (0 < z_up), both quoted (|z| < 0.5
+    // would still quote both with comp_skip 0.5); with tilt_z 0.1 / tilt_clip 8 the Up order is 8 shares.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 20),
+            ("comp_skip", 5_000_000_000),
+            ("comp_dir", 5_000_000_000),
+        ];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        let out = warm_sized(&mut h, 140, 60);
+        let mut got: Vec<(InstId, i64)> = out.places().map(|it| (it.inst, it.qty.0 / 1_000_000)).collect();
+        got.sort();
+        got
+    };
+    // .1 off: both legs 5 shares.
+    assert_eq!(run(&[]), vec![(SLOTS[2], 5), (SLOTS[3], 5)], "BMK-037.1");
+    // .2 tilt_z 0.1, tilt_clip_shares 8: the leaning Up leg 8 shares, Down 5.
+    assert_eq!(
+        run(&[("tilt_z", 100_000_000), ("tilt_clip_shares", 8)]),
+        vec![(SLOTS[2], 8), (SLOTS[3], 5)],
+        "BMK-037.2"
+    );
+    // .3 tilt_clip_shares 0: off.
+    assert_eq!(
+        run(&[("tilt_z", 100_000_000)]),
+        vec![(SLOTS[2], 5), (SLOTS[3], 5)],
+        "BMK-037.3"
+    );
+}
+
+#[test]
+fn bmk_038_last_minute_stop_loss_pairs_on_the_signal() {
+    // Long 10 Down at 0.600; the score favours Up (Up bid 190 shares vs Down 10). stop_before_ms
+    // 250 000 puts 399.5 s (200.5 s left) inside the last stretch: no regular quoting.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 10),
+            ("stop_before_ms", 250_000),
+        ];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, 10, 600);
+        let out = warm_sized(&mut h, 190, 10);
+        placed(&out)
+    };
+    // .1 late_hedge_ms 0: nothing (quoting has stopped).
+    assert_eq!(run(&[]), vec![], "BMK-038.1");
+    // .2 late_hedge_ms 10 000, late_hedge_z 0.5: Up pairs at the best bid 0.450 (no pair-cost limit 0.390).
+    assert_eq!(
+        run(&[("late_hedge_ms", 10_000), ("late_hedge_z", 500_000_000)]),
+        vec![(SLOTS[2], Px(450))],
+        "BMK-038.2"
+    );
+    // .3 late_hedge_z above the Up score: nothing.
+    assert_eq!(
+        run(&[("late_hedge_ms", 10_000), ("late_hedge_z", 9_000_000_000)]),
+        vec![],
+        "BMK-038.3"
+    );
+    // .4 inside the last late_hedge_ms (left 200.5 s <= 250 000 ms): nothing.
+    assert_eq!(
+        run(&[("late_hedge_ms", 250_000), ("late_hedge_z", 500_000_000)]),
+        vec![],
+        "BMK-038.4"
     );
 }

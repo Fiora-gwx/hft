@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 7, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 8, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -129,6 +129,17 @@ hft_strategy_sdk::define_params! {
         /// true: a token whose composite score is above comp_dir completes pairs without the pair-cost
         /// limit (two-mode rule: the favoured side pairs off inventory left on the other side)
         dir_pair_free: Bool [default = 0, since = 7, relax = None],
+        /// a token whose composite score is above tilt_z quotes tilt_clip_shares per order instead of
+        /// clip_shares (the side the score leans to is bid in larger size); 0 = off
+        tilt_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 8, relax = None],
+        /// order size of a token whose score is above tilt_z; 0 = off
+        tilt_clip_shares: Count [min = 0, max = 100_000, default = 0, since = 8, relax = None],
+        /// last-minute stop-loss: from stop_before_ms until late_hedge_ms before the window end only
+        /// pairing bids are placed, by the leg whose score is above late_hedge_z (the signal is against
+        /// the net position), at the best bid without the pair-cost limit; 0 = off
+        late_hedge_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 8, relax = None],
+        /// score the pairing leg needs in the last-minute stop-loss
+        late_hedge_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 8, relax = None],
     }
 }
 

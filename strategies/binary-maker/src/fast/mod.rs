@@ -501,6 +501,11 @@ impl Fast {
         // Venue-load gates (README "规则" 11): the previous minute's feed lag closes quoting.
         let (load, slow) = self.feat.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
         let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms) && !load && !slow;
+        // Last-minute stop-loss (late_hedge_ms): only pairing bids by the leg the score favours.
+        let hedging = ok
+            && d.late_hedge_ms > 0
+            && left_ms <= i64::from(d.stop_before_ms)
+            && left_ms > i64::from(d.late_hedge_ms);
         // Shares and average cost of the current window's Up and Down legs.
         let pos = |q: Option<&Quote>| {
             q.and_then(|q| {
@@ -550,7 +555,7 @@ impl Fast {
         } else {
             None
         };
-        self.comp_update(v, quoting, start, up, now.utc_ns);
+        self.comp_update(v, quoting || hedging, start, up, now.utc_ns);
         let comp = self.comp;
         let requote = i64::from(d.requote_ms) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
@@ -586,7 +591,6 @@ impl Fast {
             let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
             let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
             let is_up = i % 2 == 0;
-            let mine = quoting && i / 2 == up / 2;
             let book = v.book(q.inst);
             let live = book.status() == BookStatus::Live;
             let bid = book.best(Side::Buy).map(|l| l.px.0);
@@ -602,7 +606,10 @@ impl Fast {
                 .then(|| comp.z.get(i % 2).copied())
                 .flatten();
             let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
-            let lim = (other_q > own_q && !(d.dir_pair_free && favoured)).then(|| {
+            // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z.
+            let hedge = hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0);
+            let mine = (quoting || hedge) && i / 2 == up / 2;
+            let lim = (other_q > own_q && !(d.dir_pair_free && favoured) && !hedge).then(|| {
                 let margin = (i128::from(d.pair_margin.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
                 let cent = (unit_px / 100).max(1);
                 (unit_px - other_c - margin).div_euclid(cent) * cent
@@ -625,18 +632,25 @@ impl Fast {
             let cap = i64::from(cap_shares).saturating_mul(unit_qty);
             // The net after this clip fills completely stays within the cap (a short fill such as
             // 9.99 of 10 shares no longer admits a whole further clip).
-            let clip = i64::from(d.clip_shares).saturating_mul(unit_qty);
+            // Tilt (tilt_z, tilt_clip_shares): the leg the score leans to quotes the larger size.
+            let clip_shares = if d.tilt_z.0 > 0 && d.tilt_clip_shares > 0 && z.is_some_and(|z| z > d.tilt_z.0)
+            {
+                d.tilt_clip_shares
+            } else {
+                d.clip_shares
+            };
+            let clip = i64::from(clip_shares).saturating_mul(unit_qty);
             let target = match (mine && live, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
-                        && !skip
+                        && (!skip || hedge)
                         && b >= lo
                         && b <= hi
                         && own_q.saturating_sub(other_q).saturating_add(clip) <= cap
-                        && (!d.fv_limit || fv_cap.is_some()) =>
+                        && (!d.fv_limit || fv_cap.is_some() || hedge) =>
                 {
                     let t = lim.map_or(b, |l| b.min(l));
-                    let t = fv_cap.map_or(t, |f| t.min(f));
+                    let t = if hedge { t } else { fv_cap.map_or(t, |f| t.min(f)) };
                     (t >= lo).then_some(t)
                 }
                 _ => None,
@@ -644,7 +658,7 @@ impl Fast {
             let since = now.engine_ns.saturating_sub(q.last_ens);
             match q.state {
                 QState::Live => {
-                    let mut cancel = !(mine && live) || skip;
+                    let mut cancel = !(mine && live) || (skip && !hedge);
                     let mut cooled = false;
                     if !cancel && d.fv_cancel.0 > 0 {
                         let x = self.dfv(&q);
@@ -661,7 +675,7 @@ impl Fast {
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
-                    cancel |= fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
+                    cancel |= !hedge && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
@@ -697,7 +711,7 @@ impl Fast {
                         inst: q.inst,
                         group: q.id,
                         px: Px(px),
-                        qty: Qty(i64::from(d.clip_shares).saturating_mul(unit_qty)),
+                        qty: Qty(clip),
                         link: LegLinkOpt::NONE,
                         tag: tag_of(i as u16),
                         max_rest_ms: d.max_rest_ms,

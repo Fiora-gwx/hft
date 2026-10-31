@@ -87,6 +87,10 @@ status: impl
 | `load_gate_ns` | Count | 0(关) | 上一个 UTC 分钟的行情延迟每秒 90 分位的中位数 ≥ 它(纳秒)时不挂单(规则 11);v7 取 12 688 500(12.6885 ms,研究的繁忙档) | None |
 | `mdslow_gate_ns` | Count | 0(关) | 上一个 UTC 分钟的行情延迟每秒中位数的中位数 > 它(纳秒)时不挂单;v7 取 40 000 000 | None |
 | `dir_pair_free` | Bool | 0(关) | 1:方向分数高于 `comp_dir` 的代币凑对时不受对价上限约束(两模式规则:被看好的一侧把另一侧留下的库存配掉;公允价上限照常);schema v7 | None |
+| `tilt_z` | Rate | 0(关) | 方向分数高于它的代币每单挂 `tilt_clip_shares` 份(倾斜:分数偏向的一侧挂大单);schema v8 | None |
+| `tilt_clip_shares` | Count | 0(关) | 上一行的单笔份数;0 = 关 | None |
+| `late_hedge_ms` | DurationMs | 0(关) | 最后一分钟止损:从 `stop_before_ms` 到窗口结束前 `late_hedge_ms`,只挂凑对的买单,由分数高于 `late_hedge_z` 的腿(信号与净持仓相反)在买一挂、不受对价上限;0 = 关 | None |
+| `late_hedge_z` | Rate | 0 | 止损凑对的腿需要的分数 | None |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 

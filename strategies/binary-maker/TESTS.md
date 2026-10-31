@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,8 +382,9 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 7;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 8;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
+| BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
 ### BMK-025 定点对数
@@ -552,3 +553,32 @@ spec: README.md
 | BMK-036.1 | `dir_pair_free` 0 | `U1` 在对价上限 0.390(1 − 0.600 − 0.01)挂单 |
 | BMK-036.2 | `dir_pair_free` 1 | `U1` 在买一 0.450 挂单 |
 | BMK-036.3 | `dir_pair_free` 1、`comp_dir` 0 | 没有被看好的代币:`U1` 在 0.390 |
+
+### BMK-037 倾斜:分数偏向的一侧挂大单
+
+- 规则:参数 `tilt_z`、`tilt_clip_shares`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_skip` = `comp_dir` = 5(不跳过、不加方向上限)、`comp_imb1_sd` 0.1、`clip_shares` 5、`inv_max_shares` 20;`U1` 买一 140 份、`D1` 60 份
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_037_tilt_quotes_the_leaning_side_larger`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-037.1 | 关 | 两腿各 5 份 |
+| BMK-037.2 | `tilt_z` 0.1、`tilt_clip_shares` 8 | `U1` 8 份、`D1` 5 份 |
+| BMK-037.3 | `tilt_clip_shares` 0 | 两腿各 5 份 |
+
+### BMK-038 最后一分钟按信号止损凑对
+
+- 规则:参数 `late_hedge_ms`、`late_hedge_z`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_params`、`clip_shares` 5、`inv_max_shares` 10、`stop_before_ms` 250 000;持有 10 份 Down(0.600);`U1` 买一 190 份、`D1` 10 份(分数看好 Up)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_038_last_minute_stop_loss_pairs_on_the_signal`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-038.1 | `late_hedge_ms` 0 | 不挂单 |
+| BMK-038.2 | `late_hedge_ms` 10 000、`late_hedge_z` 0.5 | `U1` 在买一 0.450 挂单(无对价上限 0.390) |
+| BMK-038.3 | `late_hedge_z` 9 | 不挂单 |
+| BMK-038.4 | `late_hedge_ms` 250 000 | 不挂单(已进入最后 `late_hedge_ms`) |
