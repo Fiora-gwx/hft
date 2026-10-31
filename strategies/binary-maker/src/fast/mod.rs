@@ -640,7 +640,10 @@ impl Fast {
             let cent = (unit_px / 100).max(1);
             let fv_cap = fv_px.map(|f| f.div_euclid(cent) * cent);
             // A negative comp_skip skips every token not favoured by more than −comp_skip.
-            let skip = d.comp_skip.0 != 0 && z.is_some_and(|z| z < -d.comp_skip.0);
+            // Absorption (absorb_shares): a skipped leg still pairs the net beyond the directional part.
+            let excess = d.absorb_shares > 0
+                && other_q.saturating_sub(own_q) > i64::from(d.absorb_shares).saturating_mul(unit_qty);
+            let skip = d.comp_skip.0 != 0 && z.is_some_and(|z| z < -d.comp_skip.0) && !excess;
             let cap_shares = if favoured {
                 d.dir_cap_shares
             } else {

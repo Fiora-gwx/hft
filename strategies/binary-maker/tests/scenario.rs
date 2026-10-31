@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 9, "BMK-024.1");
+    assert_eq!(schema.version(), 10, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1024,6 +1024,14 @@ fn bmk_024_schema_v6() {
         let f = schema.field(61 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 9, 0), "BMK-024.5");
     }
+    // .6 schema v10 appends absorb_shares (0 = off).
+    assert_eq!(n_fields_at(schema, 10), Some(68), "BMK-024.6");
+    let f = schema.field(67).unwrap();
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("absorb_shares", 10, 0),
+        "BMK-024.6"
+    );
 }
 
 #[test]
@@ -2083,5 +2091,34 @@ fn bmk_039_opening_rules() {
         run(&[("open_skip_z", 500_000_000)], 10, 190, 5),
         both,
         "BMK-039.5"
+    );
+}
+
+#[test]
+fn bmk_040_absorption_pairs_the_excess() {
+    // The score favours Down (Up bid 10 vs Down 190 shares; comp_skip = comp_dir = 0.5): Up is
+    // skipped. Long 15 Down at 0.400, cap 10, dir_cap 20, clip 5.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![("clip_shares", 5), ("inv_max_shares", 10), ("dir_cap_shares", 20)];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, 15, 400);
+        let out = warm_sized(&mut h, 10, 190);
+        placed(&out)
+    };
+    // .1 absorb off: Up skipped, Down bids (15 + 5 <= 20).
+    assert_eq!(run(&[]), vec![(SLOTS[3], Px(450))], "BMK-040.1");
+    // .2 absorb 10: 15 - 10 = 5 Down shares are the maker's: Up bids to pair them, at the pair
+    // limit min(0.450, 1 - 0.400 - 0.01 = 0.590) = 0.450; Down still bids.
+    assert_eq!(
+        run(&[("absorb_shares", 10)]),
+        vec![(SLOTS[2], Px(450)), (SLOTS[3], Px(450))],
+        "BMK-040.2"
+    );
+    // .3 absorb 15: no excess, Up skipped.
+    assert_eq!(
+        run(&[("absorb_shares", 15)]),
+        vec![(SLOTS[3], Px(450))],
+        "BMK-040.3"
     );
 }
