@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 12, "BMK-024.1");
+    assert_eq!(schema.version(), 13, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1047,6 +1047,14 @@ fn bmk_024_schema_v6() {
         let f = schema.field(70 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 12, 0), "BMK-024.8");
     }
+    // .9 schema v13 appends pair_late_all (0 = off).
+    assert_eq!(n_fields_at(schema, 13), Some(74), "BMK-024.9");
+    let f = schema.field(73).unwrap();
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("pair_late_all", 13, 0),
+        "BMK-024.9"
+    );
 }
 
 #[test]
@@ -2230,5 +2238,28 @@ fn bmk_042_pairing_phases() {
         ),
         vec![(SLOTS[2], Px(450))],
         "BMK-042.3"
+    );
+}
+
+#[test]
+fn bmk_043_late_favoured_pairing() {
+    // Long 10 Down at 0.600; the score favours Up (Up bid 190 vs Down 10), dir_pair_free: Up pairs at
+    // the best bid 0.450 without the limit 0.390 (BMK-036). 399.5 s is 99.5 s into the window.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![("clip_shares", 5), ("inv_max_shares", 10), ("dir_pair_free", 1)];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, 10, 600);
+        let out = warm_sized(&mut h, 190, 10);
+        placed(&out)
+    };
+    let late = [("pair_late_ms", 60_000), ("pair_late_margin", 1_000_000_000)];
+    // .1 pair_late without pair_late_all: the favoured Up still pairs at 0.450.
+    assert_eq!(run(&late), vec![(SLOTS[2], Px(450))], "BMK-043.1");
+    // .2 pair_late_all: no late pairing at all.
+    assert_eq!(
+        run(&[late[0], late[1], ("pair_late_all", 1)]),
+        vec![],
+        "BMK-043.2"
     );
 }

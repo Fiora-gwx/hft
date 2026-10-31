@@ -632,7 +632,8 @@ impl Fast {
                 && (d.pair_prio_age_ms == 0 || age_ms < i64::from(d.pair_prio_age_ms));
             let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
-            let lim = (other_q > own_q && !(d.dir_pair_free && favoured) && !hedge).then(|| {
+            let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
+            let lim = (other_q > own_q && !free_fav && !hedge).then(|| {
                 let pm = if late_pair {
                     d.pair_late_margin.0
                 } else {

@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 12, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 13, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -174,6 +174,9 @@ hft_strategy_sdk::define_params! {
         pair_late_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 12, relax = None],
         /// pair margin from pair_late_ms on (fraction of one; 1 = no pairing bids)
         pair_late_margin: Rate [min = -100_000_000, max = 1_000_000_000, default = 0, since = 12, relax = None],
+        /// (schema v13) true: from pair_late_ms on the favoured token's pairing bid (dir_pair_free) also
+        /// uses pair_late_margin (no late pairing at any price)
+        pair_late_all: Bool [default = 0, since = 13, relax = None],
     }
 }
 
