@@ -22,6 +22,8 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: extra,
     }
@@ -171,6 +173,8 @@ fn pmc_005_tool_output_equals_library() {
         presign: false,
         daily_loss_abs: Some(20_000_000),
         daily_loss_max_resumes: Some(3),
+        account_cap: None,
+        group_cap: None,
         day_loss_carry: Some((20_755, -3_500_000)),
         ..live(d.path(), vec![])
     };

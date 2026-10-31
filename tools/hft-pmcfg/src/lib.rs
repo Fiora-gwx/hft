@@ -156,6 +156,10 @@ pub struct PmLive {
     pub daily_loss_abs: Option<i64>,
     /// `daily_loss_max_resumes` of `pm-live`; `None` = the hft-risk default (1).
     pub daily_loss_max_resumes: Option<u8>,
+    /// `max_account_notional` and `max_venue_notional` of `pm-live` (USDC raw 1e-6, > 0); `None` = 55 USDC.
+    pub account_cap: Option<i64>,
+    /// `max_group_notional` of every `pm-live` slot group (USDC raw 1e-6, > 0); `None` = 25 USDC.
+    pub group_cap: Option<i64>,
     /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
     pub presign: bool,
     /// Further Live accounts 2, 3, … (`--live-account`, `--account`), bound to the same
@@ -931,8 +935,8 @@ fn write_pm(
     // quotes, below the 82 deposited), one slot group 25, daily loss 15 unless chosen.
     let (acct_cap, group_cap, loss_cap) = match (live, maker) {
         (Some(l), _) => (
-            55_000_000,
-            25_000_000,
+            l.account_cap.unwrap_or(55_000_000),
+            l.group_cap.unwrap_or(25_000_000),
             l.daily_loss_abs.unwrap_or(PM_LIVE_DAILY_LOSS),
         ),
         (None, true) => (10_000_000_000, 1_000_000_000, 1_000_000_000),

@@ -53,12 +53,17 @@ fn pmc_001_valid_command_lines() {
     // .3 --live with every live option.
     let c = parse(&args(&format!(
         "--live 12345 k1 --no-presign --daily-loss 20.5 --daily-loss-resumes 3 \
-         --day-loss-carry 2026-10-29 -3.5 {POS}"
+         --day-loss-carry 2026-10-29 -3.5 --account-cap 110 --group-cap 40.5 {POS}"
     )))
     .unwrap();
     let Mode::Live(l) = c.mode else {
         panic!("PMC-001.3")
     };
+    assert_eq!(
+        (l.account_cap, l.group_cap),
+        (Some(110_000_000), Some(40_500_000)),
+        "PMC-001.3"
+    );
     assert_eq!(
         (l.uid.as_str(), l.keys_dir),
         ("12345", PathBuf::from("k1")),
