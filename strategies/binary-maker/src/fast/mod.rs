@@ -620,19 +620,21 @@ impl Fast {
             // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
             // floored to a whole cent.
             let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
-            let fast = fast_phase && (!d.fast_pair_only || other_q > own_q);
-            let requote = i64::from(if fast { d.fast_requote_ms } else { d.requote_ms }) * 1_000_000;
-            let nochase = if fast && d.fast_free {
-                0
-            } else {
-                i64::from(d.nochase_ms) * 1_000_000
-            };
             // Composite score (README "规则" 10): skip the token it is against; the one it favours
             // may hold up to dir_cap_shares net and, with dir_pair_free, pairs without the limit.
             let z = (comp.ok && comp.win == start && i / 2 == up / 2)
                 .then(|| comp.z.get(i % 2).copied())
                 .flatten();
             let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
+            // Fast settings: the early phase, and from fast_dir_from_ms on the favoured leg.
+            let fast = (fast_phase && (!d.fast_pair_only || other_q > own_q))
+                || (d.fast_dir_from_ms > 0 && age_ms >= i64::from(d.fast_dir_from_ms) && favoured);
+            let requote = i64::from(if fast { d.fast_requote_ms } else { d.requote_ms }) * 1_000_000;
+            let nochase = if fast && d.fast_free {
+                0
+            } else {
+                i64::from(d.nochase_ms) * 1_000_000
+            };
             // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z.
             let hedge = hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0);
             let pairing = pair_window
