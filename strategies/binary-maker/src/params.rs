@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 17, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 18, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -193,6 +193,9 @@ hft_strategy_sdk::define_params! {
         fast_dir_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 16, relax = None],
         /// (schema v17) a leg that is not short bids this many cents below the best bid; 0 = at it
         bid_offset_c: Count [min = 0, max = 20, default = 0, since = 17, relax = None],
+        /// (schema v18) a leg that is not short does not quote while its best-bid size over that
+        /// plus the other token's best-bid size (the mirrored ask) is below this (1e-9); 0 = off
+        open_min_imb: Rate [min = 0, max = 1_000_000_000, default = 0, since = 18, relax = None],
     }
 }
 

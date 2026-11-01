@@ -702,6 +702,18 @@ impl Fast {
                 });
             let against = d.open_skip_z.0 > 0 && z.is_some_and(|z| z < -d.open_skip_z.0);
             let no_open = opens && (quiet || thick || early || cheap || dear || against);
+            // Book imbalance (open_min_imb): a leg that is not short skips a thin own bid side.
+            let thin = d.open_min_imb.0 > 0 && own_q >= other_q && {
+                let own_bq = book.best(Side::Buy).map_or(0, |l| l.qty.0);
+                let oth_bq = self
+                    .quotes
+                    .get(i ^ 1)
+                    .and_then(|o| v.book(o.inst).best(Side::Buy))
+                    .map_or(0, |l| l.qty.0);
+                let sum = i128::from(own_bq) + i128::from(oth_bq);
+                sum > 0 && i128::from(own_bq) * i128::from(ONE) < i128::from(d.open_min_imb.0) * sum
+            };
+            let no_open = no_open || thin;
             let target = match (mine && live && !no_open, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a

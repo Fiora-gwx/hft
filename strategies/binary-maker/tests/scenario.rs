@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 17, "BMK-024.1");
+    assert_eq!(schema.version(), 18, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1086,6 +1086,14 @@ fn bmk_024_schema_v6() {
         (f.name, f.since, f.default),
         ("bid_offset_c", 17, 0),
         "BMK-024.13"
+    );
+    // .14 schema v18 appends open_min_imb (0 = off).
+    assert_eq!(n_fields_at(schema, 18), Some(81), "BMK-024.14");
+    let f = schema.field(80).unwrap();
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("open_min_imb", 18, 0),
+        "BMK-024.14"
     );
 }
 
