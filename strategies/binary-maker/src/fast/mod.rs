@@ -729,6 +729,13 @@ impl Fast {
                     } else {
                         b.saturating_sub(i64::from(d.bid_offset_c).saturating_mul(cent))
                     };
+                    // Front of the queue (bid_improve_c): a new level above the best bid, below the ask.
+                    let up_c = i64::from(d.bid_improve_c).saturating_mul(cent);
+                    let b = if up_c > 0 && (!d.bid_improve_short || other_q > own_q) && b.saturating_add(up_c) < a {
+                        b.saturating_add(up_c)
+                    } else {
+                        b
+                    };
                     let t = lim.map_or(b, |l| b.min(l));
                     let t = if hedge || pairing {
                         t
