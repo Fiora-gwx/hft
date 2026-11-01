@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 16, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 17, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -191,6 +191,8 @@ hft_strategy_sdk::define_params! {
         /// (schema v16) from this window age on the leg the composite score favours (comp_dir) uses
         /// the fast-phase settings (fast_requote_ms, fast_free); 0 = off
         fast_dir_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 16, relax = None],
+        /// (schema v17) a leg that is not short bids this many cents below the best bid; 0 = at it
+        bid_offset_c: Count [min = 0, max = 20, default = 0, since = 17, relax = None],
     }
 }
 

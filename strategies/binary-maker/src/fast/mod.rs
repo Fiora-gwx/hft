@@ -711,6 +711,12 @@ impl Fast {
                         && own_q.saturating_sub(other_q).saturating_add(clip) <= cap
                         && (!d.fv_limit || fv_cap.is_some() || hedge || pairing) =>
                 {
+                    // A leg that is not short may rest bid_offset_c cents below the best bid.
+                    let b = if other_q > own_q {
+                        b
+                    } else {
+                        b.saturating_sub(i64::from(d.bid_offset_c).saturating_mul(cent))
+                    };
                     let t = lim.map_or(b, |l| b.min(l));
                     let t = if hedge || pairing {
                         t
