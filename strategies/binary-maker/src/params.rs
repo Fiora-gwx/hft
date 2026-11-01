@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 20, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 21, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -209,6 +209,11 @@ hft_strategy_sdk::define_params! {
         fav_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
         /// favoured pairing (dir_pair_free) may lock pairs at a cost up to 1 + this (1e-9); 0 = no limit
         fav_pair_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
+        /// (schema v21) one direction per phase: the window splits at this age into [0, it) and
+        /// [it, end); in each phase the first token the composite score favours is the only one
+        /// favoured until the phase ends (one reversal per window at most); 0 = off; the window
+        /// length = one phase
+        dir_phase_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 21, relax = None],
     }
 }
 

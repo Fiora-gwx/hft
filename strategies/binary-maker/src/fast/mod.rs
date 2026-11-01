@@ -133,6 +133,8 @@ pub struct Fast {
     /// Directional lock of the current window (dir_lock): (window start, 0 none / 1 Up / 2 Down);
     /// not in the snapshot.
     pub lock: (i64, u8),
+    /// Phase lock (dir_phase_ms): (window start, phase, 0 none / 1 Up / 2 Down); not in the snapshot.
+    pub plock: (i64, u8, u8),
 }
 
 impl Fast {
@@ -151,6 +153,7 @@ impl Fast {
             },
             comp: CompCache::default(),
             lock: (i64::MIN, 0),
+            plock: (i64::MIN, 0, 0),
         };
         f.on_params(p, groups);
         f
@@ -597,6 +600,20 @@ impl Fast {
                 path * i128::from(ONE) / (2 * i128::from(unit.max(1))) < i128::from(d.mm_min_path.0)
             });
         let age_ms = i64::from(d.window_s) * 1_000 - left_ms;
+        // One direction per phase (dir_phase_ms): the first token favoured in the phase.
+        let phase = u8::from(d.dir_phase_ms > 0 && age_ms >= i64::from(d.dir_phase_ms));
+        if (self.plock.0, self.plock.1) != (start, phase) {
+            self.plock = (start, phase, 0);
+        }
+        if d.dir_phase_ms > 0 && self.plock.2 == 0 && d.comp_dir.0 > 0 && comp.ok && comp.win == start {
+            let (zu, zd) = (comp.z[0], comp.z[1]);
+            if zu > d.comp_dir.0 && zu >= zd {
+                self.plock.2 = 1;
+            } else if zd > d.comp_dir.0 {
+                self.plock.2 = 2;
+            }
+        }
+        let plock = if d.dir_phase_ms > 0 { self.plock.2 } else { 0 };
         // Early fast phase (fast_until_ms): shorter quote change interval, optionally no no-chase
         // cooldown and no streak pause; with fast_pair_only only for a short leg (below).
         let fast_phase = d.fast_until_ms > 0 && age_ms < i64::from(d.fast_until_ms);
@@ -648,7 +665,8 @@ impl Fast {
                 .flatten();
             let favoured = d.comp_dir.0 > 0
                 && z.is_some_and(|z| z > d.comp_dir.0)
-                && (lock == 0 || usize::from(lock) == i % 2 + 1);
+                && (lock == 0 || usize::from(lock) == i % 2 + 1)
+                && (plock == 0 || usize::from(plock) == i % 2 + 1);
             // Fast settings: the early phase, and from fast_dir_from_ms on the favoured leg.
             let fast = (fast_phase && (!d.fast_pair_only || other_q > own_q))
                 || (d.fast_dir_from_ms > 0 && age_ms >= i64::from(d.fast_dir_from_ms) && favoured);
