@@ -130,6 +130,9 @@ pub struct Fast {
     /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
     pub fv: FvAnchor,
     pub comp: CompCache,
+    /// Directional lock of the current window (dir_lock): (window start, 0 none / 1 Up / 2 Down);
+    /// not in the snapshot.
+    pub lock: (i64, u8),
 }
 
 impl Fast {
@@ -147,6 +150,7 @@ impl Fast {
                 ..FvAnchor::default()
             },
             comp: CompCache::default(),
+            lock: (i64::MIN, 0),
         };
         f.on_params(p, groups);
         f
@@ -521,6 +525,23 @@ impl Fast {
         let up = usize::try_from(cur * 2).unwrap_or(usize::MAX);
         let (qu, cu) = pos(self.quotes.get(up));
         let (qd, cd) = pos(self.quotes.get(up.wrapping_add(1)));
+        // Directional lock (dir_lock): the first token whose net exceeds inv_max_shares.
+        if self.lock.0 != start {
+            self.lock = (start, 0);
+        }
+        if d.dir_lock
+            && self.lock.1 == 0
+            && let Some(q) = self.quotes.get(up)
+        {
+            let uq = 10i64.saturating_pow(u32::from(v.inst(q.inst).qty_exp.unsigned_abs()));
+            let cap = i64::from(d.inv_max_shares).saturating_mul(uq);
+            if qu.saturating_sub(qd) > cap {
+                self.lock.1 = 1;
+            } else if qd.saturating_sub(qu) > cap {
+                self.lock.1 = 2;
+            }
+        }
+        let lock = if d.dir_lock { self.lock.1 } else { 0 };
         // Bought cost of the window (1e-6 units) against `max_window_cost`.
         let cost_full = d.max_window_cost.0 > 0
             && self.quotes.get(up).is_some_and(|q| {
@@ -625,7 +646,9 @@ impl Fast {
             let z = (comp.ok && comp.win == start && i / 2 == up / 2)
                 .then(|| comp.z.get(i % 2).copied())
                 .flatten();
-            let favoured = d.comp_dir.0 > 0 && z.is_some_and(|z| z > d.comp_dir.0);
+            let favoured = d.comp_dir.0 > 0
+                && z.is_some_and(|z| z > d.comp_dir.0)
+                && (lock == 0 || usize::from(lock) == i % 2 + 1);
             // Fast settings: the early phase, and from fast_dir_from_ms on the favoured leg.
             let fast = (fast_phase && (!d.fast_pair_only || other_q > own_q))
                 || (d.fast_dir_from_ms > 0 && age_ms >= i64::from(d.fast_dir_from_ms) && favoured);
@@ -643,8 +666,10 @@ impl Fast {
             let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
-            let lim = (other_q > own_q && !free_fav && !hedge).then(|| {
-                let pm = if late_pair {
+            let lim = (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0)).then(|| {
+                let pm = if free_fav {
+                    -d.fav_pair_cap.0
+                } else if late_pair {
                     d.pair_late_margin.0
                 } else {
                     d.pair_margin.0
@@ -714,6 +739,14 @@ impl Fast {
                 sum > 0 && i128::from(own_bq) * i128::from(ONE) < i128::from(d.open_min_imb.0) * sum
             };
             let no_open = no_open || thin;
+            // Favoured extension price cap (fav_max_px).
+            let fav_dear = favoured
+                && own_q >= other_q
+                && d.fav_max_px.0 > 0
+                && bid.is_some_and(|b| {
+                    i128::from(b) * i128::from(ONE) >= i128::from(d.fav_max_px.0) * i128::from(unit_px)
+                });
+            let no_open = no_open || fav_dear;
             let target = match (mine && live && !no_open, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a

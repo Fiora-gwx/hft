@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 19, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 20, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -201,6 +201,14 @@ hft_strategy_sdk::define_params! {
         bid_improve_c: Count [min = 0, max = 5, default = 0, since = 19, relax = None],
         /// true: bid_improve_c applies only to a leg that is short
         bid_improve_short: Bool [default = 0, since = 19, relax = None],
+        /// (schema v20) true: once one token's net exceeds inv_max_shares in a window (a directional
+        /// position), the other token is not favoured for the rest of that window
+        dir_lock: Bool [default = 0, since = 20, relax = None],
+        /// favoured leg that is not short does not quote while its best bid is at or above this
+        /// (fraction of one, 1e-9); 0 = off
+        fav_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
+        /// favoured pairing (dir_pair_free) may lock pairs at a cost up to 1 + this (1e-9); 0 = no limit
+        fav_pair_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
     }
 }
 
