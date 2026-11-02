@@ -856,6 +856,7 @@ impl Fast {
                 && z.is_some_and(|z| z > d.comp_dir.0)
                 && (lock == 0 || usize::from(lock) == i % 2 + 1)
                 && (plock == 0 || usize::from(plock) == i % 2 + 1)
+                && (d.dir_from_ms == 0 || age_ms >= i64::from(d.dir_from_ms))
                 && (d.comp_dir_max.0 == 0 || z.is_some_and(|z| z <= d.comp_dir_max.0))
                 && (d.dir_fresh_ms == 0
                     || fresh.get(i % 2).is_some_and(|&f| {
@@ -987,6 +988,12 @@ impl Fast {
                         b
                     };
                     let t = lim.map_or(b, |l| b.min(l));
+                    // Lazy pairing (pair_lazy_c): a short leg the score does not favour waits lower.
+                    let t = if other_q > own_q && d.pair_lazy_c > 0 && !z.is_some_and(|z| z >= d.pair_eager_z.0) {
+                        t.min(b.saturating_sub(i64::from(d.pair_lazy_c).saturating_mul(cent)))
+                    } else {
+                        t
+                    };
                     let t = if hedge || pairing {
                         t
                     } else {

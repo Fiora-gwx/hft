@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 26, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 27, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -281,6 +281,14 @@ hft_strategy_sdk::define_params! {
         /// (schema v26) no module bid in the last this-long of the window (resting ones are
         /// cancelled); 0 = to the end
         settle_stop_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 26, relax = None],
+        /// (schema v27, phased direction) a token can be favoured (directional holding, dir_cap_shares,
+        /// dir_pair_free) only from this window age on; before it the score only skips and times
+        /// pairing; 0 = from the start
+        dir_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 27, relax = None],
+        /// lazy pairing: a short leg whose score is below pair_eager_z bids pair_lazy_c cents below
+        /// the best bid (still under the pair-cost limit); at or above it, it bids at the best bid
+        pair_eager_z: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 27, relax = None],
+        pair_lazy_c: Count [min = 0, max = 20, default = 0, since = 27, relax = None],
     }
 }
 
