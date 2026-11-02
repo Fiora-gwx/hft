@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 25, "BMK-024.1");
+    assert_eq!(schema.version(), 26, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1164,6 +1164,11 @@ fn bmk_024_schema_v6() {
         let f = schema.field(n24 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 25, *default), "BMK-024.21");
     }
+    // .22 schema v26 appends settle_stop_ms (0 = to the end).
+    let n25 = n24 + v25.len() as u16;
+    assert_eq!(n_fields_at(schema, 26), Some(n25 + 1), "BMK-024.22");
+    let f = schema.field(n25).unwrap();
+    assert_eq!((f.name, f.since, f.default), ("settle_stop_ms", 26, 0), "BMK-024.22");
 }
 
 #[test]

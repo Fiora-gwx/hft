@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 25, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 26, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -278,6 +278,9 @@ hft_strategy_sdk::define_params! {
         settle_requote_ms: DurationMs [min = 0, max = 60_000, default = 200, since = 25, relax = None],
         /// true: bid one cent above the best bid when the spread is at least two cents
         settle_improve: Bool [default = 0, since = 25, relax = None],
+        /// (schema v26) no module bid in the last this-long of the window (resting ones are
+        /// cancelled); 0 = to the end
+        settle_stop_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 26, relax = None],
     }
 }
 

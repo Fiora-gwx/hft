@@ -1184,6 +1184,9 @@ impl Fast {
         let prob = self.settle_prob(now.utc_ns, start, w);
         self.settle.out = prob.map_or([NA; 3], |(p, mu, n)| [p, mu, n]);
         let requote = i64::from(d.settle_requote_ms) * 1_000_000;
+        // settle_stop_ms: the module stops this long before the window end.
+        let left_ms = (start + w) * 1_000 - now.utc_ns.div_euclid(1_000_000);
+        let stopped = d.settle_stop_ms > 0 && left_ms < i64::from(d.settle_stop_ms);
         for k in 0..2usize {
             let i = up.wrapping_add(k);
             let Some(q) = self.quotes.get(i).copied() else {
@@ -1213,6 +1216,7 @@ impl Fast {
             });
             let clip = i64::from(d.settle_clip_shares).saturating_mul(unit_qty);
             let want = fav
+                && !stopped
                 && p_leg.is_some_and(|p| p >= d.settle_p_min.0)
                 && target.is_some_and(|t| t >= px_of(d.settle_bid_lo.0) && t <= hi)
                 && self.settle.bought.saturating_add(clip) <= i64::from(d.settle_max_shares).saturating_mul(unit_qty)
@@ -1224,7 +1228,7 @@ impl Fast {
                     // A cleared level (best bid below ours) keeps the bid.
                     let undercut = !locked && bid.is_some_and(|b| b > q.px);
                     let cancel =
-                        !live || !fav || p_leg.is_none_or(|p| p < d.settle_cancel_p.0) || undercut || q.px > hi;
+                        !live || !fav || stopped || p_leg.is_none_or(|p| p < d.settle_cancel_p.0) || undercut || q.px > hi;
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
