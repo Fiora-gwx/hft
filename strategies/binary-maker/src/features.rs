@@ -144,6 +144,121 @@ pub struct PlanCfg {
     pub flow_min_shares: u32,
 }
 
+/// Research export of the composite score (after [`COLUMNS`]): window start of the cached score, z of
+/// Up and Down, the eight raw features of each (`NA` while no score is cached).
+pub const COMP_COLUMNS: &[ColumnDesc] = &[
+    ColumnDesc {
+        name: "comp_win",
+        unit: Unit::Count,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "comp_z_up",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "comp_z_dn",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_imb1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_imb5",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_mom30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_mom60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bret15",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bret60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_flow30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bdrop1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_imb1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_imb5",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_mom30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_mom60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bret15",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bret60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_flow30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bdrop1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+];
+
+/// The strategy's export ([`COLUMNS`] then [`COMP_COLUMNS`]).
+pub const STRATEGY_COLUMNS: [ColumnDesc; 26] = {
+    let mut out = [COLUMNS[0]; 26];
+    let mut i = 0;
+    while i < 7 {
+        out[i] = COLUMNS[i];
+        i += 1;
+    }
+    while i < 26 {
+        out[i] = COMP_COLUMNS[i - 7];
+        i += 1;
+    }
+    out
+};
+
 /// Exported columns of [`MakerFeatures::export`].
 pub const COLUMNS: &[ColumnDesc] = &[
     ColumnDesc {

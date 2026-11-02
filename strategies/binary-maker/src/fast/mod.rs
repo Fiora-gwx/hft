@@ -135,6 +135,9 @@ pub struct Fast {
     pub lock: (i64, u8),
     /// Phase lock (dir_phase_ms): (window start, phase, 0 none / 1 Up / 2 Down); not in the snapshot.
     pub plock: (i64, u8, u8),
+    /// The eight raw features of Up, Down of the cached score (`Rate`; `NA` = missing), for the
+    /// research export only.
+    pub comp_f: [[i64; features::N_FEAT]; 2],
 }
 
 impl Fast {
@@ -154,6 +157,7 @@ impl Fast {
             comp: CompCache::default(),
             lock: (i64::MIN, 0),
             plock: (i64::MIN, 0, 0),
+            comp_f: [[hft_strategy_sdk::features::NA; features::N_FEAT]; 2],
         };
         f.on_params(p, groups);
         f
@@ -246,7 +250,14 @@ impl Fast {
     }
 
     /// Composite score of token quote `x` against its complement `o` (README "规则" 10).
-    pub fn comp_score<V: Views>(&self, v: &V, x: usize, o: usize, start: i64, utc_ns: i64) -> Option<i64> {
+    pub fn comp_score<V: Views>(
+        &self,
+        v: &V,
+        x: usize,
+        o: usize,
+        start: i64,
+        utc_ns: i64,
+    ) -> Option<(i64, [i64; features::N_FEAT])> {
         let d = self.p.defaults();
         let (qx, qo) = (self.quotes.get(x)?, self.quotes.get(o)?);
         let hx = self.feat.hist.get(x)?;
@@ -274,7 +285,10 @@ impl Fast {
             unit_px,
             unit_qty,
         });
-        Some(features::score(&f, &self.comp_mu(), &self.comp_sd()))
+        Some((
+            features::score(&f, &self.comp_mu(), &self.comp_sd()),
+            f.map(|x| x.unwrap_or(hft_strategy_sdk::features::NA)),
+        ))
     }
 
     /// `comp_*_mu` in feature order.
@@ -328,13 +342,14 @@ impl Fast {
             self.comp_score(v, up, dn, start, utc_ns),
             self.comp_score(v, dn, up, start, utc_ns),
         ) {
-            (Some(zu), Some(zd)) => {
+            (Some((zu, fu)), Some((zd, fd))) => {
                 self.comp = CompCache {
                     ok: true,
                     win: start,
                     utc_ns,
                     z: [zu, zd],
                 };
+                self.comp_f = [fu, fd];
             }
             _ => self.comp.ok = false,
         }
