@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 24, "BMK-024.1");
+    assert_eq!(schema.version(), 25, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1142,6 +1142,27 @@ fn bmk_024_schema_v6() {
     for (k, name) in v24.iter().enumerate() {
         let f = schema.field(90 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 24, 0), "BMK-024.20");
+    }
+    // .21 schema v25 appends the rule 12 fields (settle_ms 0 = off).
+    let v25 = [
+        ("settle_ms", 0),
+        ("settle_p_min", 950_000_000),
+        ("settle_bid_lo", 900_000_000),
+        ("settle_bid_hi", 970_000_000),
+        ("settle_clip_shares", 20),
+        ("settle_max_shares", 60),
+        ("settle_vol_mult", 1_300_000_000),
+        ("settle_cancel_p", 900_000_000),
+        ("settle_min_lock_s", 5),
+        ("settle_mu_min", 50_000),
+        ("settle_requote_ms", 200),
+        ("settle_improve", 0),
+    ];
+    let n24 = 90 + v24.len() as u16;
+    assert_eq!(n_fields_at(schema, 25), Some(n24 + v25.len() as u16), "BMK-024.21");
+    for (k, (name, default)) in v25.iter().enumerate() {
+        let f = schema.field(n24 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 25, *default), "BMK-024.21");
     }
 }
 
@@ -2037,12 +2058,12 @@ fn bmk_035_feature_export_row() {
     // .3 the Strategy hooks (research export) are the same columns and values.
     // (the strategy appends the composite-score research columns, NA without a cached score)
     let feats = <binary_maker::BinaryMaker as hft_strategy_sdk::Strategy>::FEATURES;
-    assert_eq!((&feats[..7], feats.len()), (COLUMNS, 30), "BMK-035.3");
+    assert_eq!((&feats[..7], feats.len()), (COLUMNS, 33), "BMK-035.3");
     let mut via = [7i64; 9];
     let mut row = FeatureRow::new(&mut via);
     hft_strategy_sdk::Strategy::export_features(h.strategy(), &mut row);
     let n = row.len();
-    assert_eq!((&via[..7], n), (&buf[..7], 30), "BMK-035.3");
+    assert_eq!((&via[..7], n), (&buf[..7], 33), "BMK-035.3");
     let mut short = [0i64; 3];
     let mut row = FeatureRow::new(&mut short);
     f.export(&mut row);
@@ -2349,4 +2370,146 @@ fn bmk_043_late_favoured_pairing() {
         vec![],
         "BMK-043.2"
     );
+}
+
+/// Reference mid (raw 0.01) of second `s` in the rule 12 fixture: alternating 100 000.00 /
+/// 100 010.00 (σ ≈ 1 bp) before 540 s, 100 100.00 from 540 s (the last minute of window 300).
+fn settle_mid(s: i64) -> i64 {
+    if s >= 540 {
+        10_010_000
+    } else if s % 2 == 0 {
+        10_000_000
+    } else {
+        10_001_000
+    }
+}
+
+/// Reference quote `mid` at second `s` + 0.1 s.
+fn settle_tick(h: &mut StrategyHarness<BinaryMaker>, s: i64, mid: i64) -> hft_testkit::sdk_mock::CtxCapture {
+    ref_at(h, s * 1_000_000_000 + 100_000_000, mid)
+}
+
+/// Places of one capture: (second, inst, px, tag).
+type SettlePlaces = Vec<(i64, InstId, i64, u32)>;
+
+/// Rule 12 harness (main rules off by `sigma_min`): settle_ms 60 s and `extra`; Up book of pair 1
+/// `ub` / `ua`, Down the complement; reference ticks from 100 s to `to_s` (exclusive). Returns the
+/// harness and every place.
+fn settle_h(extra: &[(&str, i64)], ub: i64, ua: i64, to_s: i64) -> (StrategyHarness<BinaryMaker>, SettlePlaces) {
+    let mut f = vec![("settle_ms", 60_000), ("sigma_min", 1_000_000_000)];
+    f.extend_from_slice(extra);
+    let mut h = harness(&params_with(&f));
+    slot_book(h.views_mut(), SLOTS[2], ub, ua);
+    slot_book(h.views_mut(), SLOTS[3], 1_000 - ua, 1_000 - ub);
+    let mut got = Vec::new();
+    for s in 100..to_s {
+        let out = settle_tick(&mut h, s, settle_mid(s));
+        for it in out.places() {
+            got.push((s, it.inst, it.px.0, it.tag));
+        }
+    }
+    (h, got)
+}
+
+/// Φ(z) by Abramowitz–Stegun 7.1.26 (error below 1.5e-7).
+fn phi_f64(z: f64) -> f64 {
+    let x = z.abs() / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let poly = t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    let erf = 1.0 - poly * (-x * x).exp();
+    if z >= 0.0 { 0.5 * (1.0 + erf) } else { 0.5 * (1.0 - erf) }
+}
+
+#[test]
+fn bmk_044_settlement_window_liquidity() {
+    use binary_maker::fast::{QState, settle_tag_of};
+    use hft_feature::{FeatureRow, NA};
+    let tag = settle_tag_of(2);
+    // .1 p_up against the float formula of oct_lock.p_up_bn (same σ) at 555.1 s: n_lock 15, n_fut
+    // 45, K = mean(R[240..300)), locked = mean(R[540..555)), R_now = R(555).
+    let (h, _) = settle_h(&[("settle_p_min", 1_000_000_000)], 950, 960, 556);
+    let f = &h.strategy().fast;
+    let [p, mu, n] = f.settle.out;
+    let r = |s: i64| 2.0 * settle_mid(s) as f64;
+    let k = (240..300).map(r).sum::<f64>() / 60.0;
+    let lock = (540..555).map(r).sum::<f64>() / 15.0;
+    let mu_f = (15.0 * lock + 45.0 * r(555)) / 60.0 / k - 1.0;
+    let var = (1..=45i64)
+        .flat_map(|i| (1..=45i64).map(move |j| i.min(j) as f64))
+        .sum::<f64>()
+        / (45.0 * 45.0)
+        * (45.0f64 / 60.0).powi(2);
+    let sig = f.feat.vol.sigma(60).unwrap() as f64 / 1e9;
+    let p_f = phi_f64(mu_f / (sig * 1.3 * var.sqrt()));
+    assert_eq!(n, 15, "BMK-044.1");
+    assert!((mu as f64 / 1e9 - mu_f).abs() < 2e-9, "BMK-044.1 mu {mu} {mu_f}");
+    // The Φ table interpolates linearly in steps of 1/64 (error below 1e-5).
+    assert!((p as f64 / 1e9 - p_f).abs() < 1e-5, "BMK-044.1 p {p} {p_f}");
+    assert!(p_f > 0.95, "BMK-044.1 {p_f}");
+    // The export carries the same values after the existing columns.
+    let mut buf = [0i64; 33];
+    let mut row = FeatureRow::new(&mut buf);
+    hft_strategy_sdk::Strategy::export_features(h.strategy(), &mut row);
+    assert_eq!(&buf[30..], &[p, mu, n], "BMK-044.1 export");
+    // Before the last minute nothing is computed.
+    let (h, _) = settle_h(&[], 950, 960, 530);
+    assert_eq!(h.strategy().fast.settle.out, [NA; 3], "BMK-044.1 NA");
+    // .2 in band (bid 0.950): the first bid at 545 s (5 s locked), Up at the best bid, 20 shares,
+    // the rule 12 tag; nothing before the last minute or before settle_min_lock_s.
+    let (_, got) = settle_h(&[], 950, 960, 546);
+    assert_eq!(got, vec![(545, SLOTS[2], 950, tag)], "BMK-044.2");
+    // Out of band (0.980 above settle_bid_hi, 0.850 below settle_bid_lo): no bid.
+    assert_eq!(settle_h(&[], 980, 990, 560).1, vec![], "BMK-044.2 high");
+    assert_eq!(settle_h(&[], 850, 860, 560).1, vec![], "BMK-044.2 low");
+    // settle_improve with a 3 c spread: one cent above the best bid.
+    let (_, got) = settle_h(&[("settle_improve", 1)], 940, 970, 546);
+    assert_eq!(got, vec![(545, SLOTS[2], 950, tag)], "BMK-044.2 improve");
+    // settle_ms 0: off.
+    assert_eq!(settle_h(&[("settle_ms", 0)], 950, 960, 560).1, vec![], "BMK-044.2 off");
+    // .3 live bid (OMS slot 21); the reference falls back to 100 000.00 at 550 s: p_Up < 0.90 →
+    // cancel.
+    let live = |h: &mut StrategyHarness<BinaryMaker>| {
+        let q = &mut h.strategy_mut().fast.quotes[2];
+        q.state = QState::Live;
+        q.r = Some(order_ref(21));
+    };
+    let (mut h, _) = settle_h(&[], 950, 960, 546);
+    live(&mut h);
+    let out = settle_tick(&mut h, 546, settle_mid(546));
+    assert!(out.items.is_empty(), "BMK-044.3 stays {:?}", out.items);
+    let out = settle_tick(&mut h, 550, 10_000_000);
+    assert!(h.strategy().fast.settle.out[0] < 900_000_000, "BMK-044.3");
+    assert_eq!(cancels(&out), vec![21], "BMK-044.3");
+    // .4 undercut (best bid 0.955 above ours): cancel; after the cancel, a new bid at 0.955 only
+    // settle_requote_ms after the cancel. A cleared level (bid 0.940) keeps the bid.
+    let (mut h, _) = settle_h(&[], 950, 960, 546);
+    live(&mut h);
+    slot_book(h.views_mut(), SLOTS[2], 940, 960);
+    h.views_mut().at_engine_ns(546_200_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert!(out.items.is_empty(), "BMK-044.4 cleared {:?}", out.items);
+    slot_book(h.views_mut(), SLOTS[2], 955, 960);
+    h.views_mut().at_engine_ns(546_300_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![21], "BMK-044.4");
+    let out = update_at(&mut h, 546_310_000_000, 2, 21, OrderUpdateKind::Cancelled);
+    assert!(out.places().next().is_none(), "BMK-044.4 requote_ms");
+    let out = ref_at(&mut h, 546_450_000_000, settle_mid(546));
+    assert!(out.places().next().is_none(), "BMK-044.4 requote_ms");
+    let out = ref_at(&mut h, 546_550_000_000, settle_mid(546));
+    let got: Vec<(InstId, Px, u32)> = out.places().map(|it| (it.inst, it.px, it.tag)).collect();
+    assert_eq!(got, vec![(SLOTS[2], Px(955), tag)], "BMK-044.4");
+    // .5 settle_max_shares: 20 shares filled; with the cap 20 no further bid, with 60 one more.
+    for (max, want) in [(20, 0usize), (60, 1)] {
+        let (mut h, _) = settle_h(&[("settle_max_shares", max)], 950, 960, 546);
+        live(&mut h);
+        update_at(&mut h, 546_200_000_000, 2, 21, filled(20_000_000, 20_000_000, true));
+        assert_eq!(h.strategy().fast.settle.bought, 20_000_000, "BMK-044.5");
+        let out = settle_tick(&mut h, 547, settle_mid(547));
+        assert_eq!(out.places().count(), want, "BMK-044.5 max {max}");
+    }
+    // .6 the main rules quoting (default sigma_min, stop_before_ms 30 s; bids outside [p_min, p_max]
+    // so they have no target): the module waits for the last 30 s.
+    let (_, got) = settle_h(&[("sigma_min", 50_000), ("stop_before_ms", 30_000)], 950, 960, 571);
+    assert_eq!(got, vec![(570, SLOTS[2], 950, tag)], "BMK-044.6");
 }

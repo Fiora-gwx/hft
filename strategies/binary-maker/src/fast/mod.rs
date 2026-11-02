@@ -25,6 +25,18 @@ pub fn tag_of(gix: u16) -> u32 {
     u32::from(gix) + 1
 }
 
+/// Tag bit of a rule-12 (settlement-window) bid.
+pub const SETTLE_TAG: u32 = 0x0001_0000;
+
+/// Order tag of a rule-12 bid of slot group `gix` (`SETTLE_TAG | (gix + 1)`).
+pub fn settle_tag_of(gix: u16) -> u32 {
+    SETTLE_TAG | tag_of(gix)
+}
+
+/// Seconds of the settlement average (rule 12): the last `SETTLE_TWAP_S` of the window, against
+/// the strike averaged over the `SETTLE_TWAP_S` before the window start.
+pub const SETTLE_TWAP_S: i64 = 60;
+
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
 /// ignores them) and the BBO of the reference leg (the last group).
 pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
@@ -117,6 +129,39 @@ impl Quote {
     }
 }
 
+/// Rule 12 state of the current window (not in the snapshot: after a restart the strike is
+/// missing until a window whose previous minute was recorded).
+#[derive(Clone, Copy, Debug)]
+pub struct SettleState {
+    /// Window start (UTC seconds) the state belongs to.
+    pub win: i64,
+    /// The strike was looked up (once per window) and had enough seconds.
+    pub k_done: bool,
+    pub k_ok: bool,
+    /// Sum and count of the reference 2 × mid seconds of the strike.
+    pub k_sum: i128,
+    pub k_n: i64,
+    /// Shares (raw quantity) the module's bids bought in the window.
+    pub bought: i64,
+    /// Up probability (1e-9), μ (1e-9) and locked seconds of the last decision (research export;
+    /// `NA` when not computed).
+    pub out: [i64; 3],
+}
+
+impl Default for SettleState {
+    fn default() -> SettleState {
+        SettleState {
+            win: i64::MIN,
+            k_done: false,
+            k_ok: false,
+            k_sum: 0,
+            k_n: 0,
+            bought: 0,
+            out: [hft_strategy_sdk::features::NA; 3],
+        }
+    }
+}
+
 /// Per slot leg level / fill state of the v24 rules (not in the snapshot).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Micro {
@@ -166,6 +211,10 @@ pub struct Fast {
     pub fresh: (i64, [i64; 2]),
     /// v24 level / fill state per slot leg (quote order); not in the snapshot.
     pub mic: Vec<Micro>,
+    /// Rule 12 state of the current window; not in the snapshot.
+    pub settle: SettleState,
+    /// Per slot leg (quote order): its current order was placed by rule 12; not in the snapshot.
+    pub skind: Vec<bool>,
 }
 
 impl Fast {
@@ -189,6 +238,8 @@ impl Fast {
             comp_book: [hft_strategy_sdk::features::NA; 4],
             fresh: (i64::MIN, [i64::MIN; 2]),
             mic: Vec::new(),
+            settle: SettleState::default(),
+            skind: Vec::new(),
         };
         f.on_params(p, groups);
         f
@@ -201,6 +252,8 @@ impl Fast {
         self.scratch.clear();
         self.scratch.extend_from_slice(&self.quotes);
         self.quotes.clear();
+        let old_kind = std::mem::take(&mut self.skind);
+        let mut kind = Vec::with_capacity(usize::from(groups.len()));
         let n = groups.len();
         for (gix, g) in groups.iter() {
             let Some(l) = g.legs.first() else { continue };
@@ -225,14 +278,12 @@ impl Fast {
                 fill_ens: [i64::MIN / 2; 8],
                 n_fill: 0,
             };
-            let kept = self
-                .scratch
-                .iter()
-                .find(|q| q.id == g.id && q.inst == l.inst)
-                .copied()
-                .unwrap_or(fresh);
+            let at = self.scratch.iter().position(|q| q.id == g.id && q.inst == l.inst);
+            let kept = at.and_then(|k| self.scratch.get(k)).copied().unwrap_or(fresh);
             self.quotes.push(kept);
+            kind.push(at.and_then(|k| old_kind.get(k)).copied().unwrap_or(false));
         }
+        self.skind = kind;
         // The volatility ring follows `vol_window_s`; score histories follow the slot insts.
         self.feat.on_params(
             p.defaults().vol_window_s as usize,
@@ -260,6 +311,7 @@ impl Fast {
             comp: self.comp_on(),
             lag: self.lag_on(),
             flow_min_shares: self.p.defaults().comp_flow_min_shares,
+            settle: self.p.defaults().settle_ms > 0,
         }
     }
 
@@ -410,6 +462,9 @@ impl Fast {
                     {
                         q.fill_ens[(q.n_fill % 8) as usize] = now;
                         q.n_fill = q.n_fill.wrapping_add(1);
+                        if k.and_then(|k| self.skind.get(k)) == Some(&true) && q.win == self.settle.win {
+                            self.settle.bought = self.settle.bought.saturating_add(d.0);
+                        }
                         if let Some(m) = k.and_then(|k| self.mic.get_mut(k)) {
                             m.fill_px = q.px;
                             m.fill_ens = now;
@@ -575,6 +630,14 @@ impl Fast {
             && d.late_hedge_ms > 0
             && left_ms <= i64::from(d.stop_before_ms)
             && left_ms > i64::from(d.late_hedge_ms);
+        // Settlement-window liquidity (rule 12): the last settle_ms while the main rules (quoting,
+        // the stop-loss minute, pairing priority) have no target; the module owns its legs' quotes.
+        let settling = ok
+            && d.settle_ms > 0
+            && left_ms <= i64::from(d.settle_ms)
+            && !quoting
+            && !hedging
+            && !pair_window;
         // Shares and average cost of the current window's Up and Down legs.
         let pos = |q: Option<&Quote>| {
             q.and_then(|q| {
@@ -719,6 +782,10 @@ impl Fast {
                     m.state = QState::None;
                     m.r = None;
                 }
+            }
+            // Rule 12 decides its own bids while it runs.
+            if settling && q.state != QState::None && self.skind.get(i) == Some(&true) {
+                continue;
             }
             let hot = *v.inst(q.inst);
             let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
@@ -1028,6 +1095,182 @@ impl Fast {
                         m.b0 = self.feat.top.mid_x2;
                         m.d0 = inv_cdf(up_mid);
                         m.den = den;
+                        if let Some(x) = self.skind.get_mut(i) {
+                            *x = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.settle_run(v, ctx, settling, start, up, w);
+    }
+
+    /// Locked settlement-average probability of Up (rule 12) in window `start` of `w` seconds at
+    /// UTC `utc_ns`: (p_up, μ, locked seconds), `Rate` but the seconds; `None` without a strike
+    /// (at least 80 % of the 60 s before the start recorded), with more than 20 % of the locked
+    /// seconds missing, outside the last 60 s, without a reference quote or without σ.
+    pub fn settle_prob(&mut self, utc_ns: i64, start: i64, w: i64) -> Option<(i64, i64, i64)> {
+        let d = *self.p.defaults();
+        if self.settle.win != start {
+            self.settle = SettleState {
+                win: start,
+                ..SettleState::default()
+            };
+        }
+        if !self.settle.k_done {
+            let (sum, n) = self.feat.ref_sec.sum(start - SETTLE_TWAP_S, start);
+            self.settle.k_done = true;
+            self.settle.k_ok = sum > 0 && n * 5 >= SETTLE_TWAP_S * 4;
+            self.settle.k_sum = sum;
+            self.settle.k_n = n;
+        }
+        if !self.settle.k_ok {
+            return None;
+        }
+        let sec = utc_ns.div_euclid(1_000_000_000);
+        let lock_from = start + w - SETTLE_TWAP_S;
+        let n_lock = sec - lock_from;
+        let n_fut = start + w - sec;
+        let r_now = self.feat.top.mid_x2;
+        if n_lock < 0 || !(1..=SETTLE_TWAP_S).contains(&n_fut) || r_now <= 0 {
+            return None;
+        }
+        let (ls, ln) = self.feat.ref_sec.sum(lock_from, sec);
+        if ln * 5 < n_lock * 4 {
+            return None;
+        }
+        let sigma = self.feat.vol.sigma(d.vol_min_samples as usize).filter(|s| *s > 0)?;
+        let one = i128::from(ONE);
+        // A × 60 × 1e9 = (n_lock × mean(locked) + n_fut × R_now) × 1e9; μ = A / K − 1.
+        let locked = if ln > 0 {
+            i128::from(n_lock) * ls * one / i128::from(ln)
+        } else {
+            0
+        };
+        let a60 = locked + i128::from(n_fut) * i128::from(r_now) * one;
+        let k60 = i128::from(SETTLE_TWAP_S) * self.settle.k_sum;
+        let mu = (a60 * i128::from(self.settle.k_n) / k60 - one) as i64;
+        // V(n) = n(n + 1)(2n + 1) / (6 × 60²): variance of the mean of the last n of n unit steps,
+        // times (n / 60)²; sd = σ × settle_vol_mult × √V.
+        let nf = u128::try_from(n_fut).unwrap_or(0);
+        let tw = u128::try_from(SETTLE_TWAP_S).unwrap_or(1);
+        let root = isqrt(nf * (nf + 1) * (2 * nf + 1) * 1_000_000_000_000_000_000 / (6 * tw * tw)) as i128;
+        let sd = i128::from(sigma) * i128::from(d.settle_vol_mult.0) / one * root / one;
+        let p = if sd > 0 {
+            cdf((i128::from(mu) * one / sd).clamp(-6 * one, 6 * one) as i64)
+        } else if mu >= 0 {
+            ONE
+        } else {
+            0
+        };
+        Some((p, mu, n_lock))
+    }
+
+    /// Rule 12 (settlement-window liquidity) on the current pair (`up` = Up quote index) while
+    /// `settling`: one post-only bid of `settle_clip_shares` at the best bid (one cent above with
+    /// `settle_improve` when the spread is at least two cents) of the favoured token while its
+    /// probability is at least `settle_p_min` and the price is inside the band; cancelled on a
+    /// probability below `settle_cancel_p`, a flip of the favourite or an undercut; held to
+    /// settlement.
+    fn settle_run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>, settling: bool, start: i64, up: usize, w: i64) {
+        use hft_strategy_sdk::features::NA;
+        if !settling {
+            self.settle.out = [NA; 3];
+            return;
+        }
+        let d = *self.p.defaults();
+        let now = v.now();
+        let prob = self.settle_prob(now.utc_ns, start, w);
+        self.settle.out = prob.map_or([NA; 3], |(p, mu, n)| [p, mu, n]);
+        let requote = i64::from(d.settle_requote_ms) * 1_000_000;
+        for k in 0..2usize {
+            let i = up.wrapping_add(k);
+            let Some(q) = self.quotes.get(i).copied() else {
+                continue;
+            };
+            let owned = self.skind.get(i) == Some(&true);
+            let hot = *v.inst(q.inst);
+            let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+            let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+            let cent = (unit_px / 100).max(1);
+            let px_of = |r: i64| (i128::from(r) * i128::from(unit_px) / i128::from(ONE)) as i64;
+            let book = v.book(q.inst);
+            let live = book.status() == BookStatus::Live;
+            let bid = book.best(Side::Buy).map(|l| l.px.0);
+            let ask = book.best(Side::Sell).map(|l| l.px.0);
+            let locked = matches!((bid, ask), (Some(b), Some(a)) if b >= a);
+            // This leg's probability, and whether it is the favourite (Up when p_up ≥ 0.5).
+            let p_leg = prob.map(|(p, _, _)| if k == 0 { p } else { ONE - p });
+            let fav = prob.is_some_and(|(p, _, _)| (p >= ONE / 2) == (k == 0));
+            let hi = px_of(d.settle_bid_hi.0);
+            let target = bid.filter(|_| live && !locked).map(|b| {
+                if d.settle_improve && ask.is_some_and(|a| a.saturating_sub(b) >= 2 * cent) {
+                    b.saturating_add(cent)
+                } else {
+                    b
+                }
+            });
+            let clip = i64::from(d.settle_clip_shares).saturating_mul(unit_qty);
+            let want = fav
+                && p_leg.is_some_and(|p| p >= d.settle_p_min.0)
+                && target.is_some_and(|t| t >= px_of(d.settle_bid_lo.0) && t <= hi)
+                && self.settle.bought.saturating_add(clip) <= i64::from(d.settle_max_shares).saturating_mul(unit_qty)
+                && prob.is_some_and(|(_, mu, n)| {
+                    n >= i64::from(d.settle_min_lock_s) && mu.unsigned_abs() >= d.settle_mu_min.0.unsigned_abs()
+                });
+            match q.state {
+                QState::Live if owned => {
+                    // A cleared level (best bid below ours) keeps the bid.
+                    let undercut = !locked && bid.is_some_and(|b| b > q.px);
+                    let cancel =
+                        !live || !fav || p_leg.is_none_or(|p| p < d.settle_cancel_p.0) || undercut || q.px > hi;
+                    if cancel
+                        && let Some(r) = q.r
+                        && ctx.cancel(r).is_ok()
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Cancelling;
+                        m.last_ens = now.engine_ns;
+                    }
+                }
+                QState::None => {
+                    let Some(px) = target.filter(|_| want) else {
+                        continue;
+                    };
+                    if now.engine_ns.saturating_sub(q.last_ens) < requote {
+                        continue;
+                    }
+                    let it = OrderIntent {
+                        venue: q.venue,
+                        account: self.account,
+                        side: Side::Buy,
+                        tif: Tif::PostOnly,
+                        class: IntentClass::Open,
+                        flags: 0,
+                        _pad: [0; 2],
+                        inst: q.inst,
+                        group: q.id,
+                        px: Px(px),
+                        qty: Qty(clip),
+                        link: LegLinkOpt::NONE,
+                        tag: settle_tag_of(i as u16),
+                        max_rest_ms: d.max_rest_ms,
+                    };
+                    if let Ok(h) = ctx.place(it)
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Placing;
+                        m.handle = h.0;
+                        m.px = px;
+                        m.last_ens = now.engine_ns;
+                        m.win = start;
+                        m.b0 = self.feat.top.mid_x2;
+                        m.d0 = 0;
+                        m.den = 0;
+                        if let Some(x) = self.skind.get_mut(i) {
+                            *x = true;
+                        }
                     }
                 }
                 _ => {}

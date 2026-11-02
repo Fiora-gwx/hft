@@ -582,3 +582,20 @@ spec: README.md
 | BMK-038.2 | `late_hedge_ms` 10 000、`late_hedge_z` 0.5 | `U1` 在买一 0.450 挂单(无对价上限 0.390) |
 | BMK-038.3 | `late_hedge_z` 9 | 不挂单 |
 | BMK-038.4 | `late_hedge_ms` 250 000 | 不挂单(已进入最后 `late_hedge_ms`) |
+
+### BMK-044 结算窗口流动性(规则 12)
+
+- 规则:[规则](README.md#规则) 12;参数 `settle_*`(schema v25)
+- 级别:table
+- 里程碑:M3
+- 前置:`settle_ms` 60 000、`sigma_min` 1.0(1e9,主规则关闭),其余 `settle_*` 默认;参考每秒一条(第 100 s 起),中间价在 100 000.00 / 100 010.00 间交替,第 540 s 起 100 100.00;`U1` 买一 / 卖一按行,`D1` 为其互补
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_044_settlement_window_liquidity`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-044.1 | 555.1 s(n_lock 15、n_fut 45) | n_lock 15;μ 与浮点公式(`oct_lock.p_up_bn`,同一 σ)差 < 2e-9;p_up 差 < 1e-5;导出第 30–32 列为 (p_up, μ, n_lock);最后一分钟之前为 `NA` |
+| BMK-044.2 | 买一 0.950 / 卖一 0.960;0.980;0.850;`settle_improve` 1 且 0.940 / 0.970;`settle_ms` 0 | 545 s 在 `U1` 0.950 挂 20 份、tag `settle_tag_of(2)`,之前不挂;价带外不挂;抬价挂 0.950;关闭时不挂 |
+| BMK-044.3 | 挂单存活,550 s 参考回到 100 000.00 | p_up < 0.90,撤单 |
+| BMK-044.4 | 买一降到 0.940;再升到 0.955 | 降:留守;升:撤单,`Cancelled` 后 `settle_requote_ms` 内不挂,之后挂 0.955 |
+| BMK-044.5 | 成交 20 份,`settle_max_shares` 20 / 60 | 20:不再挂;60:再挂一张 |
+| BMK-044.6 | `sigma_min` 默认、`stop_before_ms` 30 000(主规则在挂单段但无目标) | 模块到 570 s(最后 30 s)才挂 |

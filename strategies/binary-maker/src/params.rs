@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 24, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 25, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -252,6 +252,32 @@ hft_strategy_sdk::define_params! {
         /// short and pauses it for oth_up_cool_ms
         oth_up_cancel: Bool [default = 0, since = 24, relax = None],
         oth_up_cool_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// (schema v25, rule 12 settlement-window liquidity) in the last settle_ms of the window, while
+        /// the main rules have no target, rest a post-only bid at the best bid of the token the locked
+        /// settlement-average probability favours (held to settlement); 0 = off
+        settle_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 25, relax = None],
+        /// lowest locked-average probability of the favoured token to bid (1e-9)
+        settle_p_min: Rate [min = 0, max = 1_000_000_000, default = 950_000_000, since = 25, relax = None],
+        /// price band of the module's bid, lowest and highest (fraction of one, 1e-9)
+        settle_bid_lo: Rate [min = 0, max = 1_000_000_000, default = 900_000_000, since = 25, relax = None],
+        settle_bid_hi: Rate [min = 0, max = 1_000_000_000, default = 970_000_000, since = 25, relax = None],
+        /// shares per module bid
+        settle_clip_shares: Count [min = 1, max = 100_000, default = 20, since = 25, relax = None],
+        /// shares the module buys per window at most (a new bid needs bought + clip within it)
+        settle_max_shares: Count [min = 0, max = 1_000_000, default = 60, since = 25, relax = None],
+        /// multiplier of the reference realized sigma in the probability (1e-9; 1.3 = 1_300_000_000)
+        settle_vol_mult: Rate [min = 1, max = 10_000_000_000, default = 1_300_000_000, since = 25, relax = None],
+        /// a module bid is cancelled when its token's probability falls below this (1e-9)
+        settle_cancel_p: Rate [min = 0, max = 1_000_000_000, default = 900_000_000, since = 25, relax = None],
+        /// no new module bid before this many seconds of the settlement average are locked
+        settle_min_lock_s: Count [min = 0, max = 60, default = 5, since = 25, relax = None],
+        /// no new module bid while the expected relative move of the average against the strike is
+        /// below this in absolute value (1e-9; 0.5 bp = 50_000)
+        settle_mu_min: Rate [min = 0, max = 1_000_000_000, default = 50_000, since = 25, relax = None],
+        /// minimum engine time between two changes of a module bid of one leg
+        settle_requote_ms: DurationMs [min = 0, max = 60_000, default = 200, since = 25, relax = None],
+        /// true: bid one cent above the best bid when the spread is at least two cents
+        settle_improve: Bool [default = 0, since = 25, relax = None],
     }
 }
 

@@ -102,5 +102,8 @@ impl Strategy for BinaryMaker {
                 row.put(hft_strategy_sdk::features::NA);
             }
         }
+        for x in self.fast.settle.out {
+            row.put(x);
+        }
     }
 }
