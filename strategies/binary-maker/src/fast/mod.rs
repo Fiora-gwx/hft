@@ -117,6 +117,26 @@ impl Quote {
     }
 }
 
+/// Per slot leg level / fill state of the v24 rules (not in the snapshot).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Micro {
+    /// Best-bid price last seen and the engine time it was first seen.
+    pub lvl_px: i64,
+    pub lvl_since: i64,
+    /// Last fill: price, engine time; the swept check runs until `chk_until`.
+    pub fill_px: i64,
+    pub fill_ens: i64,
+    pub chk_until: i64,
+    /// Swept pause end (engine ns).
+    pub swept_until: i64,
+    /// Engine time our resting bid first fell below the best bid (0 = not below).
+    pub below_since: i64,
+    /// The complement's best bid / ask last seen, and this leg's pause after it moved up.
+    pub oth_bb: i64,
+    pub oth_ba: i64,
+    pub oth_cool: i64,
+}
+
 #[derive(Debug)]
 pub struct Fast {
     pub account: AccountId,
@@ -144,6 +164,8 @@ pub struct Fast {
     /// Signal freshness (dir_fresh_ms): (window start, UTC ns each token's score last rose above
     /// comp_dir, `i64::MIN` while it is not above); not in the snapshot.
     pub fresh: (i64, [i64; 2]),
+    /// v24 level / fill state per slot leg (quote order); not in the snapshot.
+    pub mic: Vec<Micro>,
 }
 
 impl Fast {
@@ -166,6 +188,7 @@ impl Fast {
             comp_f: [[hft_strategy_sdk::features::NA; features::N_FEAT]; 2],
             comp_book: [hft_strategy_sdk::features::NA; 4],
             fresh: (i64::MIN, [i64::MIN; 2]),
+            mic: Vec::new(),
         };
         f.on_params(p, groups);
         f
@@ -216,6 +239,7 @@ impl Fast {
             self.quotes.iter().map(|q| q.inst),
         );
         self.comp.ok = false;
+        self.mic = vec![Micro::default(); self.quotes.len()];
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -379,12 +403,18 @@ impl Fast {
             EventRef::Book { .. } => self.run(v, ctx),
             EventRef::Order { u, .. } => {
                 let now = v.now().engine_ns;
-                if let Some(q) = self.quotes.iter_mut().find(|q| q.r == Some(u.r)) {
+                let k = self.quotes.iter().position(|q| q.r == Some(u.r));
+                if let Some(q) = k.and_then(|k| self.quotes.get_mut(k)) {
                     if let OrderUpdateKind::Filled { d, .. } = u.kind
                         && d.0 > 0
                     {
                         q.fill_ens[(q.n_fill % 8) as usize] = now;
                         q.n_fill = q.n_fill.wrapping_add(1);
+                        if let Some(m) = k.and_then(|k| self.mic.get_mut(k)) {
+                            m.fill_px = q.px;
+                            m.fill_ens = now;
+                            m.chk_until = now.saturating_add(1_000_000_000);
+                        }
                     }
                     match u.kind {
                         OrderUpdateKind::Filled { done: true, .. }
@@ -703,6 +733,53 @@ impl Fast {
             // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
             // floored to a whole cent.
             let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
+            // v24 level / fill state: best-bid level age and size less our own, swept fills, the
+            // complement moving up.
+            let ens = now.engine_ns;
+            let own_at_best = (matches!(q.state, QState::Live | QState::Cancelling) && bid == Some(q.px))
+                .then(|| q.r.and_then(|r| v.order(r)))
+                .flatten()
+                .map_or(0, |o| o.qty.0.saturating_sub(o.filled.0).max(0));
+            let bq_ex = book
+                .best(Side::Buy)
+                .map_or(0, |l| l.qty.0.saturating_sub(own_at_best).max(0));
+            let mut m = self.mic.get(i).copied().unwrap_or_default();
+            let b_now = bid.unwrap_or(0);
+            if b_now != m.lvl_px {
+                m.lvl_px = b_now;
+                m.lvl_since = ens;
+            }
+            let lvl_age_ms = ens.saturating_sub(m.lvl_since) / 1_000_000;
+            if m.chk_until != 0 {
+                if ens <= m.chk_until && bid.is_none_or(|b| b < m.fill_px) {
+                    m.swept_until = m.fill_ens.saturating_add(i64::from(d.swept_pause_ms) * 1_000_000);
+                    m.chk_until = 0;
+                } else if ens > m.chk_until {
+                    m.chk_until = 0;
+                }
+            }
+            let swept = d.swept_pause_ms > 0 && ens < m.swept_until;
+            if q.state == QState::Live && bid.is_some_and(|b| b > q.px) {
+                if m.below_since == 0 {
+                    m.below_since = ens;
+                }
+            } else {
+                m.below_since = 0;
+            }
+            let (obb, oba) = self.quotes.get(i ^ 1).map_or((0, 0), |o| {
+                let b = v.book(o.inst);
+                (b.best(Side::Buy).map_or(0, |l| l.px.0), b.best(Side::Sell).map_or(0, |l| l.px.0))
+            });
+            let oth_up = d.oth_up_cancel && ((m.oth_bb > 0 && obb > m.oth_bb) || (m.oth_ba > 0 && oba > m.oth_ba));
+            m.oth_bb = obb;
+            m.oth_ba = oba;
+            if oth_up && own_q >= other_q {
+                m.oth_cool = ens.saturating_add(i64::from(d.oth_up_cool_ms) * 1_000_000);
+            }
+            let oth_cool = d.oth_up_cancel && own_q >= other_q && ens < m.oth_cool;
+            if let Some(x) = self.mic.get_mut(i) {
+                *x = m;
+            }
             // Composite score (README "规则" 10): skip the token it is against; the one it favours
             // may hold up to dir_cap_shares net and, with dir_pair_free, pairs without the limit.
             let z = (comp.ok && comp.win == start && i / 2 == up / 2)
@@ -734,8 +811,10 @@ impl Fast {
             let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
-            let lim = (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0)).then(|| {
-                let pm = if free_fav {
+            let lim = (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0 || swept)).then(|| {
+                let pm = if swept {
+                    -d.swept_pair_cap.0
+                } else if free_fav {
                     -d.fav_pair_cap.0
                 } else if late_pair {
                     d.pair_late_margin.0
@@ -776,7 +855,7 @@ impl Fast {
             };
             let clip = i64::from(clip_shares).saturating_mul(unit_qty);
             // Opening rules (schema v9): a leg that is not short may not raise the net when one holds.
-            let opens = own_q >= other_q && !favoured;
+            let opens = own_q >= other_q && (!favoured || d.fav_obey_open);
             let thick = d.mm_max_bq > 0
                 && book
                     .best(Side::Buy)
@@ -815,6 +894,9 @@ impl Fast {
                     i128::from(b) * i128::from(ONE) >= i128::from(d.fav_max_px.0) * i128::from(unit_px)
                 });
             let no_open = no_open || fav_dear;
+            // Swept pause (swept_pause_ms) and the complement-up pause (oth_up_cancel): no opening
+            // or adding.
+            let no_open = no_open || (swept && own_q >= other_q) || oth_cool;
             let target = match (mine && live && !no_open, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
@@ -862,8 +944,22 @@ impl Fast {
                     // Undercut (a better bid than ours where we would quote higher, the book not
                     // locked or crossed) or above the pair-cost limit; a cleared level (best bid
                     // below ours) keeps the quote.
-                    let undercut =
+                    let mut undercut =
                         !locked && bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
+                    // Patient queueing (hold_thin_undercut): only a mature new best bid moves us.
+                    if undercut && d.hold_thin_undercut {
+                        undercut = (d.undercut_min_bq > 0
+                            && bq_ex >= i64::from(d.undercut_min_bq).saturating_mul(unit_qty))
+                            || (d.undercut_min_level_ms > 0 && lvl_age_ms >= i64::from(d.undercut_min_level_ms))
+                            || (d.hold_below_max_ms > 0
+                                && m.below_since > 0
+                                && ens.saturating_sub(m.below_since) >= i64::from(d.hold_below_max_ms) * 1_000_000);
+                    }
+                    // Leave a thinning level (leave_bq).
+                    cancel |= d.leave_bq > 0
+                        && own_q >= other_q
+                        && bid == Some(q.px)
+                        && bq_ex < i64::from(d.leave_bq).saturating_mul(unit_qty);
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
@@ -885,6 +981,17 @@ impl Fast {
                 }
                 QState::None => {
                     let Some(px) = target else { continue };
+                    // Mature-level admission (open_min_* / pair_min_*).
+                    let (mbq, mage) = if other_q > own_q {
+                        (d.pair_min_bq, d.pair_min_level_ms)
+                    } else {
+                        (d.open_min_bq, d.open_min_level_ms)
+                    };
+                    if (mbq > 0 && bq_ex < i64::from(mbq).saturating_mul(unit_qty))
+                        || (mage > 0 && lvl_age_ms < i64::from(mage))
+                    {
+                        continue;
+                    }
                     if since < requote
                         || (!pairing && now.engine_ns < q.cool_until)
                         || cost_full

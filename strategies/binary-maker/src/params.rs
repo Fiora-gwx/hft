@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 23, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 24, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -224,6 +224,34 @@ hft_strategy_sdk::define_params! {
         /// a token is favoured only within this long after its score last rose above comp_dir in
         /// the window (a fresh signal); 0 = no limit
         dir_fresh_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 23, relax = None],
+        /// (schema v24, mature-level admission) a leg that is not short places a new bid only while
+        /// the best bid's displayed size less our own is at least this many shares; 0 = off
+        open_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        /// and only while the best-bid price has been unchanged for this long; 0 = off
+        open_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// the same two thresholds for a short (pairing) leg; 0 = off
+        pair_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        pair_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// a resting bid of a leg that is not short at the best bid is cancelled when the level's
+        /// displayed size less our own falls below this many shares; 0 = off
+        leave_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        /// true: the favoured leg obeys the opening rules too (no exemption)
+        fav_obey_open: Bool [default = 0, since = 24, relax = None],
+        /// true: an undercut cancels only when the new best bid is mature (size at least
+        /// undercut_min_bq, or unchanged for undercut_min_level_ms, or we have been below it for
+        /// hold_below_max_ms)
+        hold_thin_undercut: Bool [default = 0, since = 24, relax = None],
+        undercut_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        undercut_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        hold_below_max_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// a fill whose price level disappears within 1 s (swept) pauses the leg's opening and adding
+        /// for this long; pairing during the pause is limited to cost 1 + swept_pair_cap; 0 = off
+        swept_pause_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        swept_pair_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 24, relax = None],
+        /// true: the complement's best bid or ask moving up cancels this leg's bid when it is not
+        /// short and pauses it for oth_up_cool_ms
+        oth_up_cancel: Bool [default = 0, since = 24, relax = None],
+        oth_up_cool_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
     }
 }
 

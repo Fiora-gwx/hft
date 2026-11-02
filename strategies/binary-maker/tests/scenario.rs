@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 23, "BMK-024.1");
+    assert_eq!(schema.version(), 24, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1120,6 +1120,28 @@ fn bmk_024_schema_v6() {
     for (k, name) in ["comp_dir_max", "dir_fresh_ms"].iter().enumerate() {
         let f = schema.field(88 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 23, 0), "BMK-024.19");
+    }
+    // .20 schema v24 appends the mature-level / swept / complement-up fields (0 = off).
+    let v24 = [
+        "open_min_bq",
+        "open_min_level_ms",
+        "pair_min_bq",
+        "pair_min_level_ms",
+        "leave_bq",
+        "fav_obey_open",
+        "hold_thin_undercut",
+        "undercut_min_bq",
+        "undercut_min_level_ms",
+        "hold_below_max_ms",
+        "swept_pause_ms",
+        "swept_pair_cap",
+        "oth_up_cancel",
+        "oth_up_cool_ms",
+    ];
+    assert_eq!(n_fields_at(schema, 24), Some(90 + v24.len() as u16), "BMK-024.20");
+    for (k, name) in v24.iter().enumerate() {
+        let f = schema.field(90 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 24, 0), "BMK-024.20");
     }
 }
 
