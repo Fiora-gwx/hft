@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 21, "BMK-024.1");
+    assert_eq!(schema.version(), 22, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1111,6 +1111,10 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 21), Some(87), "BMK-024.17");
     let f = schema.field(86).unwrap();
     assert_eq!((f.name, f.since, f.default), ("dir_phase_ms", 21, 0), "BMK-024.17");
+    // .18 schema v22 appends comp_always (0 = off).
+    assert_eq!(n_fields_at(schema, 22), Some(88), "BMK-024.18");
+    let f = schema.field(87).unwrap();
+    assert_eq!((f.name, f.since, f.default), ("comp_always", 22, 0), "BMK-024.18");
 }
 
 #[test]
@@ -2005,12 +2009,12 @@ fn bmk_035_feature_export_row() {
     // .3 the Strategy hooks (research export) are the same columns and values.
     // (the strategy appends the composite-score research columns, NA without a cached score)
     let feats = <binary_maker::BinaryMaker as hft_strategy_sdk::Strategy>::FEATURES;
-    assert_eq!((&feats[..7], feats.len()), (COLUMNS, 26), "BMK-035.3");
+    assert_eq!((&feats[..7], feats.len()), (COLUMNS, 30), "BMK-035.3");
     let mut via = [7i64; 9];
     let mut row = FeatureRow::new(&mut via);
     hft_strategy_sdk::Strategy::export_features(h.strategy(), &mut row);
     let n = row.len();
-    assert_eq!((&via[..7], n), (&buf[..7], 26), "BMK-035.3");
+    assert_eq!((&via[..7], n), (&buf[..7], 30), "BMK-035.3");
     let mut short = [0i64; 3];
     let mut row = FeatureRow::new(&mut short);
     f.export(&mut row);

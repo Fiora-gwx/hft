@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 21, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 22, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -214,6 +214,10 @@ hft_strategy_sdk::define_params! {
         /// favoured until the phase ends (one reversal per window at most); 0 = off; the window
         /// length = one phase
         dir_phase_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 21, relax = None],
+        /// (schema v22, research export) true: the composite score is kept current while the
+        /// strategy does not quote too (every window, every second of it); decisions read it only
+        /// while quoting
+        comp_always: Bool [default = 0, since = 22, relax = None],
     }
 }
 

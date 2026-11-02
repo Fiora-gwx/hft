@@ -145,7 +145,8 @@ pub struct PlanCfg {
 }
 
 /// Research export of the composite score (after [`COLUMNS`]): window start of the cached score, z of
-/// Up and Down, the eight raw features of each (`NA` while no score is cached).
+/// Up and Down, the eight raw features of each, best bid / ask of both tokens (`NA` while no score is
+/// cached).
 pub const COMP_COLUMNS: &[ColumnDesc] = &[
     ColumnDesc {
         name: "comp_win",
@@ -242,17 +243,37 @@ pub const COMP_COLUMNS: &[ColumnDesc] = &[
         unit: Unit::Ratio,
         exp: -9,
     },
+    ColumnDesc {
+        name: "book_up_bb",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_up_ba",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_dn_bb",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_dn_ba",
+        unit: Unit::Px,
+        exp: 0,
+    },
 ];
 
 /// The strategy's export ([`COLUMNS`] then [`COMP_COLUMNS`]).
-pub const STRATEGY_COLUMNS: [ColumnDesc; 26] = {
-    let mut out = [COLUMNS[0]; 26];
+pub const STRATEGY_COLUMNS: [ColumnDesc; 30] = {
+    let mut out = [COLUMNS[0]; 30];
     let mut i = 0;
     while i < 7 {
         out[i] = COLUMNS[i];
         i += 1;
     }
-    while i < 26 {
+    while i < 30 {
         out[i] = COMP_COLUMNS[i - 7];
         i += 1;
     }

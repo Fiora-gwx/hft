@@ -94,7 +94,7 @@ impl Strategy for BinaryMaker {
             row.put(c.win);
             row.put(c.z[0]);
             row.put(c.z[1]);
-            for x in self.fast.comp_f.iter().flatten() {
+            for x in self.fast.comp_f.iter().flatten().chain(self.fast.comp_book.iter()) {
                 row.put(*x);
             }
         } else {

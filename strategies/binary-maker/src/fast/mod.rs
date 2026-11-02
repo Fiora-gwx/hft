@@ -138,6 +138,9 @@ pub struct Fast {
     /// The eight raw features of Up, Down of the cached score (`Rate`; `NA` = missing), for the
     /// research export only.
     pub comp_f: [[i64; features::N_FEAT]; 2],
+    /// Best bid / ask of Up and Down when the score was cached (raw px; `NA` = side missing), for the
+    /// research export only.
+    pub comp_book: [i64; 4],
 }
 
 impl Fast {
@@ -158,6 +161,7 @@ impl Fast {
             lock: (i64::MIN, 0),
             plock: (i64::MIN, 0, 0),
             comp_f: [[hft_strategy_sdk::features::NA; features::N_FEAT]; 2],
+            comp_book: [hft_strategy_sdk::features::NA; 4],
         };
         f.on_params(p, groups);
         f
@@ -350,6 +354,13 @@ impl Fast {
                     z: [zu, zd],
                 };
                 self.comp_f = [fu, fd];
+                let side = |i: usize, s: Side| {
+                    self.quotes
+                        .get(i)
+                        .and_then(|q| v.book(q.inst).best(s).map(|l| l.px.0))
+                        .unwrap_or(hft_strategy_sdk::features::NA)
+                };
+                self.comp_book = [side(up, Side::Buy), side(up, Side::Sell), side(dn, Side::Buy), side(dn, Side::Sell)];
             }
             _ => self.comp.ok = false,
         }
@@ -596,7 +607,7 @@ impl Fast {
         } else {
             None
         };
-        self.comp_update(v, quoting || hedging || pair_window, start, up, now.utc_ns);
+        self.comp_update(v, quoting || hedging || pair_window || d.comp_always, start, up, now.utc_ns);
         let comp = self.comp;
         // Up-mid path over the last 60 s (fraction of one), for mm_min_path: sum of |Δ 2 × mid| / 2 of
         // consecutive recorded seconds.
