@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 22, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 23, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -218,6 +218,12 @@ hft_strategy_sdk::define_params! {
         /// strategy does not quote too (every window, every second of it); decisions read it only
         /// while quoting
         comp_always: Bool [default = 0, since = 22, relax = None],
+        /// (schema v23) a token is favoured only while its score is at most this (1e-9 standard
+        /// deviations; over-extended signals are weaker); 0 = no upper bound
+        comp_dir_max: Rate [min = 0, max = 10_000_000_000, default = 0, since = 23, relax = None],
+        /// a token is favoured only within this long after its score last rose above comp_dir in
+        /// the window (a fresh signal); 0 = no limit
+        dir_fresh_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 23, relax = None],
     }
 }
 

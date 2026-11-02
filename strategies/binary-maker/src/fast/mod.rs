@@ -141,6 +141,9 @@ pub struct Fast {
     /// Best bid / ask of Up and Down when the score was cached (raw px; `NA` = side missing), for the
     /// research export only.
     pub comp_book: [i64; 4],
+    /// Signal freshness (dir_fresh_ms): (window start, UTC ns each token's score last rose above
+    /// comp_dir, `i64::MIN` while it is not above); not in the snapshot.
+    pub fresh: (i64, [i64; 2]),
 }
 
 impl Fast {
@@ -162,6 +165,7 @@ impl Fast {
             plock: (i64::MIN, 0, 0),
             comp_f: [[hft_strategy_sdk::features::NA; features::N_FEAT]; 2],
             comp_book: [hft_strategy_sdk::features::NA; 4],
+            fresh: (i64::MIN, [i64::MIN; 2]),
         };
         f.on_params(p, groups);
         f
@@ -640,6 +644,21 @@ impl Fast {
             }
         }
         let plock = if d.dir_phase_ms > 0 { self.plock.2 } else { 0 };
+        // Signal freshness (dir_fresh_ms): when each token's score last rose above comp_dir.
+        if self.fresh.0 != start {
+            self.fresh = (start, [i64::MIN; 2]);
+        }
+        if d.dir_fresh_ms > 0 && comp.ok && comp.win == start {
+            for k in 0..2 {
+                let above = comp.z[k] > d.comp_dir.0;
+                if !above {
+                    self.fresh.1[k] = i64::MIN;
+                } else if self.fresh.1[k] == i64::MIN {
+                    self.fresh.1[k] = now.utc_ns;
+                }
+            }
+        }
+        let fresh = self.fresh.1;
         // Early fast phase (fast_until_ms): shorter quote change interval, optionally no no-chase
         // cooldown and no streak pause; with fast_pair_only only for a short leg (below).
         let fast_phase = d.fast_until_ms > 0 && age_ms < i64::from(d.fast_until_ms);
@@ -692,7 +711,12 @@ impl Fast {
             let favoured = d.comp_dir.0 > 0
                 && z.is_some_and(|z| z > d.comp_dir.0)
                 && (lock == 0 || usize::from(lock) == i % 2 + 1)
-                && (plock == 0 || usize::from(plock) == i % 2 + 1);
+                && (plock == 0 || usize::from(plock) == i % 2 + 1)
+                && (d.comp_dir_max.0 == 0 || z.is_some_and(|z| z <= d.comp_dir_max.0))
+                && (d.dir_fresh_ms == 0
+                    || fresh.get(i % 2).is_some_and(|&f| {
+                        f != i64::MIN && now.utc_ns.saturating_sub(f) <= i64::from(d.dir_fresh_ms) * 1_000_000
+                    }));
             // Fast settings: the early phase, and from fast_dir_from_ms on the favoured leg.
             let fast = (fast_phase && (!d.fast_pair_only || other_q > own_q))
                 || (d.fast_dir_from_ms > 0 && age_ms >= i64::from(d.fast_dir_from_ms) && favoured);

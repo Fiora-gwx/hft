@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 22, "BMK-024.1");
+    assert_eq!(schema.version(), 23, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1115,6 +1115,12 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 22), Some(88), "BMK-024.18");
     let f = schema.field(87).unwrap();
     assert_eq!((f.name, f.since, f.default), ("comp_always", 22, 0), "BMK-024.18");
+    // .19 schema v23 appends comp_dir_max, dir_fresh_ms (0 = off).
+    assert_eq!(n_fields_at(schema, 23), Some(90), "BMK-024.19");
+    for (k, name) in ["comp_dir_max", "dir_fresh_ms"].iter().enumerate() {
+        let f = schema.field(88 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 23, 0), "BMK-024.19");
+    }
 }
 
 #[test]
