@@ -180,6 +180,9 @@ pub struct Micro {
     pub oth_bb: i64,
     pub oth_ba: i64,
     pub oth_cool: i64,
+    /// v28: public best-bid fall pause end; engine time of the last trade on this leg's inst.
+    pub drop_until: i64,
+    pub trade_ens: i64,
 }
 
 #[derive(Debug)]
@@ -453,6 +456,16 @@ impl Fast {
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Book { .. } => self.run(v, ctx),
+            EventRef::Trade { inst, .. } => {
+                let now = v.now().engine_ns;
+                for (k, q) in self.quotes.iter().enumerate() {
+                    if q.inst == inst
+                        && let Some(m) = self.mic.get_mut(k)
+                    {
+                        m.trade_ens = now;
+                    }
+                }
+            }
             EventRef::Order { u, .. } => {
                 let now = v.now().engine_ns;
                 let k = self.quotes.iter().position(|q| q.r == Some(u.r));
@@ -812,6 +825,18 @@ impl Fast {
                 .map_or(0, |l| l.qty.0.saturating_sub(own_at_best).max(0));
             let mut m = self.mic.get(i).copied().unwrap_or_default();
             let b_now = bid.unwrap_or(0);
+            // Public sweep gate (mkt_drop_min_c): the best bid fell by at least mkt_drop_min_c cents.
+            if d.mkt_drop_min_c > 0 && m.lvl_px > 0 && b_now > 0 {
+                let c1 = (unit_px / 100).max(1);
+                let fell = b_now <= m.lvl_px.saturating_sub(i64::from(d.mkt_drop_min_c).saturating_mul(c1));
+                let traded = !d.mkt_drop_need_trade || {
+                    let t_oth = self.mic.get(i ^ 1).map_or(0, |o| o.trade_ens);
+                    m.trade_ens.max(t_oth) >= ens.saturating_sub(100_000_000)
+                };
+                if fell && traded {
+                    m.drop_until = ens.saturating_add(i64::from(d.mkt_drop_pause_ms) * 1_000_000);
+                }
+            }
             if b_now != m.lvl_px {
                 m.lvl_px = b_now;
                 m.lvl_since = ens;
@@ -844,6 +869,24 @@ impl Fast {
                 m.oth_cool = ens.saturating_add(i64::from(d.oth_up_cool_ms) * 1_000_000);
             }
             let oth_cool = d.oth_up_cancel && own_q >= other_q && ens < m.oth_cool;
+            let dropped = d.mkt_drop_min_c > 0 && own_q >= other_q && ens < m.drop_until;
+            // Short pairing window (pair_window_ms): pairing only soon after the long leg's last fill,
+            // or while the unpaired risk exceeds pair_risk_usd.
+            let no_pair = d.pair_window_ms > 0 && other_q > own_q && {
+                let long_fill = self.mic.get(i ^ 1).map_or(0, |o| o.fill_ens);
+                let in_window = long_fill > 0 && ens.saturating_sub(long_fill) <= i64::from(d.pair_window_ms) * 1_000_000;
+                let risky = d.pair_risk_usd.0 > 0 && {
+                    let e = i32::from(hot.qty_exp) + i32::from(hot.px_exp) + 6;
+                    let raw = i128::from(other_q.saturating_sub(own_q)) * i128::from(other_c);
+                    let usd = if e >= 0 {
+                        raw * 10i128.pow(e.unsigned_abs())
+                    } else {
+                        raw / 10i128.pow(e.unsigned_abs())
+                    };
+                    usd > i128::from(d.pair_risk_usd.0)
+                };
+                !in_window && !risky
+            };
             if let Some(x) = self.mic.get_mut(i) {
                 *x = m;
             }
@@ -964,8 +1007,10 @@ impl Fast {
             let no_open = no_open || fav_dear;
             // Swept pause (swept_pause_ms) and the complement-up pause (oth_up_cancel): no opening
             // or adding.
-            let no_open = no_open || (swept && own_q >= other_q) || oth_cool;
-            let target = match (mine && live && !no_open, bid, ask) {
+            let no_open = no_open || (swept && own_q >= other_q) || oth_cool || dropped;
+            // open_from_ms: no opening or adding before this window age.
+            let no_open = no_open || (d.open_from_ms > 0 && own_q >= other_q && age_ms < i64::from(d.open_from_ms));
+            let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
                         && (!skip || hedge)
@@ -1006,7 +1051,7 @@ impl Fast {
             let since = now.engine_ns.saturating_sub(q.last_ens);
             match q.state {
                 QState::Live => {
-                    let mut cancel = !(mine && live) || (skip && !hedge) || no_open;
+                    let mut cancel = !(mine && live) || (skip && !hedge) || no_open || no_pair;
                     let mut cooled = false;
                     if !cancel && d.fv_cancel.0 > 0 && !pairing {
                         let x = self.dfv(&q);

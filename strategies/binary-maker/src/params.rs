@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 27, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 28, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -289,6 +289,20 @@ hft_strategy_sdk::define_params! {
         /// the best bid (still under the pair-cost limit); at or above it, it bids at the best bid
         pair_eager_z: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 27, relax = None],
         pair_lazy_c: Count [min = 0, max = 20, default = 0, since = 27, relax = None],
+        /// (schema v28, first-leg rules) public sweep gate: a fall of a token's best bid by at least
+        /// this many cents cancels its non-short bid and pauses it for mkt_drop_pause_ms; 0 = off
+        mkt_drop_min_c: Count [min = 0, max = 20, default = 0, since = 28, relax = None],
+        mkt_drop_pause_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// true: the fall counts only with a trade on either token in the 100 ms before it
+        mkt_drop_need_trade: Bool [default = 0, since = 28, relax = None],
+        /// short pairing window: a short leg pairs only within this long after the long leg's last
+        /// fill (then the net is held), unless the unpaired risk exceeds pair_risk_usd; 0 = off
+        pair_window_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// unpaired risk (net shares x the long leg's average cost) above which pairing has no time
+        /// limit; 0 = never
+        pair_risk_usd: Notional [min = 0, max = 1_000_000_000_000, default = 0, since = 28, relax = None],
+        /// no opening or adding (a leg that is not short) before this window age; 0 = off
+        open_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
     }
 }
 

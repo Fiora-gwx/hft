@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 27, "BMK-024.1");
+    assert_eq!(schema.version(), 28, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1174,6 +1174,20 @@ fn bmk_024_schema_v6() {
     for (k, name) in ["dir_from_ms", "pair_eager_z", "pair_lazy_c"].iter().enumerate() {
         let f = schema.field(n25 + 1 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 27, 0), "BMK-024.23");
+    }
+    // .24 schema v28 appends the first-leg rules (0 = off).
+    let v28 = [
+        "mkt_drop_min_c",
+        "mkt_drop_pause_ms",
+        "mkt_drop_need_trade",
+        "pair_window_ms",
+        "pair_risk_usd",
+        "open_from_ms",
+    ];
+    assert_eq!(n_fields_at(schema, 28), Some(n25 + 4 + v28.len() as u16), "BMK-024.24");
+    for (k, name) in v28.iter().enumerate() {
+        let f = schema.field(n25 + 4 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 28, 0), "BMK-024.24");
     }
 }
 
