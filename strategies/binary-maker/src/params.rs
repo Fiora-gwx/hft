@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 30, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 31, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -322,6 +322,13 @@ hft_strategy_sdk::define_params! {
         /// reversal, pair later
         dip_falling: Bool [default = 0, since = 30, relax = None],
         dip_z_min: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 30, relax = None],
+        /// (schema v31) chop gate: dip bids only while the mean efficiency ratio of the Up mid
+        /// (|end - start| / path, 30..240 s of each window) over the last chop_k windows is at most
+        /// chop_er_max (a choppy, mean-reverting market); 0 = off
+        chop_k: Count [min = 0, max = 24, default = 0, since = 31, relax = None],
+        chop_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 31, relax = None],
+        /// a dip bid needs the leg's window holding plus one clip to stay within this many shares; 0 = no cap
+        dip_max_shares: Count [min = 0, max = 1_000_000, default = 0, since = 31, relax = None],
     }
 }
 

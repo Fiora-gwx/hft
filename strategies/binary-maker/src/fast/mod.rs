@@ -187,6 +187,36 @@ pub struct Micro {
     pub dip_until: i64,
 }
 
+/// Efficiency-ratio history of the Up mid for the chop gate (v31; not in the snapshot).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Chop {
+    pub win: i64,
+    pub last_sec: i64,
+    pub first: i64,
+    pub last: i64,
+    pub path: i64,
+    pub n: u32,
+    pub ring: [i64; 24],
+    pub len: u8,
+    pub pos: u8,
+}
+
+impl Chop {
+    /// Mean of the last `k` window efficiency ratios (1e-9), `None` with fewer than k / 2 of them.
+    pub fn mean(&self, k: usize) -> Option<i64> {
+        let n = usize::from(self.len).min(k);
+        if n == 0 || n * 2 < k {
+            return None;
+        }
+        let mut s = 0i128;
+        for j in 0..n {
+            let at = (usize::from(self.pos) + 24 - 1 - j) % 24;
+            s += i128::from(self.ring[at]);
+        }
+        Some((s / n as i128) as i64)
+    }
+}
+
 #[derive(Debug)]
 pub struct Fast {
     pub account: AccountId,
@@ -220,6 +250,8 @@ pub struct Fast {
     pub settle: SettleState,
     /// Per slot leg (quote order): its current order was placed by rule 12; not in the snapshot.
     pub skind: Vec<bool>,
+    /// v31 chop gate state; not in the snapshot.
+    pub chop: Chop,
 }
 
 impl Fast {
@@ -245,6 +277,7 @@ impl Fast {
             mic: Vec::new(),
             settle: SettleState::default(),
             skind: Vec::new(),
+            chop: Chop::default(),
         };
         f.on_params(p, groups);
         f
@@ -708,6 +741,38 @@ impl Fast {
                 _ => ONE / 2,
             }
         });
+        // Chop gate state (v31): the Up mid's efficiency ratio of each window, 30..240 s.
+        let age_c = i64::from(d.window_s) * 1_000 - left_ms;
+        if self.chop.win != start {
+            let c = self.chop;
+            if c.n >= 100 && c.path > 0 {
+                let er = (i128::from((c.last - c.first).abs()) * i128::from(ONE) / i128::from(c.path)) as i64;
+                let p = usize::from(c.pos);
+                self.chop.ring[p] = er;
+                self.chop.pos = ((p + 1) % 24) as u8;
+                self.chop.len = c.len.saturating_add(1).min(24);
+            }
+            self.chop.win = start;
+            self.chop.n = 0;
+            self.chop.path = 0;
+            self.chop.last_sec = 0;
+        }
+        let up_valid = self.quotes.get(up).is_some_and(|q| {
+            let b = v.book(q.inst);
+            matches!((b.best(Side::Buy), b.best(Side::Sell)), (Some(x), Some(y)) if x.px.0 < y.px.0)
+        });
+        let sec_c = now.utc_ns.div_euclid(1_000_000_000);
+        if up_valid && (30_000..=240_000).contains(&age_c) && sec_c != self.chop.last_sec {
+            if self.chop.n == 0 {
+                self.chop.first = up_mid;
+            } else {
+                self.chop.path = self.chop.path.saturating_add((up_mid - self.chop.last).abs());
+            }
+            self.chop.last = up_mid;
+            self.chop.n += 1;
+            self.chop.last_sec = sec_c;
+        }
+        let chop_ok = d.chop_k == 0 || self.chop.mean(d.chop_k as usize).is_some_and(|e| e <= d.chop_er_max.0);
         let den = self.feat.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
             let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
             let v_ms = (left_ms - TWAP_TAIL_MS).max(1);
@@ -884,7 +949,10 @@ impl Fast {
                 } else {
                     mom.is_some_and(|x| x >= d.dip_mom_min.0) && zk.is_some_and(|z| z <= d.dip_z_max.0)
                 };
-                if ens >= m.dip_until && trig {
+                let capped = d.dip_max_shares > 0
+                    && own_q.saturating_add(i64::from(d.clip_shares).saturating_mul(unit_qty))
+                        > i64::from(d.dip_max_shares).saturating_mul(unit_qty);
+                if ens >= m.dip_until && trig && chop_ok && !capped {
                     m.dip_until = ens.saturating_add(i64::from(d.dip_ttl_ms) * 1_000_000);
                 }
                 let sec = now.utc_ns.div_euclid(1_000_000_000);
