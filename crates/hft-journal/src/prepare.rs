@@ -103,6 +103,11 @@ impl SegmentPreparer {
                 if st == SegState::Preparing as u32 {
                     return PrepState::Ready;
                 }
+                // Read during `roll`: `Open` with the header not yet written (it gets its CRC last).
+                // Its hash would chain the next segment to the prepared header: wait a round.
+                if f.header_crc32c != f.compute_crc() {
+                    return PrepState::Ready;
+                }
                 latest = Some((*no, f));
                 break;
             }

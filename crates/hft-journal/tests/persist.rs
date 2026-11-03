@@ -206,3 +206,36 @@ fn jnl_050_round_order() {
         .collect();
     assert_eq!(ops, vec!["prepare", "copy", "sync", "retire"]);
 }
+
+#[test]
+fn jnl_132_header_read_before_roll_finishes() {
+    // The persist thread can look at a segment while `roll` activates it: state `Open` already,
+    // header still as prepared (first_seq 0, created_utc_ns 0, CRC unset). Simulated by storing
+    // `Open` into the prepared segment 2 by hand (offset 3 088 = state, JNL-001).
+    const OFF_STATE: usize = 3088;
+    let mut h = H::open0(linux_c0());
+    h.write_to_seq(50);
+    assert_ne!(h.prep.poll(), PrepState::Failed);
+    let p2 = h.seg_path(2);
+    assert_eq!(h.state(2), SegState::Preparing as u32);
+    testing::poke(&p2, OFF_STATE, &(SegState::Open as u32).to_le_bytes()).unwrap();
+    // .1 the persister leaves it for a later round; nothing goes under 19700101/.
+    h.persist_all();
+    assert!(!h.cold_jdir().join("19700101").exists(), "JNL-132.1");
+    // .2 the preparer does not chain a segment 3 to that header.
+    assert_eq!(h.prep.poll(), PrepState::Ready, "JNL-132.2");
+    assert!(!testing::exists(&h.seg_path(3)), "JNL-132.2");
+    // .3 the real roll: the cold copy and its seal carry the written header.
+    testing::poke(&p2, OFF_STATE, &(SegState::Preparing as u32).to_le_bytes()).unwrap();
+    h.roll(RollReason::Hourly);
+    h.write_to_seq(80);
+    h.roll(RollReason::Hourly);
+    h.persist_all();
+    let hd = h.hdr(2);
+    assert_eq!(hd.first_seq, 52, "JNL-132.3");
+    let stem = h.cold_stem(2);
+    let seal = std::fs::read(stem.with_extension("seal")).unwrap();
+    let r: SealRecord = zerocopy::FromBytes::read_from_bytes(&seal[..]).unwrap();
+    assert_eq!((r.segment_no, r.first_seq), (2, hd.first_seq), "JNL-132.3");
+    assert!(!h.cold_jdir().join("19700101").exists(), "JNL-132.3");
+}

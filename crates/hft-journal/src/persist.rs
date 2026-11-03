@@ -216,12 +216,24 @@ impl PJournal {
             if st == SegState::Preparing as u32 || h.segment_no != no {
                 continue;
             }
+            let Ok(o) = fs::hot_open(&p, true) else { continue };
+            // The header as of the state word, from the mapping: `roll` writes the `[W]` fields and
+            // then stores `Open` (Release). A file read of both can see `Open` with the header still
+            // as prepared (first_seq 0, created_utc_ns 0) — the cold copy then lands under
+            // `19700101/` and its seal says first_seq 0 (live 2026-11-02). Acquire the state first,
+            // then read the header; a header whose CRC does not check waits for the next round.
+            let st = o.map.load32(OFF_STATE);
+            let h = o.map.fixed();
+            if st == SegState::Preparing as u32 || h.segment_no != no || h.header_crc32c != h.compute_crc() {
+                fs::release(None, o.map);
+                continue;
+            }
             let stem = fs::cold_stem(&self.cold_jdir, h.created_utc_ns, h.segment_no, h.first_seq);
             if st == SegState::Sealed as u32 && fs::with_ext(&stem, "seal").exists() {
+                fs::release(None, o.map);
                 self.done.insert(no);
                 continue;
             }
-            let Ok(o) = fs::hot_open(&p, true) else { continue };
             self.segs.insert(
                 no,
                 PSeg {
