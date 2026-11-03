@@ -583,6 +583,38 @@ spec: README.md
 | BMK-038.3 | `late_hedge_z` 9 | 不挂单 |
 | BMK-038.4 | `late_hedge_ms` 250 000 | 不挂单(已进入最后 `late_hedge_ms`) |
 
+### BMK-045 止损配对(规则 13)
+
+- 规则:[规则](README.md#规则) 13;参数 `rescue_*`(schema v32)
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_params`、`clip_shares` 5、`inv_max_shares` 10、`sigma_min` 1.0(主规则关闭);持有 10 份 Down(0.600);两腿买一 0.450 / 卖一 0.470,`U1` 买一 190 份、`D1` 10 份(分数看好 Up);399.5 s(窗口 300,年龄 99.5 s)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_045_stop_loss_pairing`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-045.1 | `rescue_ms` 0 | 不挂单,记号未设 |
+| BMK-045.2 | `rescue_ms` 90 000、`rescue_z` 0.5、`rescue_px` 0.50 | `U1` 在买一 0.450 挂单(无对价上限 0.390),记号 = 300 |
+| BMK-045.3 | `rescue_px` 0.40;`rescue_ms` 120 000;`rescue_z` 9 | 都不挂单 |
+| BMK-045.4 | 加 `rescue_cap` 0.02 | `U1` 挂 0.420 |
+
+### BMK-046 规则 12 的 Chainlink 价源
+
+- 规则:[规则](README.md#规则) 12(Chainlink);参数 `settle_src`、`settle_lead_usd`、`settle_edge`(schema v32)
+- 级别:table
+- 里程碑:M3
+- 前置:同 BMK-044;Chainlink 样本(local_kind 1)在每秒参考报价之前注入
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_046_settlement_on_chainlink`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-046.1 | `settle_src` 1,Chainlink = 参考中间价 | (p_up, μ, n_lock) 与参考版相同;545 s 挂 0.950 |
+| BMK-046.2 | 无样本;样本只到 541 s;`settle_src` 0 无样本 | 前两者不挂;参考版照常挂 |
+| BMK-046.3 | Chainlink 第 540 s 起停在行权价 | 不挂 |
+| BMK-046.4 | `settle_lead_usd` 90 / 100(领先 95 USD),两种价源 | 90 挂,100 不挂 |
+| BMK-046.5 | `settle_edge` = p − 0.95 ∓ 0.001 | 前者挂,后者不挂 |
+| BMK-046.6 | 载荷:正常、更早样本、版本 2、16 字节、负价 | 计 2 个样本,最新 (100, 7);98 秒有值、101 秒无;103 s 为当前价,104 s 不是 |
+
 ### BMK-044 结算窗口流动性(规则 12)
 
 - 规则:[规则](README.md#规则) 12;参数 `settle_*`(schema v25)

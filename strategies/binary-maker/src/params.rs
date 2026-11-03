@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 31, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 32, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -329,6 +329,25 @@ hft_strategy_sdk::define_params! {
         chop_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 31, relax = None],
         /// a dip bid needs the leg's window holding plus one clip to stay within this many shares; 0 = no cap
         dip_max_shares: Count [min = 0, max = 1_000_000, default = 0, since = 31, relax = None],
+        /// (schema v32) stop-loss pairing: from this window age until stop_before_ms, a short leg whose
+        /// score is above rescue_z while the held leg's best bid is at most rescue_px pairs at the best
+        /// bid, without the pair-cost limit and the volatility gate; once it bid, the window opens
+        /// nothing more; 0 = off
+        rescue_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 32, relax = None],
+        rescue_z: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 32, relax = None],
+        rescue_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// a stop-loss pair may lock at a cost up to 1 + rescue_cap (fraction of one, 1e-9); 0 = no limit
+        rescue_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// (schema v32) rule 12 price source: 0 = the Binance reference; 1 = Chainlink BTC/USD pushed
+        /// by InjectWarmup (local_kind 1, README "Chainlink"): strike, locked seconds and the current
+        /// price from Chainlink, σ still from the reference; without a fresh Chainlink price no bids
+        settle_src: Count [min = 0, max = 1, default = 0, since = 32, relax = None],
+        /// rule 12 bids only while the projected settlement average leads the strike by at least this
+        /// many US dollars towards the token (Up above, Down below); a bid is cancelled below half; 0 = off
+        settle_lead_usd: Count [min = 0, max = 100_000, default = 0, since = 32, relax = None],
+        /// rule 12 bids at most at the token's probability less this (fraction of one, 1e-9) and
+        /// cancels a bid above the probability; 0 = off
+        settle_edge: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
     }
 }
 

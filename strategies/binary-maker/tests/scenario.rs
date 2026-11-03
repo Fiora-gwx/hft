@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 31, "BMK-024.1");
+    assert_eq!(schema.version(), 32, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1218,6 +1218,13 @@ fn bmk_024_schema_v6() {
     for (k, name) in ["chop_k", "chop_er_max", "dip_max_shares"].iter().enumerate() {
         let f = schema.field(n29 + 2 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 31, 0), "BMK-024.27");
+    }
+    // .28 schema v32 appends the stop-loss pairing and the rule 12 Chainlink fields (0 = off).
+    let v32 = ["rescue_ms", "rescue_z", "rescue_px", "rescue_cap", "settle_src", "settle_lead_usd", "settle_edge"];
+    assert_eq!(n_fields_at(schema, 32), Some(n29 + 5 + v32.len() as u16), "BMK-024.28");
+    for (k, name) in v32.iter().enumerate() {
+        let f = schema.field(n29 + 5 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 32, 0), "BMK-024.28");
     }
 }
 
@@ -2567,4 +2574,134 @@ fn bmk_044_settlement_window_liquidity() {
     // so they have no target): the module waits for the last 30 s.
     let (_, got) = settle_h(&[("sigma_min", 50_000), ("stop_before_ms", 30_000)], 950, 960, 571);
     assert_eq!(got, vec![(570, SLOTS[2], 950, tag)], "BMK-044.6");
+}
+
+#[test]
+fn bmk_045_stop_loss_pairing() {
+    // Long 10 Down at 0.600, both books bid 0.450 / ask 0.470, the score favours Up (Up bid 190
+    // shares vs Down 10); sigma_min closes the main rules. 399.5 s = age 99.5 s of window 300.
+    let run = |extra: &[(&str, i64)]| {
+        let mut f = vec![("clip_shares", 5), ("inv_max_shares", 10), ("sigma_min", 1_000_000_000)];
+        f.extend_from_slice(extra);
+        let mut h = harness(&comp_params(&f));
+        hold(&mut h, 3, 10, 600);
+        let out = warm_sized(&mut h, 190, 10);
+        (placed(&out), h.strategy().fast.rescued)
+    };
+    let on = [("rescue_ms", 90_000), ("rescue_z", 500_000_000), ("rescue_px", 500_000_000)];
+    // .1 rescue_ms 0: nothing.
+    assert_eq!(run(&[]), (vec![], i64::MIN), "BMK-045.1");
+    // .2 on: Up pairs at the best bid 0.450 without the pair-cost limit (0.390); the window is marked.
+    assert_eq!(run(&on), (vec![(SLOTS[2], Px(450))], 300), "BMK-045.2");
+    // .3 the held Down bid 0.450 above rescue_px 0.40, the age below rescue_ms, the score below
+    // rescue_z: nothing.
+    for (row, k, v) in [
+        ("BMK-045.3 px", 2, 400_000_000),
+        ("BMK-045.3 age", 0, 120_000),
+        ("BMK-045.3 z", 1, 9_000_000_000),
+    ] {
+        let mut f = on.to_vec();
+        f[k].1 = v;
+        assert_eq!(run(&f).0, vec![], "{row}");
+    }
+    // .4 rescue_cap 0.02: at most 1 - 0.600 + 0.02 = 0.420.
+    let mut f = on.to_vec();
+    f.push(("rescue_cap", 20_000_000));
+    assert_eq!(run(&f).0, vec![(SLOTS[2], Px(420))], "BMK-045.4");
+}
+
+/// Chainlink sample payload v1 for UTC second `s` + 0.5 s, price `px` (1e-8 USD).
+fn cl_payload(s: i64, px: i64) -> Vec<u8> {
+    let mut b = vec![1u8];
+    b.extend_from_slice(&(s * 1_000 + 500).to_le_bytes());
+    b.extend_from_slice(&px.to_le_bytes());
+    b
+}
+
+/// `settle_h` with Chainlink samples `cl(s)` (1e-8 USD; `None` = no sample) before each second's
+/// reference tick.
+fn settle_hc(
+    extra: &[(&str, i64)],
+    ub: i64,
+    ua: i64,
+    to_s: i64,
+    cl: impl Fn(i64) -> Option<i64>,
+) -> (StrategyHarness<BinaryMaker>, SettlePlaces) {
+    let mut f = vec![("settle_ms", 60_000), ("sigma_min", 1_000_000_000)];
+    f.extend_from_slice(extra);
+    let mut h = harness(&params_with(&f));
+    slot_book(h.views_mut(), SLOTS[2], ub, ua);
+    slot_book(h.views_mut(), SLOTS[3], 1_000 - ua, 1_000 - ub);
+    let mut got = Vec::new();
+    for s in 100..to_s {
+        if let Some(px) = cl(s) {
+            let b = cl_payload(s, px);
+            h.views_mut().at_engine_ns(s * 1_000_000_000 + 50_000_000);
+            h.feed(&EventRef::Warmup {
+                local_kind: 1,
+                chunk_no: 0,
+                last: true,
+                payload: &b,
+            });
+        }
+        let out = settle_tick(&mut h, s, settle_mid(s));
+        for it in out.places() {
+            got.push((s, it.inst, it.px.0, it.tag));
+        }
+    }
+    (h, got)
+}
+
+#[test]
+fn bmk_046_settlement_on_chainlink() {
+    use binary_maker::fast::{ClFeed, settle_tag_of};
+    let tag = settle_tag_of(2);
+    // Chainlink = the reference mid (raw 0.01 USD) in 1e-8 USD.
+    let same = |s: i64| Some(settle_mid(s) * 1_000_000);
+    // .1 settle_src 1 on the same path: the same p, μ and the same bid as the reference.
+    let (hb, gb) = settle_h(&[], 950, 960, 546);
+    let (hc, gc) = settle_hc(&[("settle_src", 1)], 950, 960, 546, same);
+    assert_eq!(hc.strategy().fast.settle.out, hb.strategy().fast.settle.out, "BMK-046.1");
+    assert_eq!(gc, gb, "BMK-046.1");
+    assert_eq!(gc, vec![(545, SLOTS[2], 950, tag)], "BMK-046.1");
+    // .2 no Chainlink samples, or none after 541 s (stale at 545 s): no bid; the reference source
+    // ignores the samples.
+    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 560, |_| None).1, vec![], "BMK-046.2");
+    let stale = |s: i64| (s <= 541).then(|| settle_mid(s) * 1_000_000);
+    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 546, stale).1, vec![], "BMK-046.2 stale");
+    assert_eq!(settle_hc(&[], 950, 960, 546, |_| None).1, gb, "BMK-046.2 reference");
+    // .3 Chainlink stays at the strike while the reference moves: μ ~ 0, no bid.
+    let flat = |s: i64| Some(if s >= 540 { 10_000_500 * 1_000_000 } else { settle_mid(s) * 1_000_000 });
+    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 560, flat).1, vec![], "BMK-046.3");
+    // .4 settle_lead_usd: the projected average 100 100.00 leads the strike 100 005.00 by 95 USD.
+    for (lead, want) in [(90, 1usize), (100, 0)] {
+        let got = settle_hc(&[("settle_src", 1), ("settle_lead_usd", lead)], 950, 960, 546, same).1;
+        assert_eq!(got.len(), want, "BMK-046.4 lead {lead}");
+        let got = settle_h(&[("settle_lead_usd", lead)], 950, 960, 546).1;
+        assert_eq!(got.len(), want, "BMK-046.4 reference lead {lead}");
+    }
+    // .5 settle_edge: a bid only at most at p - edge.
+    let p = hb.strategy().fast.settle.out[0];
+    for (edge, want) in [(p - 950_000_000 - 1_000_000, 1usize), (p - 950_000_000 + 1_000_000, 0)] {
+        assert_eq!(settle_h(&[("settle_edge", edge)], 950, 960, 546).1.len(), want, "BMK-046.5 {edge}");
+    }
+    // .6 payload decoding: version, length, price sign; an older sample fills only its second.
+    let mut c = ClFeed {
+        last_s: i64::MIN,
+        ..ClFeed::default()
+    };
+    c.on_payload(&cl_payload(100, 7));
+    c.on_payload(&cl_payload(98, 9));
+    let mut bad = cl_payload(101, 5);
+    bad[0] = 2;
+    c.on_payload(&bad);
+    c.on_payload(&cl_payload(102, 5)[..16]);
+    c.on_payload(&cl_payload(103, -5));
+    assert_eq!((c.n, c.last_s, c.last_px), (2, 100, 7), "BMK-046.6");
+    assert_eq!(
+        (c.sec.exact(98), c.sec.exact(100), c.sec.exact(101)),
+        (Some(9), Some(7), None),
+        "BMK-046.6"
+    );
+    assert_eq!((c.now(103), c.now(104)), (Some(7), None), "BMK-046.6 fresh");
 }

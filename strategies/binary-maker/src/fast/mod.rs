@@ -37,6 +37,49 @@ pub fn settle_tag_of(gix: u16) -> u32 {
 /// the strike averaged over the `SETTLE_TWAP_S` before the window start.
 pub const SETTLE_TWAP_S: i64 = 60;
 
+/// `InjectWarmup` local kind of a Chainlink BTC/USD sample (README "Chainlink").
+pub const CL_WARMUP_KIND: u16 = 1;
+/// A Chainlink sample older than this many seconds is not the current price.
+pub const CL_FRESH_S: i64 = 3;
+
+/// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
+/// second and the latest sample; not in the snapshot.
+#[derive(Clone, Debug, Default)]
+pub struct ClFeed {
+    pub sec: Box<features::RefSecs>,
+    /// Chainlink second and price of the latest sample (`i64::MIN` / 0 before the first).
+    pub last_s: i64,
+    pub last_px: i64,
+    pub n: u64,
+}
+
+impl ClFeed {
+    /// Payload v1 (17 bytes, little endian): version u8 = 1, Chainlink timestamp ms i64, price
+    /// 1e-8 USD i64. Other versions, short payloads and non-positive prices are ignored; a sample
+    /// older than the latest only fills its own second.
+    pub fn on_payload(&mut self, payload: &[u8]) {
+        let field = |a: usize| payload.get(a..a + 8).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(i64::from_le_bytes);
+        if payload.first() != Some(&1) {
+            return;
+        }
+        let (Some(ts), Some(px)) = (field(1), field(9)) else { return };
+        if px <= 0 {
+            return;
+        }
+        let s = ts.div_euclid(1_000);
+        self.sec.put(s, px);
+        if self.n == 0 || s >= self.last_s {
+            self.last_s = s;
+            self.last_px = px;
+        }
+        self.n = self.n.saturating_add(1);
+    }
+    /// The latest price if it is at most `CL_FRESH_S` older than UTC second `sec`.
+    pub fn now(&self, sec: i64) -> Option<i64> {
+        (self.n > 0 && self.last_s >= sec - CL_FRESH_S).then_some(self.last_px)
+    }
+}
+
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
 /// ignores them) and the BBO of the reference leg (the last group).
 pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
@@ -50,6 +93,8 @@ pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
         };
         let _ = out.market(l.inst, gix, mask, Part::Fast);
     }
+    // Chainlink samples (settle_src = 1) arrive as InjectWarmup on the fast part.
+    out.warmup(Part::Both);
 }
 
 /// √30 × 1e6 (drift horizon, README "规则" 9).
@@ -252,6 +297,10 @@ pub struct Fast {
     pub skind: Vec<bool>,
     /// v31 chop gate state; not in the snapshot.
     pub chop: Chop,
+    /// Window start in which a stop-loss pairing bid (rescue_ms) was placed; not in the snapshot.
+    pub rescued: i64,
+    /// Chainlink samples (settle_src); not in the snapshot.
+    pub cl: ClFeed,
 }
 
 impl Fast {
@@ -278,6 +327,11 @@ impl Fast {
             settle: SettleState::default(),
             skind: Vec::new(),
             chop: Chop::default(),
+            rescued: i64::MIN,
+            cl: ClFeed {
+                last_s: i64::MIN,
+                ..ClFeed::default()
+            },
         };
         f.on_params(p, groups);
         f
@@ -490,6 +544,7 @@ impl Fast {
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
+            EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
             EventRef::Book { .. } => self.run(v, ctx),
             EventRef::Trade { inst, .. } => {
                 let now = v.now().engine_ns;
@@ -784,7 +839,12 @@ impl Fast {
         } else {
             None
         };
-        self.comp_update(v, quoting || hedging || pair_window || d.comp_always, start, up, now.utc_ns);
+        // Stop-loss pairing window (rescue_ms, v32): from rescue_ms until the stop-loss minute.
+        let rescue_on = ok
+            && d.rescue_ms > 0
+            && age_c >= i64::from(d.rescue_ms)
+            && left_ms > i64::from(d.stop_before_ms);
+        self.comp_update(v, quoting || hedging || pair_window || d.comp_always || rescue_on, start, up, now.utc_ns);
         let comp = self.comp;
         // Up-mid path over the last 60 s (fraction of one), for mm_min_path: sum of |Δ 2 × mid| / 2 of
         // consecutive recorded seconds.
@@ -1020,8 +1080,16 @@ impl Fast {
             } else {
                 i64::from(d.nochase_ms) * 1_000_000
             };
-            // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z.
-            let hedge = hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0);
+            // Stop-loss pairing (rescue_ms): a short leg whose score is above rescue_z while the held
+            // leg's best bid is at most rescue_px.
+            let rescue = rescue_on
+                && other_q > own_q
+                && z.is_some_and(|z| z > d.rescue_z.0)
+                && obb > 0
+                && i128::from(obb) * i128::from(ONE) <= i128::from(d.rescue_px.0) * i128::from(unit_px);
+            // In the stop-loss minute a leg quotes only to pair, when the score is above late_hedge_z;
+            // a stop-loss pairing bid quotes the same way (best bid, no pair-cost limit).
+            let hedge = (hedging && other_q > own_q && z.is_some_and(|z| z > d.late_hedge_z.0)) || rescue;
             let pairing = pair_window
                 && other_q > own_q
                 && (d.pair_prio_age_ms == 0 || age_ms < i64::from(d.pair_prio_age_ms));
@@ -1042,6 +1110,14 @@ impl Fast {
                 let cent = (unit_px / 100).max(1);
                 (unit_px - other_c - margin).div_euclid(cent) * cent
             });
+            // rescue_cap: a stop-loss pair locks at a cost of at most 1 + rescue_cap.
+            let lim = if rescue && d.rescue_cap.0 > 0 {
+                let c1 = (unit_px / 100).max(1);
+                let extra = (i128::from(d.rescue_cap.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+                Some((unit_px - other_c + extra).div_euclid(c1) * c1)
+            } else {
+                lim
+            };
             let lo = (i128::from(d.p_min.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
             let hi = (i128::from(d.p_max.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
             // Fair-value limit of this leg (README "规则" 9), raw price; the bid cap is floored to a cent.
@@ -1119,6 +1195,8 @@ impl Fast {
             // open_from_ms: no opening or adding before this window age.
             let no_open = no_open || (d.open_from_ms > 0 && own_q >= other_q && age_ms < i64::from(d.open_from_ms));
             let no_open = no_open || (dip_leg && !dip_active);
+            // After a stop-loss pairing bid the window opens nothing more.
+            let no_open = no_open || (self.rescued == start && own_q >= other_q);
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
@@ -1264,6 +1342,9 @@ impl Fast {
                         if let Some(x) = self.skind.get_mut(i) {
                             *x = false;
                         }
+                        if rescue {
+                            self.rescued = start;
+                        }
                     }
                 }
                 _ => {}
@@ -1284,8 +1365,14 @@ impl Fast {
                 ..SettleState::default()
             };
         }
+        // settle_src = 1: Chainlink seconds and price instead of the reference.
+        let cl = d.settle_src == 1;
         if !self.settle.k_done {
-            let (sum, n) = self.feat.ref_sec.sum(start - SETTLE_TWAP_S, start);
+            let (sum, n) = if cl {
+                self.cl.sec.sum(start - SETTLE_TWAP_S, start)
+            } else {
+                self.feat.ref_sec.sum(start - SETTLE_TWAP_S, start)
+            };
             self.settle.k_done = true;
             self.settle.k_ok = sum > 0 && n * 5 >= SETTLE_TWAP_S * 4;
             self.settle.k_sum = sum;
@@ -1298,11 +1385,15 @@ impl Fast {
         let lock_from = start + w - SETTLE_TWAP_S;
         let n_lock = sec - lock_from;
         let n_fut = start + w - sec;
-        let r_now = self.feat.top.mid_x2;
+        let r_now = if cl { self.cl.now(sec).unwrap_or(0) } else { self.feat.top.mid_x2 };
         if n_lock < 0 || !(1..=SETTLE_TWAP_S).contains(&n_fut) || r_now <= 0 {
             return None;
         }
-        let (ls, ln) = self.feat.ref_sec.sum(lock_from, sec);
+        let (ls, ln) = if cl {
+            self.cl.sec.sum(lock_from, sec)
+        } else {
+            self.feat.ref_sec.sum(lock_from, sec)
+        };
         if ln * 5 < n_lock * 4 {
             return None;
         }
@@ -1353,6 +1444,22 @@ impl Fast {
         // settle_stop_ms: the module stops this long before the window end.
         let left_ms = (start + w) * 1_000 - now.utc_ns.div_euclid(1_000_000);
         let stopped = d.settle_stop_ms > 0 && left_ms < i64::from(d.settle_stop_ms);
+        // Up lead in US cents: μ × strike; the strike is 1e-8 USD (Chainlink) or the reference
+        // 2 × mid in its price units.
+        let ref_unit = if self.reference == INST_NONE {
+            1
+        } else {
+            i128::from(10i64.saturating_pow(u32::from(v.inst(self.reference).px_exp.unsigned_abs())))
+        };
+        let k_mean = (self.settle.k_ok && self.settle.k_n > 0).then(|| self.settle.k_sum / i128::from(self.settle.k_n));
+        let lead_c = prob.zip(k_mean).map(|((_, mu, _), k)| {
+            let raw = i128::from(mu) * k / i128::from(ONE);
+            (if d.settle_src == 1 {
+                raw / 1_000_000
+            } else {
+                raw * 100 / (2 * ref_unit.max(1))
+            }) as i64
+        });
         for k in 0..2usize {
             let i = up.wrapping_add(k);
             let Some(q) = self.quotes.get(i).copied() else {
@@ -1381,7 +1488,13 @@ impl Fast {
                 }
             });
             let clip = i64::from(d.settle_clip_shares).saturating_mul(unit_qty);
+            // This leg's lead (US cents): projected settlement average less the strike, Down negated.
+            let lead = lead_c.map(|l| if k == 0 { l } else { -l });
+            let lead_min = i64::from(d.settle_lead_usd).saturating_mul(100);
             let want = fav
+                && (d.settle_lead_usd == 0 || lead.is_some_and(|l| l >= lead_min))
+                && (d.settle_edge.0 == 0
+                    || p_leg.zip(target).is_some_and(|(p, t)| t <= px_of(p.saturating_sub(d.settle_edge.0))))
                 && !stopped
                 && p_leg.is_some_and(|p| p >= d.settle_p_min.0)
                 && target.is_some_and(|t| t >= px_of(d.settle_bid_lo.0) && t <= hi)
@@ -1393,8 +1506,14 @@ impl Fast {
                 QState::Live if owned => {
                     // A cleared level (best bid below ours) keeps the bid.
                     let undercut = !locked && bid.is_some_and(|b| b > q.px);
-                    let cancel =
-                        !live || !fav || stopped || p_leg.is_none_or(|p| p < d.settle_cancel_p.0) || undercut || q.px > hi;
+                    let cancel = !live
+                        || !fav
+                        || stopped
+                        || p_leg.is_none_or(|p| p < d.settle_cancel_p.0)
+                        || undercut
+                        || q.px > hi
+                        || (d.settle_lead_usd > 0 && lead.is_none_or(|l| l.saturating_mul(2) < lead_min))
+                        || (d.settle_edge.0 > 0 && p_leg.is_some_and(|p| q.px > px_of(p)));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
