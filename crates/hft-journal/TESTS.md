@@ -17,7 +17,7 @@ spec: README.md
 | 使用本组件 | 不适用:见子节 |
 | 写者 | JNL-008, JNL-010–JNL-038, JNL-063, JNL-068, JNL-120, JNL-121 |
 | 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-129, JNL-131 |
-| persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
+| persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114, JNL-132 |
 | 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
 | cargo feature | JNL-087, JNL-101, JNL-102, JNL-122, JNL-123, JNL-130 |
@@ -1843,6 +1843,22 @@ spec: README.md
 | JNL-131.3 | 4,false | 两入口均 Chain |
 | JNL-131.4 | 前两行各删除中段或改变中段前段头哈希 | 恢复入口预检 Chain |
 | JNL-131.5 | 已标记段回退到前段末 seq,全部记录头和 CRC 同步重算 | 单取该段可读,两段合读预检 Chain |
+
+### JNL-132 roll 写段头期间被 persist 与预创建读到
+
+- 规则:[persist 与后台维护(persist 线程调用)](README.md#persist-与后台维护persist-线程调用)
+- 级别:unit
+- 里程碑:M1
+- 前置:`H(C0)`、`open0`、写到 seq 50;预创建段 2(`Preparing`);手工把段 2 的 `state`(偏移 3 088)写成 `Open`,段头保持预创建时的样子(first_seq 0、created_utc_ns 0、CRC 未填),模拟 persist 线程在 `roll` 写完段头之前读到 `Open`
+- 步骤:
+  1. persist 跑到无事可做
+  2. 预创建 `poll`
+  3. `state` 改回 `Preparing`;`roll`(段 2 打开)、写到 seq 80、再 `roll`;persist 跑到无事可做
+- 期望:
+  - 步骤 1:冷目录下没有 `19700101/`
+  - 步骤 2:返回 `Ready`;没有段 3
+  - 步骤 3:段 2 段头 `first_seq = 52`;冷副本按这份段头命名,其 `.seal` 的 `(segment_no, first_seq) = (2, 52)`;冷目录下没有 `19700101/`
+- 实现:`crates/hft-journal/tests/persist.rs::jnl_132_header_read_before_roll_finishes`
 
 ## 验收
 
