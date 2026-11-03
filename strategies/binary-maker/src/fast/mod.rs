@@ -183,6 +183,8 @@ pub struct Micro {
     /// v28: public best-bid fall pause end; engine time of the last trade on this leg's inst.
     pub drop_until: i64,
     pub trade_ens: i64,
+    /// v29: dip bid active until (engine ns).
+    pub dip_until: i64,
 }
 
 #[derive(Debug)]
@@ -870,6 +872,40 @@ impl Fast {
             }
             let oth_cool = d.oth_up_cancel && own_q >= other_q && ens < m.oth_cool;
             let dropped = d.mkt_drop_min_c > 0 && own_q >= other_q && ens < m.drop_until;
+            // Dip bids (dip_mode): the token rose and the score turned -> bid below the best bid.
+            let (dip_active, dip_depth_c) = if d.dip_mode {
+                let zk = (comp.ok && comp.win == start && i / 2 == up / 2).then(|| comp.z.get(i % 2).copied()).flatten();
+                let mom = (comp.ok && comp.win == start && i / 2 == up / 2)
+                    .then(|| self.comp_f.get(i % 2).and_then(|f| f.get(2)).copied())
+                    .flatten()
+                    .filter(|x| *x != hft_strategy_sdk::features::NA);
+                if ens >= m.dip_until
+                    && mom.is_some_and(|x| x >= d.dip_mom_min.0)
+                    && zk.is_some_and(|z| z <= d.dip_z_max.0)
+                {
+                    m.dip_until = ens.saturating_add(i64::from(d.dip_ttl_ms) * 1_000_000);
+                }
+                let sec = now.utc_ns.div_euclid(1_000_000_000);
+                let c1 = (unit_px / 100).max(1);
+                let (mut lo_m, mut hi_m) = (i64::MAX, i64::MIN);
+                if let Some(h) = self.feat.hist.get(i) {
+                    for k in 0..i64::from(d.dip_range_s) {
+                        if let Some(x) = h.mid_x2.at(sec - k) {
+                            lo_m = lo_m.min(x);
+                            hi_m = hi_m.max(x);
+                        }
+                    }
+                }
+                let range_c = if hi_m >= lo_m { (hi_m - lo_m) / 2 / c1 } else { 0 };
+                let depth = (i128::from(range_c) * i128::from(d.dip_depth_k.0) / i128::from(ONE)) as i64;
+                let depth = depth.clamp(i64::from(d.dip_depth_min_c), i64::from(d.dip_depth_max_c.max(d.dip_depth_min_c)));
+                (ens < m.dip_until, depth)
+            } else {
+                (false, 0)
+            };
+            if let Some(x) = self.mic.get_mut(i) {
+                x.dip_until = m.dip_until;
+            }
             // Short pairing window (pair_window_ms): pairing only soon after the long leg's last fill,
             // or while the unpaired risk exceeds pair_risk_usd.
             let no_pair = d.pair_window_ms > 0 && other_q > own_q && {
@@ -967,6 +1003,8 @@ impl Fast {
             let clip = i64::from(clip_shares).saturating_mul(unit_qty);
             // Opening rules (schema v9): a leg that is not short may not raise the net when one holds.
             let opens = own_q >= other_q && (!favoured || d.fav_obey_open);
+            // dip_mode: a leg that is not short and not favoured opens only while its dip bid is on.
+            let dip_leg = d.dip_mode && own_q >= other_q && !favoured;
             let thick = d.mm_max_bq > 0
                 && book
                     .best(Side::Buy)
@@ -1010,6 +1048,7 @@ impl Fast {
             let no_open = no_open || (swept && own_q >= other_q) || oth_cool || dropped;
             // open_from_ms: no opening or adding before this window age.
             let no_open = no_open || (d.open_from_ms > 0 && own_q >= other_q && age_ms < i64::from(d.open_from_ms));
+            let no_open = no_open || (dip_leg && !dip_active);
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
@@ -1029,6 +1068,11 @@ impl Fast {
                     let up_c = i64::from(d.bid_improve_c).saturating_mul(cent);
                     let b = if up_c > 0 && (!d.bid_improve_short || other_q > own_q) && b.saturating_add(up_c) < a {
                         b.saturating_add(up_c)
+                    } else {
+                        b
+                    };
+                    let b = if dip_leg {
+                        b.saturating_sub(dip_depth_c.saturating_mul(cent))
                     } else {
                         b
                     };

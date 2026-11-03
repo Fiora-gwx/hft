@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 28, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 29, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -303,6 +303,20 @@ hft_strategy_sdk::define_params! {
         pair_risk_usd: Notional [min = 0, max = 1_000_000_000_000, default = 0, since = 28, relax = None],
         /// no opening or adding (a leg that is not short) before this window age; 0 = off
         open_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// (schema v29, dip bids) true: a leg that is not short and not favoured opens only through
+        /// a dip bid: after its token rose (30 s mid change at least dip_mom_min) and the score turned
+        /// (at most dip_z_max), for dip_ttl_ms it bids below the best bid by a depth set by the
+        /// token's recent price range; otherwise it does not open
+        dip_mode: Bool [default = 0, since = 29, relax = None],
+        dip_mom_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 29, relax = None],
+        dip_z_max: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 29, relax = None],
+        dip_ttl_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 29, relax = None],
+        /// depth = dip_depth_k x the token mid's high-low range over the last dip_range_s seconds,
+        /// in cents, clamped to [dip_depth_min_c, dip_depth_max_c]
+        dip_depth_k: Rate [min = 0, max = 10_000_000_000, default = 0, since = 29, relax = None],
+        dip_range_s: Count [min = 1, max = 120, default = 30, since = 29, relax = None],
+        dip_depth_min_c: Count [min = 0, max = 50, default = 1, since = 29, relax = None],
+        dip_depth_max_c: Count [min = 0, max = 50, default = 5, since = 29, relax = None],
     }
 }
 

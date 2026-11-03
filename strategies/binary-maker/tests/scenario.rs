@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 28, "BMK-024.1");
+    assert_eq!(schema.version(), 29, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1188,6 +1188,23 @@ fn bmk_024_schema_v6() {
     for (k, name) in v28.iter().enumerate() {
         let f = schema.field(n25 + 4 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 28, 0), "BMK-024.24");
+    }
+    // .25 schema v29 appends the dip-bid fields (dip_mode 0 = off).
+    let v29 = [
+        ("dip_mode", 0),
+        ("dip_mom_min", 0),
+        ("dip_z_max", 0),
+        ("dip_ttl_ms", 0),
+        ("dip_depth_k", 0),
+        ("dip_range_s", 30),
+        ("dip_depth_min_c", 1),
+        ("dip_depth_max_c", 5),
+    ];
+    let n28 = n25 + 4 + v28.len() as u16;
+    assert_eq!(n_fields_at(schema, 29), Some(n28 + v29.len() as u16), "BMK-024.25");
+    for (k, (name, default)) in v29.iter().enumerate() {
+        let f = schema.field(n28 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 29, *default), "BMK-024.25");
     }
 }
 
