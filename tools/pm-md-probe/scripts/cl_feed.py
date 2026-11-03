@@ -2,8 +2,11 @@
 `price.crypto` (btcusd) and sends every new sample to each hft-core ctl socket as `InjectWarmup`
 (local_kind 1, payload v1: version u8 = 1, Chainlink timestamp ms i64 LE, price 1e-8 USD i64 LE).
 
-usage: cl_feed.py --creds CLOB_CREDS.json --socket RUN/cfg/core.sock [--socket ...]
+usage: cl_feed.py --creds CLOB_CREDS.json (--socket RUN/cfg/core.sock | --discover 'DIR/live-*') ...
                   [--strategy pm-maker] [--issuer cli:<user>] [--log FILE]
+
+--discover GLOB (repeatable): every 30 s the newest run directory matching each glob (name order)
+that has cfg/core.sock is a target, so restarted runs are picked up.
 
 PolyBolt needs CLOB API credentials (any account; keys api_key / api_secret / api_passphrase or
 apiKey / secret / passphrase). Needs the `websockets` package. Samples go out in order, one command
@@ -14,7 +17,9 @@ import argparse
 import asyncio
 import base64
 import getpass
+import glob
 import json
+import os
 import socket
 import struct
 import time
@@ -90,6 +95,8 @@ class Feed:
         self.stats = {"samples": 0, "sent": 0, "fail": 0, "codes": {}}
         self.t_sum = time.time()
         self.log_f = open(a.log, "a") if a.log else None
+        self.targets = list(a.socket or [])
+        self.t_disc = 0.0
 
     def log(self, d: dict):
         line = json.dumps({"t": round(time.time(), 3), **d}, separators=(",", ":"))
@@ -99,9 +106,23 @@ class Feed:
         else:
             print(line, flush=True)
 
+    def discover(self):
+        if not self.a.discover or time.time() - self.t_disc < 30:
+            return
+        self.t_disc = time.time()
+        found = list(self.a.socket or [])
+        for g in self.a.discover:
+            runs = [d for d in sorted(glob.glob(g)) if os.path.exists(os.path.join(d, "cfg", "core.sock"))]
+            if runs:
+                found.append(os.path.join(runs[-1], "cfg", "core.sock"))
+        if found != self.targets:
+            self.log({"ev": "targets", "sockets": found})
+            self.targets = found
+
     def send_all(self, data: bytes):
         self.chunk += 1
-        for path in self.a.socket:
+        self.discover()
+        for path in self.targets:
             try:
                 code = inject(path, self.a.issuer, self.a.strategy, self.chunk, data)
             except OSError as e:
@@ -162,13 +183,16 @@ class Feed:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--creds", required=True)
-    ap.add_argument("--socket", action="append", required=True)
+    ap.add_argument("--socket", action="append")
+    ap.add_argument("--discover", action="append")
     ap.add_argument("--strategy", default="pm-maker")
     ap.add_argument("--issuer", default=f"cli:{getpass.getuser()}")
     ap.add_argument("--log")
     a = ap.parse_args()
+    if not a.socket and not a.discover:
+        ap.error("--socket or --discover is required")
     f = Feed(a)
-    f.log({"ev": "start", "sockets": a.socket, "strategy": a.strategy, "issuer": a.issuer})
+    f.log({"ev": "start", "sockets": a.socket, "discover": a.discover, "strategy": a.strategy, "issuer": a.issuer})
     asyncio.run(f.main())
 
 
