@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 29, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 30, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -317,6 +317,11 @@ hft_strategy_sdk::define_params! {
         dip_range_s: Count [min = 1, max = 120, default = 30, since = 29, relax = None],
         dip_depth_min_c: Count [min = 0, max = 50, default = 1, since = 29, relax = None],
         dip_depth_max_c: Count [min = 0, max = 50, default = 5, since = 29, relax = None],
+        /// (schema v30) true: the dip bid goes to the token that FELL (30 s mid change at most
+        /// -dip_mom_min) once its score turned up (at least dip_z_min): buy the loser on a predicted
+        /// reversal, pair later
+        dip_falling: Bool [default = 0, since = 30, relax = None],
+        dip_z_min: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 30, relax = None],
     }
 }
 

@@ -879,10 +879,12 @@ impl Fast {
                     .then(|| self.comp_f.get(i % 2).and_then(|f| f.get(2)).copied())
                     .flatten()
                     .filter(|x| *x != hft_strategy_sdk::features::NA);
-                if ens >= m.dip_until
-                    && mom.is_some_and(|x| x >= d.dip_mom_min.0)
-                    && zk.is_some_and(|z| z <= d.dip_z_max.0)
-                {
+                let trig = if d.dip_falling {
+                    mom.is_some_and(|x| x <= -d.dip_mom_min.0) && zk.is_some_and(|z| z >= d.dip_z_min.0)
+                } else {
+                    mom.is_some_and(|x| x >= d.dip_mom_min.0) && zk.is_some_and(|z| z <= d.dip_z_max.0)
+                };
+                if ens >= m.dip_until && trig {
                     m.dip_until = ens.saturating_add(i64::from(d.dip_ttl_ms) * 1_000_000);
                 }
                 let sec = now.utc_ns.div_euclid(1_000_000_000);
