@@ -41,6 +41,8 @@ pub const SETTLE_TWAP_S: i64 = 60;
 pub const CL_WARMUP_KIND: u16 = 1;
 /// A Chainlink sample older than this many seconds is not the current price.
 pub const CL_FRESH_S: i64 = 3;
+/// `InjectWarmup` local kind of a chop-gate seed (README "规则" 13 后的"震荡开关预热").
+pub const CHOP_WARMUP_KIND: u16 = 2;
 
 /// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
 /// second and the latest sample; not in the snapshot.
@@ -247,6 +249,45 @@ pub struct Chop {
 }
 
 impl Chop {
+    /// Seed after a restart (`InjectWarmup` local kind 2). Payload v1: version u8 = 1, count u8, then
+    /// `count` × (window start s i64, efficiency ratio 1e-9 i64), little endian. Applied only while the
+    /// ring is empty; entries out of [0, 1e9], at or after the window being accumulated (`win` > 0) or
+    /// not in increasing window order are skipped; the last 24 are kept, the newest last.
+    pub fn seed(&mut self, payload: &[u8]) {
+        if self.len != 0 || payload.first() != Some(&1) {
+            return;
+        }
+        let Some(&count) = payload.get(1) else { return };
+        let field = |a: usize| {
+            payload
+                .get(a..a + 8)
+                .and_then(|b| <[u8; 8]>::try_from(b).ok())
+                .map(i64::from_le_bytes)
+        };
+        let mut kept = [0i64; 24];
+        let mut n = 0usize;
+        let mut prev = i64::MIN;
+        for j in 0..usize::from(count) {
+            let (Some(w), Some(er)) = (field(2 + 16 * j), field(10 + 16 * j)) else { break };
+            if w <= prev || !(0..=ONE).contains(&er) || (self.win > 0 && w >= self.win) {
+                continue;
+            }
+            prev = w;
+            if n == 24 {
+                kept.copy_within(1.., 0);
+                n = 23;
+            }
+            if let Some(x) = kept.get_mut(n) {
+                *x = er;
+            }
+            n += 1;
+        }
+        self.ring = [0; 24];
+        self.ring[..n].copy_from_slice(&kept[..n]);
+        self.len = n as u8;
+        self.pos = (n % 24) as u8;
+    }
+
     /// Mean of the last `k` window efficiency ratios (1e-9), `None` with fewer than k / 2 of them.
     pub fn mean(&self, k: usize) -> Option<i64> {
         let n = usize::from(self.len).min(k);
@@ -545,6 +586,7 @@ impl Fast {
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
+            EventRef::Warmup { local_kind, payload, .. } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
             EventRef::Book { .. } => self.run(v, ctx),
             EventRef::Trade { inst, .. } => {
                 let now = v.now().engine_ns;

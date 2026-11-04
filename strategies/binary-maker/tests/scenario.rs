@@ -2705,3 +2705,57 @@ fn bmk_046_settlement_on_chainlink() {
     );
     assert_eq!((c.now(103), c.now(104)), (Some(7), None), "BMK-046.6 fresh");
 }
+
+/// Chop seed payload v1 of (window start, efficiency ratio) pairs.
+fn chop_payload(e: &[(i64, i64)]) -> Vec<u8> {
+    let mut b = vec![1u8, e.len() as u8];
+    for (w, er) in e {
+        b.extend_from_slice(&w.to_le_bytes());
+        b.extend_from_slice(&er.to_le_bytes());
+    }
+    b
+}
+
+#[test]
+fn bmk_047_chop_seed() {
+    use binary_maker::fast::Chop;
+    let e: Vec<(i64, i64)> = (0..12).map(|k| (1_000 + 300 * k, 100_000_000 + k * 10_000_000)).collect();
+    // .1 twelve windows into an empty ring: mean of the last 12 = 0.155, of the last 6 = 0.185.
+    let mut c = Chop::default();
+    c.seed(&chop_payload(&e));
+    assert_eq!((c.len, c.pos), (12, 12), "BMK-047.1");
+    assert_eq!((c.mean(12), c.mean(6)), (Some(155_000_000), Some(185_000_000)), "BMK-047.1");
+    // .2 a ring with entries ignores a seed; a bad version is ignored.
+    let mut c2 = c;
+    c2.seed(&chop_payload(&[(9_000, 0)]));
+    assert_eq!(c2.ring, c.ring, "BMK-047.2");
+    let mut bad = chop_payload(&e);
+    bad[0] = 2;
+    let mut c3 = Chop::default();
+    c3.seed(&bad);
+    assert_eq!(c3.len, 0, "BMK-047.2 version");
+    // .3 skipped: out of range, out of order, at or after the window being accumulated.
+    let mut c4 = Chop {
+        win: 2_200,
+        ..Chop::default()
+    };
+    c4.seed(&chop_payload(&[(1_000, 2_000_000_000), (1_300, 300_000_000), (1_200, 100_000_000), (1_600, 200_000_000), (2_200, 400_000_000)]));
+    assert_eq!((c4.len, c4.ring[0], c4.ring[1]), (2, 300_000_000, 200_000_000), "BMK-047.3");
+    // .4 thirty windows: the last 24 kept, the newest last.
+    let e30: Vec<(i64, i64)> = (0..30).map(|k| (300 * k, k * 1_000_000)).collect();
+    let mut c5 = Chop::default();
+    c5.seed(&chop_payload(&e30));
+    assert_eq!((c5.len, c5.pos, c5.ring[0], c5.ring[23]), (24, 0, 6_000_000, 29_000_000), "BMK-047.4");
+    assert_eq!(c5.mean(1), Some(29_000_000), "BMK-047.4");
+    // .5 through the strategy: InjectWarmup local kind 2 fills the chop ring.
+    let mut h = harness(&params_with(&[("chop_k", 12)]));
+    let b = chop_payload(&e);
+    h.views_mut().at_engine_ns(5_000_000_000);
+    h.feed(&EventRef::Warmup {
+        local_kind: 2,
+        chunk_no: 0,
+        last: true,
+        payload: &b,
+    });
+    assert_eq!(h.strategy().fast.chop.mean(12), Some(155_000_000), "BMK-047.5");
+}
