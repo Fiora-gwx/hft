@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 32, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 33, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -348,6 +348,12 @@ hft_strategy_sdk::define_params! {
         /// rule 12 bids at most at the token's probability less this (fraction of one, 1e-9) and
         /// cancels a bid above the probability; 0 = off
         settle_edge: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// (schema v33) pressure block (Albers et al. 2025 "reversal"): a leg that is not short opens
+        /// nothing (and cancels its opening bid) while its own book's L1 imbalance (bid qty - ask qty) /
+        /// (bid qty + ask qty) is below ofi_obi_max and its order-flow imbalance (Cont-Kukanov-Stoikov,
+        /// own best bid / ask) over the last ofi_win_ms is at most 0; 0 = off
+        ofi_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 33, relax = None],
+        ofi_obi_max: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 33, relax = None],
     }
 }
 

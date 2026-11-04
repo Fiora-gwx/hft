@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 32, "BMK-024.1");
+    assert_eq!(schema.version(), 33, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1225,6 +1225,13 @@ fn bmk_024_schema_v6() {
     for (k, name) in v32.iter().enumerate() {
         let f = schema.field(n29 + 5 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 32, 0), "BMK-024.28");
+    }
+    // .29 schema v33 appends the pressure block (0 = off).
+    let n32 = n29 + 5 + v32.len() as u16;
+    assert_eq!(n_fields_at(schema, 33), Some(n32 + 2), "BMK-024.29");
+    for (k, name) in ["ofi_win_ms", "ofi_obi_max"].iter().enumerate() {
+        let f = schema.field(n32 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 33, 0), "BMK-024.29");
     }
 }
 
@@ -2758,4 +2765,76 @@ fn bmk_047_chop_seed() {
         payload: &b,
     });
     assert_eq!(h.strategy().fast.chop.mean(12), Some(155_000_000), "BMK-047.5");
+}
+
+/// Reference warm-up (392 s, empty slot books), then pair 1's books once a second at 392..=398 s with the Up bid
+/// sizes `up_bids` (Up ask 0.470 × 100, Down 0.450 × 100 / 0.470 × 100), each followed by a `Book`
+/// event of Up, and a last reference quote at 399.5 s; the places from 398 s on (the order-flow
+/// ring reaches 5 s back).
+fn ofi_run(extra: &[(&str, i64)], up_bids: &[i64]) -> Vec<(InstId, Px)> {
+    let mut h = harness(&params_with(extra));
+    let mut got = Vec::new();
+    // No slot books during the warm-up.
+    h.views_mut().book(SLOTS[2], &[], &[]);
+    h.views_mut().book(SLOTS[3], &[], &[]);
+    for k in 0..392i64 {
+        h.views_mut().at_engine_ns(k * 1_000_000_000);
+        ref_quote(h.views_mut(), if k % 2 == 0 { 10_000_000 } else { 10_001_000 });
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+    }
+    for (k, q) in up_bids.iter().enumerate() {
+        h.views_mut().at_engine_ns((392 + k as i64) * 1_000_000_000);
+        h.views_mut().book(SLOTS[2], &[lv(450, *q)], &[lv(470, 100)]);
+        h.views_mut().book(SLOTS[3], &[lv(450, 100)], &[lv(470, 100)]);
+        let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+        // From 398 s the order-flow ring reaches 5 s back.
+        if k >= 6 {
+            got.extend(placed(&out));
+        }
+    }
+    h.views_mut().at_engine_ns(399_500_000_000);
+    ref_quote(h.views_mut(), 10_000_500);
+    let b = h.views_mut().bbo_of(R);
+    got.extend(placed(&h.feed(&ev::bbo(R, 6, b).as_ref())));
+    got
+}
+
+#[test]
+fn bmk_048_pressure_block() {
+    use binary_maker::fast::OfiRing;
+    let s = 1_000_000_000i64;
+    // .1 Cont-Kukanov-Stoikov increments: bid 100 → 150 at the same price +50; ask 0.470 × 100 →
+    // 0.460 × 80 −80.
+    let mut o = OfiRing::default();
+    o.on_book(SLOTS[2], Some((450, 100)), Some((470, 100)), 0);
+    o.on_book(SLOTS[2], Some((450, 150)), Some((470, 100)), 50_000_000);
+    assert_eq!(o.cum, 50, "BMK-048.1");
+    o.on_book(SLOTS[2], Some((450, 150)), Some((460, 80)), 1_200_000_000);
+    assert_eq!(o.cum, -30, "BMK-048.1");
+    // .2 over the last 1 s / 0.5 s at 1.3 s: since the end of bucket 3 / 8 (value 50) = −80; 5 s
+    // reaches before the first bucket; nothing since the last bucket = 0.
+    assert_eq!(o.over(1_300_000_000, 1_000), Some(-80), "BMK-048.2");
+    assert_eq!(o.over(1_300_000_000, 500), Some(-80), "BMK-048.2");
+    assert_eq!(o.over(1_300_000_000, 5_000), None, "BMK-048.2");
+    assert_eq!(o.over(1_250_000_000, 0), Some(0), "BMK-048.2");
+    // .3 a new instrument restarts the ring.
+    o.on_book(SLOTS[3], Some((450, 100)), Some((470, 100)), 2 * s);
+    assert_eq!((o.inst, o.cum, o.first), (SLOTS[3], 0, 20), "BMK-048.3");
+    // .4 Up bid 10 against ask 100 (imbalance −0.82) with flat order flow: Up opens nothing,
+    // Down (imbalance 0) quotes; off (ofi_win_ms 0) both quote.
+    let on = [("ofi_win_ms", 5_000), ("ofi_obi_max", -300_000_000)];
+    let flat = [10, 10, 10, 10, 10, 10, 10];
+    let has = |v: &[(InstId, Px)], i| v.iter().any(|(x, _)| *x == i);
+    let got = ofi_run(&on, &flat);
+    assert!(!has(&got, SLOTS[2]) && has(&got, SLOTS[3]), "BMK-048.4 {got:?}");
+    let got = ofi_run(&[], &flat);
+    assert!(has(&got, SLOTS[2]) && has(&got, SLOTS[3]), "BMK-048.4 off {got:?}");
+    // .5 the Up bid grows 10 → 30 at 397 s (order flow +20 within 5 s, imbalance still −0.54):
+    // Up quotes.
+    let got = ofi_run(&on, &[10, 10, 10, 10, 10, 30, 30]);
+    assert!(has(&got, SLOTS[2]), "BMK-048.5 {got:?}");
+    // .6 the imbalance above ofi_obi_max (bid 100 against ask 100) with flat flow: Up quotes.
+    let got = ofi_run(&on, &[100, 100, 100, 100, 100, 100, 100]);
+    assert!(has(&got, SLOTS[2]), "BMK-048.6 {got:?}");
 }

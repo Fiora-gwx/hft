@@ -234,6 +234,104 @@ pub struct Micro {
     pub dip_until: i64,
 }
 
+/// v33 order-flow imbalance bucket (engine time) and number of buckets kept (25.6 s).
+pub const OFI_BUCKET_NS: i64 = 100_000_000;
+pub const OFI_N: usize = 256;
+
+/// Order-flow imbalance of one slot leg's own book (v33 `ofi_win_ms`): Cont-Kukanov-Stoikov
+/// increments of the best bid / ask on every `Book` event, cumulated per 100 ms bucket; restarts
+/// when the leg's instrument changes; not in the snapshot.
+#[derive(Clone, Debug)]
+pub struct OfiRing {
+    pub inst: InstId,
+    /// Previous best (bid px, bid qty, ask px, ask qty); `None` until both sides are seen.
+    pub prev: Option<(i64, i64, i64, i64)>,
+    pub cum: i64,
+    /// First and last bucket seen (`i64::MIN` = none); `ring` holds the cumulative value at the end of
+    /// each bucket.
+    pub first: i64,
+    pub last: i64,
+    pub ring: [i64; OFI_N],
+}
+
+impl Default for OfiRing {
+    fn default() -> Self {
+        OfiRing {
+            inst: INST_NONE,
+            prev: None,
+            cum: 0,
+            first: i64::MIN,
+            last: i64::MIN,
+            ring: [0; OFI_N],
+        }
+    }
+}
+
+impl OfiRing {
+    fn slot(k: i64) -> usize {
+        k.rem_euclid(OFI_N as i64) as usize
+    }
+
+    /// One book update of `inst` (best levels after it) at engine time `ens`.
+    pub fn on_book(&mut self, inst: InstId, bid: Option<(i64, i64)>, ask: Option<(i64, i64)>, ens: i64) {
+        if inst != self.inst {
+            *self = OfiRing {
+                inst,
+                ..OfiRing::default()
+            };
+        }
+        let k = ens.div_euclid(OFI_BUCKET_NS);
+        if self.last == i64::MIN {
+            self.first = k;
+        } else if k > self.last {
+            // Buckets without events keep the cumulative value.
+            let from = self.last.saturating_add(1).max(k.saturating_sub(OFI_N as i64 - 1));
+            for b in from..k {
+                self.ring[Self::slot(b)] = self.cum;
+            }
+        }
+        if let (Some((bp, bq)), Some((ap, aq))) = (bid, ask) {
+            if let Some((pbp, pbq, pap, paq)) = self.prev {
+                let mut e = 0i64;
+                if bp >= pbp {
+                    e = e.saturating_add(bq);
+                }
+                if bp <= pbp {
+                    e = e.saturating_sub(pbq);
+                }
+                if ap <= pap {
+                    e = e.saturating_sub(aq);
+                }
+                if ap >= pap {
+                    e = e.saturating_add(paq);
+                }
+                self.cum = self.cum.saturating_add(e);
+            }
+            self.prev = Some((bp, bq, ap, aq));
+        }
+        if self.last == i64::MIN || k >= self.last {
+            self.ring[Self::slot(k)] = self.cum;
+            self.last = k;
+        }
+    }
+
+    /// Order-flow imbalance over the last `ms` up to `ens`; `None` while the history does not reach
+    /// back that far.
+    pub fn over(&self, ens: i64, ms: i64) -> Option<i64> {
+        if self.last == i64::MIN {
+            return None;
+        }
+        let back = ens.div_euclid(OFI_BUCKET_NS).saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
+        if back >= self.last {
+            return Some(0);
+        }
+        if back < self.first || back <= self.last.saturating_sub(OFI_N as i64) {
+            return None;
+        }
+        Some(self.cum.saturating_sub(self.ring[Self::slot(back)]))
+    }
+}
+
 /// Efficiency-ratio history of the Up mid for the chop gate (v31; not in the snapshot).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Chop {
@@ -342,6 +440,8 @@ pub struct Fast {
     pub rescued: i64,
     /// Chainlink samples (settle_src); not in the snapshot.
     pub cl: ClFeed,
+    /// v33 order-flow imbalance per slot leg (quote order); not in the snapshot.
+    pub ofi: Vec<OfiRing>,
 }
 
 impl Fast {
@@ -373,6 +473,7 @@ impl Fast {
                 last_s: i64::MIN,
                 ..ClFeed::default()
             },
+            ofi: Vec::with_capacity(cap),
         };
         f.on_params(p, groups);
         f
@@ -424,6 +525,8 @@ impl Fast {
         );
         self.comp.ok = false;
         self.mic = vec![Micro::default(); self.quotes.len()];
+        self.ofi.clear();
+        self.ofi.resize(self.quotes.len(), OfiRing::default());
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -587,7 +690,19 @@ impl Fast {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
-            EventRef::Book { .. } => self.run(v, ctx),
+            EventRef::Book { inst, .. } => {
+                if self.p.defaults().ofi_win_ms > 0 {
+                    let ens = v.now().engine_ns;
+                    let b = v.book(inst);
+                    let lv = |s: Side| b.best(s).map(|l| (l.px.0, l.qty.0));
+                    for (q, o) in self.quotes.iter().zip(self.ofi.iter_mut()) {
+                        if q.inst == inst {
+                            o.on_book(inst, lv(Side::Buy), lv(Side::Sell), ens);
+                        }
+                    }
+                }
+                self.run(v, ctx);
+            }
             EventRef::Trade { inst, .. } => {
                 let now = v.now().engine_ns;
                 for (k, q) in self.quotes.iter().enumerate() {
@@ -1239,6 +1354,21 @@ impl Fast {
             let no_open = no_open || (dip_leg && !dip_active);
             // After a stop-loss pairing bid the window opens nothing more.
             let no_open = no_open || (self.rescued == start && own_q >= other_q);
+            // v33 pressure block: own L1 imbalance below ofi_obi_max while the order flow over
+            // ofi_win_ms has not turned towards the leg.
+            let pressed = d.ofi_win_ms > 0 && own_q >= other_q && {
+                let bq = book.best(Side::Buy).map_or(0, |l| l.qty.0);
+                let aq = book.best(Side::Sell).map_or(0, |l| l.qty.0);
+                let sum = i128::from(bq) + i128::from(aq);
+                sum > 0
+                    && (i128::from(bq) - i128::from(aq)) * i128::from(ONE) < i128::from(d.ofi_obi_max.0) * sum
+                    && self
+                        .ofi
+                        .get(i)
+                        .and_then(|o| o.over(ens, i64::from(d.ofi_win_ms)))
+                        .is_some_and(|f| f <= 0)
+            };
+            let no_open = no_open || pressed;
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
