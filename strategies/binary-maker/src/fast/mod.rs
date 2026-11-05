@@ -882,7 +882,10 @@ impl Fast {
         let left_ms = (start + w) * 1_000 - utc_ms;
         // Venue-load gates (README "规则" 11): the previous minute's feed lag closes quoting.
         let (load, slow) = self.feat.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
-        let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms) && !load && !slow;
+        // v34 low-volatility band: implied sigma in [sigma_lo, sigma_min) quotes with opening conditions.
+        let vol = self.vol_state(left_ms);
+        let vol_low = vol == 1;
+        let quoting = ok && left_ms > i64::from(d.stop_before_ms) && vol > 0 && !load && !slow;
         // Last-minute stop-loss (late_hedge_ms): only pairing bids by the leg the score favours.
         // Pairing priority (pair_stop_ms): a short leg pairs until pair_stop_ms before the end.
         let pair_window = ok && d.pair_stop_ms > 0 && left_ms > i64::from(d.pair_stop_ms);
@@ -984,7 +987,8 @@ impl Fast {
             self.chop.n += 1;
             self.chop.last_sec = sec_c;
         }
-        let chop_ok = d.chop_k == 0 || self.chop.mean(d.chop_k as usize).is_some_and(|e| e <= d.chop_er_max.0);
+        let chop_mean = if d.chop_k > 0 { self.chop.mean(d.chop_k as usize) } else { None };
+        let chop_ok = d.chop_k == 0 || chop_mean.is_some_and(|e| e <= d.chop_er_max.0);
         let den = self.feat.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
             let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
             let v_ms = (left_ms - TWAP_TAIL_MS).max(1);
@@ -1369,6 +1373,24 @@ impl Fast {
                         .is_some_and(|f| f <= 0)
             };
             let no_open = no_open || pressed;
+            // v34 chop scope / trend gate and the low-volatility band's opening conditions.
+            let opening = own_q >= other_q;
+            let chop_block = opening
+                && d.chop_k > 0
+                && ((d.chop_all && !chop_ok)
+                    || (d.chop_er_min.0 > 0 && !chop_mean.is_some_and(|e| e >= d.chop_er_min.0)));
+            let lo_block = opening
+                && vol_low
+                && ((d.lo_er_max.0 > 0 && !chop_mean.is_some_and(|e| e <= d.lo_er_max.0))
+                    || (d.lo_obi_on && {
+                        let bq = book.best(Side::Buy).map_or(0, |l| l.qty.0);
+                        let aq = book.best(Side::Sell).map_or(0, |l| l.qty.0);
+                        let sum = i128::from(bq) + i128::from(aq);
+                        sum <= 0
+                            || (i128::from(bq) - i128::from(aq)) * i128::from(ONE)
+                                < i128::from(d.lo_obi_min.0) * sum
+                    }));
+            let no_open = no_open || chop_block || lo_block;
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a
@@ -1741,15 +1763,24 @@ impl Fast {
 
     /// Implied volatility (reference sigma × `sigma_scale`) at least `sigma_min`, and the
     /// remaining standard deviation (implied sigma × √seconds left) at least `min_rem_sd`.
-    fn vol_ok(&self, left_ms: i64) -> bool {
+    /// 2 = at least `sigma_min`, 1 = in the v34 low band [`sigma_lo`, `sigma_min`), 0 = neither.
+    fn vol_state(&self, left_ms: i64) -> u8 {
         let d = self.p.defaults();
         let Some(s) = self.feat.vol.sigma(d.vol_min_samples as usize) else {
-            return false;
+            return 0;
         };
         let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
         // √(left_ms × 1000) = √(seconds left) × 1000.
         let root_milli = isqrt(u128::try_from(left_ms.max(0)).unwrap_or(0) * 1_000) as i128;
-        implied >= i128::from(d.sigma_min.0) && implied * root_milli / 1_000 >= i128::from(d.min_rem_sd.0)
+        if implied * root_milli / 1_000 < i128::from(d.min_rem_sd.0) {
+            0
+        } else if implied >= i128::from(d.sigma_min.0) {
+            2
+        } else if d.sigma_lo.0 > 0 && implied >= i128::from(d.sigma_lo.0) {
+            1
+        } else {
+            0
+        }
     }
 
     /// `n: u16`, then per slot group `id: u32, state: u8, r?: (venue u8, account u8, slot u32,

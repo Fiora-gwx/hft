@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 33, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 34, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -354,6 +354,19 @@ hft_strategy_sdk::define_params! {
         /// own best bid / ask) over the last ofi_win_ms is at most 0; 0 = off
         ofi_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 33, relax = None],
         ofi_obi_max: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 33, relax = None],
+        /// (schema v34) chop gate scope: true = the chop gate (chop_k, chop_er_max) holds back every
+        /// opening of a leg that is not short, not only dip bids
+        chop_all: Bool [default = 0, since = 34, relax = None],
+        /// (schema v34) trend gate: a leg that is not short opens only while the mean efficiency ratio
+        /// over the last chop_k windows is at least chop_er_min (needs chop_k > 0); 0 = off
+        chop_er_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        /// (schema v34) low-volatility band: implied sigma in [sigma_lo, sigma_min) still quotes, but a
+        /// leg that is not short opens only while the chop mean is at most lo_er_max (0 = no chop
+        /// condition) and, with lo_obi_on, its own L1 imbalance is at least lo_obi_min; 0 = off
+        sigma_lo: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        lo_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        lo_obi_on: Bool [default = 0, since = 34, relax = None],
+        lo_obi_min: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 34, relax = None],
     }
 }
 
