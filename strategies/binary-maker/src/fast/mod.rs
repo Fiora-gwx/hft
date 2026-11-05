@@ -332,6 +332,80 @@ impl OfiRing {
     }
 }
 
+/// Trade-print count of one slot leg (v35 `trd_win_ms`): cumulative count per 100 ms engine-time
+/// bucket (256 buckets); restarts when the leg's instrument changes; not in the snapshot.
+#[derive(Clone, Debug)]
+pub struct TrdRing {
+    pub inst: InstId,
+    pub cum: i64,
+    pub first: i64,
+    pub last: i64,
+    pub ring: [i64; OFI_N],
+}
+
+impl Default for TrdRing {
+    fn default() -> Self {
+        TrdRing {
+            inst: INST_NONE,
+            cum: 0,
+            first: i64::MIN,
+            last: i64::MIN,
+            ring: [0; OFI_N],
+        }
+    }
+}
+
+impl TrdRing {
+    fn slot(k: i64) -> usize {
+        k.rem_euclid(OFI_N as i64) as usize
+    }
+
+    /// Advances to engine time `ens` (empty buckets keep the count), restarting on a new instrument.
+    fn advance(&mut self, inst: InstId, ens: i64) {
+        if inst != self.inst {
+            *self = TrdRing {
+                inst,
+                ..TrdRing::default()
+            };
+        }
+        let k = ens.div_euclid(OFI_BUCKET_NS);
+        if self.last == i64::MIN {
+            self.first = k;
+            self.last = k;
+        } else if k > self.last {
+            let from = self.last.saturating_add(1).max(k.saturating_sub(OFI_N as i64 - 1));
+            for b in from..k {
+                self.ring[Self::slot(b)] = self.cum;
+            }
+            self.last = k;
+        }
+    }
+
+    /// One trade print of `inst` at `ens`.
+    pub fn on_trade(&mut self, inst: InstId, ens: i64) {
+        self.advance(inst, ens);
+        self.cum = self.cum.saturating_add(1);
+        if ens.div_euclid(OFI_BUCKET_NS) >= self.last {
+            self.ring[Self::slot(self.last)] = self.cum;
+        }
+    }
+
+    /// Prints over the last `ms` up to `ens`; `None` while the history does not reach back that far.
+    pub fn over(&self, ens: i64, ms: i64) -> Option<i64> {
+        if self.last == i64::MIN {
+            return None;
+        }
+        let back = ens.div_euclid(OFI_BUCKET_NS).saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
+        if back >= self.last {
+            return Some(0);
+        }
+        if back < self.first || back <= self.last.saturating_sub(OFI_N as i64) {
+            return None;
+        }
+        Some(self.cum.saturating_sub(self.ring[Self::slot(back)]))
+    }
+}
+
 /// Efficiency-ratio history of the Up mid for the chop gate (v31; not in the snapshot).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Chop {
@@ -442,6 +516,8 @@ pub struct Fast {
     pub cl: ClFeed,
     /// v33 order-flow imbalance per slot leg (quote order); not in the snapshot.
     pub ofi: Vec<OfiRing>,
+    /// v35 trade-print count per slot leg (quote order); not in the snapshot.
+    pub trd: Vec<TrdRing>,
 }
 
 impl Fast {
@@ -474,6 +550,7 @@ impl Fast {
                 ..ClFeed::default()
             },
             ofi: Vec::with_capacity(cap),
+            trd: Vec::with_capacity(cap),
         };
         f.on_params(p, groups);
         f
@@ -527,6 +604,8 @@ impl Fast {
         self.mic = vec![Micro::default(); self.quotes.len()];
         self.ofi.clear();
         self.ofi.resize(self.quotes.len(), OfiRing::default());
+        self.trd.clear();
+        self.trd.resize(self.quotes.len(), TrdRing::default());
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -705,11 +784,18 @@ impl Fast {
             }
             EventRef::Trade { inst, .. } => {
                 let now = v.now().engine_ns;
+                let trd_on = self.p.defaults().trd_win_ms > 0;
                 for (k, q) in self.quotes.iter().enumerate() {
                     if q.inst == inst
                         && let Some(m) = self.mic.get_mut(k)
                     {
                         m.trade_ens = now;
+                    }
+                    if trd_on
+                        && q.inst == inst
+                        && let Some(t) = self.trd.get_mut(k)
+                    {
+                        t.on_trade(inst, now);
                     }
                 }
             }
@@ -1391,6 +1477,19 @@ impl Fast {
                                 < i128::from(d.lo_obi_min.0) * sum
                     }));
             let no_open = no_open || chop_block || lo_block;
+            // v35 trade-activity gate: both legs' prints over trd_win_ms (history too short: no block).
+            let quiet = opening && d.trd_win_ms > 0 && {
+                let ms = i64::from(d.trd_win_ms);
+                let leg = |k: usize| {
+                    let inst = self.quotes.get(k).map_or(INST_NONE, |q| q.inst);
+                    self.trd.get(k).and_then(|t| if t.inst == inst { t.over(ens, ms) } else { Some(0) })
+                };
+                match (leg(i), leg(i ^ 1)) {
+                    (Some(a), Some(b)) => a.saturating_add(b) < i64::from(d.trd_min),
+                    _ => false,
+                }
+            };
+            let no_open = no_open || quiet;
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a

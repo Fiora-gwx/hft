@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 34, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 35, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -367,6 +367,11 @@ hft_strategy_sdk::define_params! {
         lo_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
         lo_obi_on: Bool [default = 0, since = 34, relax = None],
         lo_obi_min: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        /// (schema v35) trade-activity gate: a leg that is not short opens only while the window's two
+        /// tokens printed at least trd_min trades over the last trd_win_ms (a drop on active selling
+        /// reverts more often than a quiet repricing); history shorter than trd_win_ms does not block; 0 = off
+        trd_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 35, relax = None],
+        trd_min: Count [min = 0, max = 1_000_000, default = 0, since = 35, relax = None],
     }
 }
 
