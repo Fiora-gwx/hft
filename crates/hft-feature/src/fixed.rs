@@ -10,8 +10,27 @@ pub const LN2_NANO: i128 = 693_147_181;
 
 const ONE128: i128 = ONE as i128;
 
-/// Floor square root.
+/// Floor square root (exact): an f64 estimate corrected by integer checks, so the result is the
+/// unique x with x² ≤ v < (x + 1)² — the same value as the Newton iteration it replaced, without
+/// its chain of 128-bit divisions (a profiled hot spot of the strategy, 2026-11-05).
 pub fn isqrt(v: u128) -> u128 {
+    if v < 2 {
+        return v;
+    }
+    // sqrt(v) < 2^64; the estimate is within a few units of the root.
+    let mut x = ((v as f64).sqrt() as u128).min(u128::from(u64::MAX));
+    while x.checked_mul(x).is_none_or(|sq| sq > v) {
+        x -= 1;
+    }
+    while (x + 1).checked_mul(x + 1).is_some_and(|sq| sq <= v) {
+        x += 1;
+    }
+    x
+}
+
+/// The Newton-iteration floor square root `isqrt` used before 2026-11-05 (tests compare against it).
+#[cfg(test)]
+fn isqrt_newton(v: u128) -> u128 {
     if v < 2 {
         return v;
     }
@@ -22,6 +41,32 @@ pub fn isqrt(v: u128) -> u128 {
         y = (x + v / x) / 2;
     }
     x
+}
+
+#[cfg(test)]
+mod isqrt_tests {
+    use super::{isqrt, isqrt_newton};
+
+    #[test]
+    fn isqrt_matches_newton() {
+        let mut edge: Vec<u128> = (0..=10_000u128).collect();
+        for k in 1..128u32 {
+            let p = 1u128 << k;
+            edge.extend([p - 1, p, p + 1]);
+        }
+        for r in [u64::MAX as u128, (1u128 << 63) + 12_345, 3_037_000_499, 1_000_000_007] {
+            edge.extend([r * r - 1, r * r, r * r + 1, r * r + 2 * r]);
+        }
+        edge.push(u128::MAX);
+        let mut s = 0x9E37_79B9_7F4A_7C15u128;
+        for _ in 0..200_000 {
+            s = s.wrapping_mul(0x5851_F42D_4C95_7F2D_1405_7B7E_F767_814F).wrapping_add(1);
+            edge.push(s >> (s % 128));
+        }
+        for v in edge {
+            assert_eq!(isqrt(v), isqrt_newton(v), "v = {v}");
+        }
+    }
 }
 
 /// 2·atanh(u / 1e9) × 1e9 = ln((1 + u)/(1 − u)) for |u| < 1e9: 2·Σ_{j=0}^{11} u^(2j+1) / (2j+1),

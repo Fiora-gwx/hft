@@ -966,6 +966,22 @@ impl Fast {
             -1
         };
         let left_ms = (start + w) * 1_000 - utc_ms;
+        // v36 A/B sizing: odd windows scale the share limits by ab_scale.
+        let ab = if d.ab_scale > 1 && w > 0 && (start / w).rem_euclid(2) == 1 {
+            d.ab_scale
+        } else {
+            1
+        };
+        let d = if ab > 1 {
+            let mut x = d;
+            x.clip_shares = x.clip_shares.saturating_mul(ab);
+            x.inv_max_shares = x.inv_max_shares.saturating_mul(ab);
+            x.dip_max_shares = x.dip_max_shares.saturating_mul(ab);
+            x.early_cap_shares = x.early_cap_shares.saturating_mul(ab);
+            x
+        } else {
+            d
+        };
         // Venue-load gates (README "规则" 11): the previous minute's feed lag closes quoting.
         let (load, slow) = self.feat.lag.gates(now.utc_ns, d.load_gate_ns, d.mdslow_gate_ns);
         // v34 low-volatility band: implied sigma in [sigma_lo, sigma_min) quotes with opening conditions.
@@ -1082,7 +1098,7 @@ impl Fast {
             (implied * root_milli / 1_000) as i64
         });
         let lims = if d.fv_limit && quoting {
-            self.fair_limits(v, start, up, den, qu.saturating_sub(qd), now.engine_ns)
+            self.fair_limits(v, start, up, den, qu.saturating_sub(qd) / i64::from(ab), now.engine_ns)
         } else {
             None
         };

@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 35, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 36, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -372,6 +372,10 @@ hft_strategy_sdk::define_params! {
         /// reverts more often than a quiet repricing); history shorter than trd_win_ms does not block; 0 = off
         trd_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 35, relax = None],
         trd_min: Count [min = 0, max = 1_000_000, default = 0, since = 35, relax = None],
+        /// (schema v36) A/B sizing: above 1, windows with an odd index (window start / window_s) scale
+        /// clip_shares, inv_max_shares, dip_max_shares and early_cap_shares by ab_scale (the fair-value
+        /// skew sees the net scaled back); 0 or 1 = off
+        ab_scale: Count [min = 0, max = 4, default = 0, since = 36, relax = None],
     }
 }
 

@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 33, "BMK-024.1");
+    assert_eq!(schema.version(), 36, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1233,6 +1233,24 @@ fn bmk_024_schema_v6() {
         let f = schema.field(n32 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 33, 0), "BMK-024.29");
     }
+    // .30 schema v34 appends the chop scope / trend gate and the low-volatility band (0 = off).
+    let n33 = n32 + 2;
+    let v34 = ["chop_all", "chop_er_min", "sigma_lo", "lo_er_max", "lo_obi_on", "lo_obi_min"];
+    assert_eq!(n_fields_at(schema, 34), Some(n33 + v34.len() as u16), "BMK-024.30");
+    for (k, name) in v34.iter().enumerate() {
+        let f = schema.field(n33 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 34, 0), "BMK-024.30");
+    }
+    // .31 schema v35 appends the trade-activity gate; .32 v36 the A/B sizing (0 = off).
+    let n34 = n33 + v34.len() as u16;
+    assert_eq!(n_fields_at(schema, 35), Some(n34 + 2), "BMK-024.31");
+    for (k, name) in ["trd_win_ms", "trd_min"].iter().enumerate() {
+        let f = schema.field(n34 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 35, 0), "BMK-024.31");
+    }
+    assert_eq!(n_fields_at(schema, 36), Some(n34 + 3), "BMK-024.32");
+    let f = schema.field(n34 + 2).unwrap();
+    assert_eq!((f.name, f.since, f.default), ("ab_scale", 36, 0), "BMK-024.32");
 }
 
 #[test]
