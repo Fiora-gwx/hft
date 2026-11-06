@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use hft_event::{
     Bbo, CmdResult, ConnState, ControlCmd, EngineClock, EventKind, ExternalFill, L2BatchHdr, L2SnapHdr,
-    OrderDecision, OrderEvent, Trade, UtcAnchor,
+    OrderDecision, OrderEvent, SendReport, Trade, UtcAnchor,
 };
 use hft_journal::{JournalReader, Next};
 use hft_refdata::RefData;
@@ -426,6 +426,25 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 d.reason,
                 d.intent_no,
                 d.oflags
+            );
+        } else if kind == EventKind::SEND_REPORT {
+            // Gateway write of an order-class command: engine UTC of the write (same clock as `eu`).
+            let Ok((r, _)) = SendReport::try_read_from_prefix(body) else {
+                continue;
+            };
+            let sent_eu = eutc.at(r.sent_tsc.0, calib);
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"send\",\"u\":{cur_u},\"eu\":{cur_eu},\"sq\":{cur_seq},\"sent_eu\":{sent_eu},\"dseq\":{},\"op\":{},\"oslot\":{},\"gen\":{},\"tslot\":{},\"tgen\":{},\"conn\":{},\"status\":{},\"errno\":{}}}",
+                r.decision_seq,
+                r.op as u8,
+                r.slot.0,
+                r.r#gen,
+                r.target_slot.0,
+                r.target_gen,
+                r.conn.0,
+                r.status as u8,
+                r.os_errno
             );
         } else if kind == EventKind::ORDER_EVENT {
             let Ok((e, _)) = OrderEvent::try_read_from_prefix(body) else {
