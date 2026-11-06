@@ -473,6 +473,18 @@ impl ResearchDriver {
             self.stats.log_mode_dropped += 1;
             return None;
         }
+        // A logged Kill would hold the simulated account for the rest of the journal: dropped too
+        // (counted with the dropped modes).
+        if let Some(f) = &self.force_live
+            && r.kind == EventKind::CONTROL_CMD
+            && let Ok((_, ControlCmd::Kill { scope, .. })) = ControlCmd::decode(&r.body)
+            && f.targets
+                .iter()
+                .any(|(_, a)| *a == scope.account || scope.account.0 == 0)
+        {
+            self.stats.log_mode_dropped += 1;
+            return None;
+        }
         if let Some(b) = blob_of(&r) {
             self.blobs.push(b);
         }
