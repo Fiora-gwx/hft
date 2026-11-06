@@ -76,6 +76,18 @@ impl CbFeed {
     /// u8, local receive ns i64, exchange ns i64, a, b, c i64). Kind 1 is a BBO (a bid, b ask,
     /// 1e-8 USD); other kinds are ignored. A sample's time is the arrival `ens` less its receive
     /// age against the command's last sample.
+    /// A native Coinbase BBO (the second reference group): bid + ask in the inst's price units.
+    pub fn on_bbo(&mut self, ens: i64, mid_x2: i64) {
+        if mid_x2 <= 0 {
+            return;
+        }
+        if let (Some(x), Some(y)) = (self.t.get_mut(self.pos), self.mid_x2.get_mut(self.pos)) {
+            *x = ens;
+            *y = mid_x2;
+        }
+        self.pos = (self.pos + 1) % CB_N;
+        self.n = self.n.saturating_add(1);
+    }
     pub fn on_payload(&mut self, payload: &[u8], ens: i64) {
         if payload.first() != Some(&1) || payload.len() < 3 {
             return;
@@ -148,13 +160,34 @@ impl ClFeed {
     }
 }
 
+/// Reference groups at the end of the table: the trailing groups not on the first group's (slot)
+/// venue, at most two counted (the fair-value reference, then the fast Coinbase reference).
+pub fn reference_count(groups: &GroupTable) -> u16 {
+    let n = usize::from(groups.len());
+    let slot_venue = groups.iter().next().and_then(|(_, g)| g.legs.first().map(|l| l.venue));
+    let mut k = 0;
+    while k < n.min(3) {
+        let off = groups
+            .iter()
+            .nth(n - 1 - k)
+            .and_then(|(_, g)| g.legs.first())
+            .is_some_and(|l| Some(l.venue) != slot_venue);
+        if !off {
+            break;
+        }
+        k += 1;
+    }
+    u16::try_from(k).unwrap_or(0)
+}
+
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
-/// ignores them) and the BBO of the reference leg (the last group).
+/// ignores them) and the BBO of the reference legs (the last one or two groups).
 pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
     let n = groups.len();
+    let refs = reference_count(groups).max(1);
     for (gix, g) in groups.iter() {
         let Some(l) = g.legs.first() else { continue };
-        let mask = if gix + 1 == n {
+        let mask = if gix + refs >= n {
             EvMask::BBO
         } else {
             EvMask(EvMask::BOOK.0 | EvMask::TRADE.0)
@@ -549,6 +582,9 @@ pub struct Fast {
     pub quotes: Vec<Quote>,
     scratch: Vec<Quote>,
     pub reference: InstId,
+    /// The second reference group's inst (native Coinbase BBO for the v37 guard); `INST_NONE`
+    /// without one (then the guard reads the sidecar's InjectWarmup samples).
+    pub reference2: InstId,
     /// Features the rules read (`crate::features`; not in the snapshot).
     pub feat: MakerFeatures,
     /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
@@ -599,6 +635,7 @@ impl Fast {
             quotes: Vec::with_capacity(cap),
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
+            reference2: INST_NONE,
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
                 win: i64::MIN,
@@ -638,10 +675,16 @@ impl Fast {
         let old_kind = std::mem::take(&mut self.skind);
         let mut kind = Vec::with_capacity(usize::from(groups.len()));
         let n = groups.len();
+        let refs = reference_count(groups).max(1);
+        self.reference2 = INST_NONE;
         for (gix, g) in groups.iter() {
             let Some(l) = g.legs.first() else { continue };
-            if gix + 1 == n {
-                self.reference = l.inst;
+            if gix + refs >= n {
+                if gix + refs == n {
+                    self.reference = l.inst;
+                } else {
+                    self.reference2 = l.inst;
+                }
                 continue;
             }
             let fresh = Quote {
@@ -843,7 +886,16 @@ impl Fast {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
-            EventRef::Warmup { local_kind, payload, .. } if local_kind == CB_WARMUP_KIND => {
+            EventRef::Bbo { inst, b, .. } if inst == self.reference2 && inst != INST_NONE => {
+                self.cb.on_bbo(v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
+                if self.p.defaults().cb_win_ms > 0 {
+                    self.run(v, ctx);
+                }
+            }
+            // The sidecar's samples only without a native Coinbase reference (different units).
+            EventRef::Warmup { local_kind, payload, .. }
+                if local_kind == CB_WARMUP_KIND && self.reference2 == INST_NONE =>
+            {
                 self.cb.on_payload(payload, v.now().engine_ns);
                 if self.p.defaults().cb_win_ms > 0 {
                     self.run(v, ctx);
