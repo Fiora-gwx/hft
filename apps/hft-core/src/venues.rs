@@ -457,6 +457,7 @@ where
         env: c.instance.order_env().venue_env(),
         rest_conns,
         rest_cancel_reserve,
+        cancel_race: v.gw.cancel_race.unwrap_or(false),
         oms_slots: v
             .accounts
             .iter()

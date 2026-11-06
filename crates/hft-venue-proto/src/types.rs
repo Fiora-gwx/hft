@@ -560,6 +560,10 @@ pub enum RestWhat {
     Keepalive,
     /// `CANCEL_ALL_SWEEP` open-order list.
     Sweep,
+    /// A second request racing an order request (`gw.cancel_race`, `encode_rest_companion`):
+    /// decoded like `Order` (same `req`), but it has no `SendReport` and its failure or silence
+    /// never makes the order unknown.
+    OrderCompanion,
 }
 
 /// Origin of a gw REST request, given back to `decode_rest`.

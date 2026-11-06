@@ -221,6 +221,9 @@ pub struct GwCfg {
     /// Free connections of each gw REST pool only cancels may take (< `rest_conns`); hft-core
     /// default `P::GW_REST_CANCEL_RESERVE`.
     pub rest_cancel_reserve: u8,
+    /// Race every REST cancel with the protocol's companion request on another free connection
+    /// (`VenueProtocol::encode_rest_companion`, README "撤单赛跑"); off by default.
+    pub cancel_race: bool,
     /// OMS slot count N per (venue, account) table: slot ids 1..=N (0 reserved); the slot mirror
     /// holds N + 1 entries indexed by slot id.
     pub oms_slots: u32,
@@ -258,6 +261,7 @@ impl Default for GwCfg {
             rotate_margin_s: 3600,
             rest_conns: 2,
             rest_cancel_reserve: 0,
+            cancel_race: false,
             oms_slots: 2048,
             env: VenueEnv::Prod,
             order_endpoint: EndpointId::default(),

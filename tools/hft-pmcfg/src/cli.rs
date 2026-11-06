@@ -9,7 +9,7 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--live-account UID KEYS_DIR ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
@@ -106,6 +106,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut account_cap = None;
     let mut group_cap = None;
     let mut no_presign = false;
+    let mut no_cancel_race = false;
     let mut extra = Vec::new();
     let mut params = Vec::new();
     let mut pos: Vec<String> = Vec::new();
@@ -200,6 +201,10 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_presign, "--no-presign")?;
                 no_presign = true;
             }
+            "--no-cancel-race" => {
+                once(no_cancel_race, "--no-cancel-race")?;
+                no_cancel_race = true;
+            }
             "--param" => {
                 let p = next("--param", "NAME=RAW")?;
                 params.push(crate::parse_param(&p)?);
@@ -219,6 +224,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let needs_live = [
         (probe, "--taker-probe"),
         (no_presign, "--no-presign"),
+        (no_cancel_race, "--no-cancel-race"),
         (!extra.is_empty(), "--live-account/--account"),
         (carry.is_some(), "--day-loss-carry"),
         (daily_loss.is_some(), "--daily-loss"),
@@ -260,6 +266,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 account_cap,
                 group_cap,
                 presign: !no_presign,
+                cancel_race: !no_cancel_race,
                 extra_accounts: extra,
             };
             l.check()?;

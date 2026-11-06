@@ -252,6 +252,39 @@ pub(crate) fn encode(
     sign_headers(&t.eoa, k.api_secret, cred, clk, true, out).map_err(of)
 }
 
+/// README "撤单赛跑": the companion of a `Cancel` sent by the order hash — every order of the
+/// account on the token (`DELETE /cancel-market-orders`), so it ends the same order when that is
+/// the account's only order on the token (one quote per leg). `Ok(false)` for other operations
+/// and for a cancel that already goes by token.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn encode_companion(
+    t: &Templates,
+    ctx: &GwCtx,
+    cred: &Credential,
+    c: &GwCmd,
+    tgt: &TargetRef,
+    clk: &WallClock,
+    out: &mut RestReqBuf,
+) -> Result<bool, EncodeErr> {
+    if c.op != GwOp::Cancel
+        || ctx
+            .order_hash(tgt.exch_order_id)
+            .or_else(|| ctx.placed_hash(&tgt.id))
+            .is_none()
+    {
+        return Ok(false);
+    }
+    *out = RestReqBuf::default();
+    let k = l2_keys(cred).map_err(|_| EncodeErr::Unsupported(c.op))?;
+    if k.deposit != t.wallet {
+        return Err(EncodeErr::Unsupported(c.op));
+    }
+    out.method = Method::Delete;
+    cancel_token(ctx, c, out)?;
+    sign_headers(&t.eoa, k.api_secret, cred, clk, true, out).map_err(of)?;
+    Ok(true)
+}
+
 /// `DELETE /cancel-market-orders {"asset_id": <token of c.inst>}`.
 fn cancel_token(ctx: &GwCtx, c: &GwCmd, out: &mut RestReqBuf) -> Result<(), EncodeErr> {
     let token = ctx.token_of(c.inst).ok_or(EncodeErr::UnknownInst)?;

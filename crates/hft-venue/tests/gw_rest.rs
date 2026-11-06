@@ -602,27 +602,27 @@ fn ven_402_idle_rest_lane_rebuilt_before_an_order_uses_it() {
             h.poll(now + n);
         }
     }
-    assert!(h.retired.is_empty() && rest_builds(&h).is_empty(), "VEN-402.1");
+    assert!(h.retired.is_empty() && rest_builds(&h).is_empty(), "VEN-414.1");
     // .2 at the age one lane retires and its replacement is requested from conn-builder; the
     // other lane stays installed.
     for n in 0..8 {
         h.poll(26 * S + 1 + n);
     }
-    assert_eq!(h.retired, vec![r0], "VEN-402.2");
+    assert_eq!(h.retired, vec![r0], "VEN-414.2");
     let b = rest_builds(&h);
-    assert_eq!(b.len(), 1, "VEN-402.2");
-    assert!(h.rt.conn(r1).is_some(), "VEN-402.2");
+    assert_eq!(b.len(), 1, "VEN-414.2");
+    assert!(h.rt.conn(r1).is_some(), "VEN-414.2");
     let fresh = b[0];
     h.complete(fresh);
     h.poll(26 * S + 10);
-    assert!(h.rt.conn(fresh).is_some(), "VEN-402.2");
+    assert!(h.rt.conn(fresh).is_some(), "VEN-414.2");
     // .3 the next check recycles the other aged lane; its replacement is built the same way.
     for n in 0..8 {
         h.poll(27 * S + 10 + n);
     }
-    assert_eq!(h.retired, vec![r0, r1], "VEN-402.3");
+    assert_eq!(h.retired, vec![r0, r1], "VEN-414.3");
     let b: Vec<_> = rest_builds(&h).into_iter().filter(|c| *c != fresh).collect();
-    assert_eq!(b.len(), 1, "VEN-402.3");
+    assert_eq!(b.len(), 1, "VEN-414.3");
     h.complete(b[0]);
     h.poll(27 * S + 20);
     // .4 a REST place goes out on a rebuilt connection, never on a recycled one.
@@ -632,9 +632,9 @@ fn ven_402_idle_rest_lane_rebuilt_before_an_order_uses_it() {
     let p = h.place(A1, 7, 3, S1, false);
     h.cmd(p);
     h.poll(28 * S);
-    assert_eq!(reports(&h.reps())[0].status, SendStatus::Written, "VEN-402.4");
-    assert_eq!(sent(&mut h, fresh) + sent(&mut h, b[0]), before + 1, "VEN-402.4");
-    assert!(h.rt.conn(r0).is_none() && h.rt.conn(r1).is_none(), "VEN-402.4");
+    assert_eq!(reports(&h.reps())[0].status, SendStatus::Written, "VEN-414.4");
+    assert_eq!(sent(&mut h, fresh) + sent(&mut h, b[0]), before + 1, "VEN-414.4");
+    assert!(h.rt.conn(r0).is_none() && h.rt.conn(r1).is_none(), "VEN-414.4");
 }
 
 /// Answers the request in flight on `conn` (status 200) and polls it out.
@@ -965,4 +965,62 @@ fn ven_413_private_builds_and_rest_pools_per_account() {
         h.rt.set_rest_pools(A2, vec![(EndpointId(0), pool)]).is_err(),
         "VEN-413.4"
     );
+}
+
+/// An HTTP answer on connection `conn`.
+fn response_on<const V: u32>(h: &mut Gh<Stub<2048, V>>, conn: u8, status: u16, now: u64) {
+    let msg = format!("HTTP/1.1 {status} Result\r\nContent-Length: 2\r\n\r\nok");
+    let wire = h.net.peer(ConnId(conn)).records(&[msg.as_bytes()]);
+    mempeer::deliver(h.rt.conn(ConnId(conn)).unwrap(), now, now, wire);
+    for n in 0..8 {
+        h.poll(now + n);
+    }
+}
+
+/// README "撤单赛跑": with `gw.cancel_race` a REST cancel also writes the protocol's companion on
+/// the other free connection — one `SendReport`, no report of its own — and a failed companion
+/// does not make the order unknown.
+#[test]
+fn ven_414_cancel_race_companion() {
+    let race = hft_venue::GwCfg {
+        cancel_race: true,
+        ..g0()
+    };
+    let mut h = setup_lanes::<V_REST_ORDERS>(race, net::net_cfg(), 2, 0);
+    stub::set_cfg(|c| c.companion = true);
+    let p = h.place(A1, 7, 3, S1, false);
+    h.cmd(p);
+    h.poll(4000);
+    h.reps();
+    response(&mut h, 200, 4500);
+    h.reps();
+    stub::take_log();
+    // .1 the cancel and its companion are written; one Written report.
+    let c = h.targeted(GwOp::Cancel, A1, 7);
+    h.cmd(c);
+    h.poll(5000);
+    assert_eq!(statuses(&h.reps()), vec![SendStatus::Written], "VEN-414.1");
+    assert_eq!(stub::calls("encode_rest_companion").len(), 1, "VEN-414.1");
+    assert_eq!(h.rt.counters().rest_companion_sent, 1, "VEN-414.1");
+    // .2 the companion's failure (503 on its connection) is not an unknown outcome of the order.
+    response_on(&mut h, 115, 503, 6000);
+    let v = h.reps();
+    assert!(
+        !v.iter().any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.what == OrderEventKind::OutcomeUnknown)),
+        "VEN-414.2 {v:?}"
+    );
+    // .3 off: no companion.
+    let mut h = setup_lanes::<V_REST_ORDERS>(g0(), net::net_cfg(), 2, 0);
+    stub::set_cfg(|c| c.companion = true);
+    let p = h.place(A1, 7, 3, S1, false);
+    h.cmd(p);
+    h.poll(4000);
+    response(&mut h, 200, 4500);
+    h.reps();
+    stub::take_log();
+    let c = h.targeted(GwOp::Cancel, A1, 7);
+    h.cmd(c);
+    h.poll(5000);
+    assert!(stub::calls("encode_rest_companion").is_empty(), "VEN-414.3");
+    assert_eq!(h.rt.counters().rest_companion_sent, 0, "VEN-414.3");
 }

@@ -25,6 +25,7 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: extra,
     }
 }
@@ -171,6 +172,7 @@ fn pmc_005_tool_output_equals_library() {
     let hot = p("hot");
     let carry = PmLive {
         presign: false,
+        cancel_race: false,
         daily_loss_abs: Some(20_000_000),
         daily_loss_max_resumes: Some(3),
         account_cap: None,
@@ -209,6 +211,7 @@ fn pmc_005_tool_output_equals_library() {
                 "12345".into(),
                 s(&p("k1")),
                 "--no-presign".into(),
+                "--no-cancel-race".into(),
                 "--daily-loss".into(),
                 "20".into(),
                 "--daily-loss-resumes".into(),

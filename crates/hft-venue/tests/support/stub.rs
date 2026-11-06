@@ -77,6 +77,8 @@ pub struct StubCfg {
     /// `encode` fails with this error (VEN-199.6).
     pub encode_err: Option<EncodeErr>,
     pub fee_rule_deviation: bool,
+    /// `encode_rest_companion` gives a cancel companion (VEN-402).
+    pub companion: bool,
 }
 
 pub const HB_OFF: HeartbeatSpec = HeartbeatSpec {
@@ -113,6 +115,7 @@ impl Default for StubCfg {
             hb_order: HB_OFF,
             probe: PingKind::WsPing,
             encode_err: None,
+            companion: false,
             fee_rule_deviation: false,
         }
     }
@@ -1115,6 +1118,27 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let b = ctx.bound.iter().find(|(i, _)| *i == c.inst).map(|(_, id)| id[0]);
         log("encode_rest_ctx", || format!("{b:?}"));
         Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out)
+    }
+    /// With `companion`: a cancel's second request (`/companion?wire-only`).
+    fn encode_rest_companion(
+        _rd: &RefData,
+        _t: &Tpl,
+        _ctx: &mut GwCtx,
+        _cred: &Credential,
+        c: &GwCmd,
+        _tgt: &TargetRef,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        if !cfg().companion || c.op != GwOp::Cancel {
+            return Ok(false);
+        }
+        log("encode_rest_companion", || format!("{:?}", c.op));
+        out.path_query
+            .push(b"/companion?wire-only")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(true)
     }
     fn encode_rest_signed(
         rd: &RefData,
