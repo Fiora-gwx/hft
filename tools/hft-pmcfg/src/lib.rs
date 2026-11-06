@@ -75,7 +75,7 @@ pub const PM_PROBE_RR_MAX_CROSS: i64 = 500_000_000;
 pub enum PmStrategy {
     /// book-observer: one group per slot, never trades (the sim without a mode flag).
     Observer,
-    /// binary-maker: one group per slot plus the reference group.
+    /// binary-maker: one group per slot plus the reference group (and the Coinbase reference).
     Maker,
     /// pm-taker-probe: one group, slot `btc-up-0` (InstId 1).
     TakerProbe,
@@ -885,7 +885,7 @@ fn write_pm(
         });
     }
     if coinbase {
-        // Market data only: no account, no group; a strategy subscribes to it by InstId.
+        // Market data only: no account; the maker's second reference group (InstId 8).
         b.inst(InstSpec {
             id: cb_ref,
             venue: cb,
@@ -965,11 +965,12 @@ fn write_pm(
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).map_err(|e| format!("refdata: {e:?}"))?;
     let schema = desc.schema;
-    // Groups: one per slot (and the reference); the probe has one, slot InstId 1.
+    // Groups: one per slot (and the reference, then the Coinbase reference); the probe has one,
+    // slot InstId 1.
     let n = if probe {
         1
     } else {
-        slots.len() as u16 + u16::from(maker)
+        slots.len() as u16 + u16::from(maker) + u16::from(coinbase)
     };
     let field =
         |name: &str| (0..schema.n_fields()).position(|i| schema.field(i).is_some_and(|f| f.name == name));
@@ -1024,7 +1025,13 @@ fn write_pm(
     };
     let mut params = h.as_bytes().to_vec();
     for i in 0..usize::from(n) {
-        let (asset, venue) = if i < slots.len() { (token(i), v) } else { (btc, bn) };
+        let (asset, venue) = if i < slots.len() {
+            (token(i), v)
+        } else if i == slots.len() {
+            (btc, bn)
+        } else {
+            (btc, cb)
+        };
         let g = GroupSpec {
             id: GroupId::compose(StrategyId(1), i as u32 + 1).ok_or("group id")?,
             asset,

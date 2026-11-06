@@ -487,10 +487,19 @@ fn pmc_008_coinbase_reference() {
         ],
         "PMC-008.1"
     );
-    // .2 no group and no account on it: strategy parameters are those of the configuration without.
-    assert_eq!(
+    // .2 one more group, the maker's second reference (InstId 8 on Coinbase, no opening); the
+    // other groups are those of the configuration without.
+    let (bw, bo) = (
         std::fs::read(with.join("strategy_params.bin")).unwrap(),
         std::fs::read(without.join("strategy_params.bin")).unwrap(),
+    );
+    let (sw, so) = (hft_event::parse_spb1(&bw).unwrap(), hft_event::parse_spb1(&bo).unwrap());
+    assert_eq!((sw.hdr.n_groups, so.hdr.n_groups), (8, 7), "PMC-008.2");
+    assert_eq!(&sw.groups[..7], &so.groups[..], "PMC-008.2");
+    let g = sw.groups[7];
+    assert_eq!(
+        (g.n_legs, g.open_allowed, g.legs[0].inst, g.legs[0].venue),
+        (1, 0, hft_types::InstId(8), cb),
         "PMC-008.2"
     );
     // .3 --no-coinbase: nothing of it.
