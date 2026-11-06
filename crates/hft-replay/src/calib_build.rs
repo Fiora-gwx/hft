@@ -21,6 +21,11 @@ pub struct CalibOpts {
     pub reassembly: usize,
     pub window_s: u32,
     pub phase_s: u32,
+    /// Move buckets (hft-sim `CondCfg`): thresholds bp × 100, look-back ms, reference inst (0 =
+    /// the first `Bbo` inst of a venue without L2).
+    pub mv_thr: Vec<u32>,
+    pub mv_window_ms: u32,
+    pub ref_inst: u32,
 }
 
 /// A decision waiting for its report: `(record tsc, previous-minute load value, move, phase)`.
@@ -68,7 +73,8 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
             continue;
         };
         let hz = clk.tsc_hz_milli.max(1);
-        let one_s = hz / 1_000;
+        let win = hz.saturating_mul(u64::from(o.mv_window_ms)) / 1_000_000;
+        let keep = hz.saturating_mul(u64::from(o.mv_window_ms.max(1_000))).saturating_mul(2) / 1_000_000;
         let utc = |t: u64| -> i64 {
             let d = i128::from(t) - i128::from(clk.calib_tsc);
             clk.calib_realtime_ns + (d * 1_000_000_000_000 / i128::from(hz)) as i64
@@ -112,7 +118,7 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
                     let Some(b) = read_body_plain::<hft_event::Bbo>(&r.body) else {
                         continue;
                     };
-                    if lag.ref_inst.is_none() {
+                    if lag.ref_inst.is_none() && (o.ref_inst == 0 || o.ref_inst == b.h.inst.0) {
                         lag.ref_inst = Some(b.h.inst.0);
                     }
                     if lag.ref_inst == Some(b.h.inst.0) && b.bid_px.0 > 0 && b.ask_px.0 > 0 {
@@ -121,7 +127,7 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
                         while lag
                             .ref_hist
                             .front()
-                            .is_some_and(|x| r.tsc.saturating_sub(x.0) > 2 * one_s)
+                            .is_some_and(|x| r.tsc.saturating_sub(x.0) > keep)
                         {
                             lag.ref_hist.pop_front();
                         }
@@ -136,19 +142,10 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
                     continue;
                 }
                 let mv = match (
-                    lag.ref_hist.iter().find(|x| r.tsc.saturating_sub(x.0) <= one_s),
+                    lag.ref_hist.iter().find(|x| r.tsc.saturating_sub(x.0) <= win),
                     lag.ref_hist.back(),
                 ) {
-                    (Some(a), Some(b)) if a.1 > 0 => {
-                        let dd = (b.1 - a.1).abs();
-                        if dd * 40_000 <= a.1 {
-                            0
-                        } else if dd * 10_000 <= a.1 {
-                            1
-                        } else {
-                            2
-                        }
-                    }
+                    (Some(a), Some(b)) if a.1 > 0 => hft_sim::move_bucket((b.1 - a.1).abs(), a.1, &o.mv_thr),
                     _ => 0,
                 };
                 let s = utc(r.tsc).div_euclid(1_000_000_000);
@@ -220,6 +217,9 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
         "thr": thr_ms,
         "window_s": o.window_s,
         "phase_s": o.phase_s,
+        "mv_thr_bp": o.mv_thr.iter().map(|t| f64::from(*t) / 100.0).collect::<Vec<_>>(),
+        "mv_window_ms": o.mv_window_ms,
+        "mv_ref_inst": o.ref_inst,
         "pools": pools,
         "meta": {
             "tool": "replayer calib",

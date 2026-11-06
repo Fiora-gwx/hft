@@ -1,7 +1,8 @@
 //! The latency-condition tracker (README "条件延迟"): the `Cond` of a decision from the market
 //! records the simulation is fed. Venue load = the previous complete UTC minute's median of
 //! per-second md-lag p90 on the tracked venues (against `load_thr_ns`); move = the reference
-//! quote's mid change over the last 1 s (≤ 0.25 / ≤ 1 / > 1 bp); phase = outside the first
+//! quote's mid change over the last `mv_window_ms` (bucket = number of `mv_thr` thresholds it
+//! exceeds; default 1 s and 0.25 / 1 bp → ≤ 0.25 / ≤ 1 / > 1 bp); phase = outside the first
 //! `phase_s` of each `window_s`. Shared by research replay and the sim-gw.
 
 use std::collections::VecDeque;
@@ -19,6 +20,22 @@ pub struct CondCfg {
     pub load_thr_ns: Vec<i64>,
     pub window_s: u32,
     pub phase_s: u32,
+    /// Move bucket thresholds, bp × 100 (25 = 0.25 bp), ascending.
+    pub mv_thr: Vec<u32>,
+    /// Look-back of the move (ms).
+    pub mv_window_ms: u32,
+    /// The reference inst (0 = the first `Bbo` inst of an untracked venue).
+    pub ref_inst: u32,
+}
+
+/// Move bucket of a change `d` (absolute) of `base` (both in bid + ask units): the number of
+/// thresholds of `thr` (bp × 100) it exceeds. Shared with `replayer calib`.
+pub fn move_bucket(d: i128, base: i128, thr: &[u32]) -> u8 {
+    let n = thr
+        .iter()
+        .filter(|t| d * 1_000_000 > base * i128::from(**t))
+        .count();
+    u8::try_from(n).unwrap_or(u8::MAX)
 }
 
 impl Default for CondCfg {
@@ -27,6 +44,9 @@ impl Default for CondCfg {
             load_thr_ns: Vec::new(),
             window_s: 300,
             phase_s: 5,
+            mv_thr: vec![25, 100],
+            mv_window_ms: 1_000,
+            ref_inst: 0,
         }
     }
 }
@@ -87,13 +107,17 @@ impl CondTracker {
             let Some(b) = crate::glue::body_of::<Bbo>(body) else {
                 return;
             };
-            if self.ref_inst.is_none() {
+            if self.ref_inst.is_none() && (self.cfg.ref_inst == 0 || self.cfg.ref_inst == b.h.inst.0) {
                 self.ref_inst = Some(b.h.inst);
             }
             if self.ref_inst == Some(b.h.inst) && b.bid_px.0 > 0 && b.ask_px.0 > 0 {
                 self.ref_hist
                     .push_back((tsc, i128::from(b.bid_px.0) + i128::from(b.ask_px.0)));
-                let keep = self.hz_milli.saturating_mul(2) / 1_000;
+                let keep = self
+                    .hz_milli
+                    .saturating_mul(u64::from(self.cfg.mv_window_ms.max(1_000)))
+                    .saturating_mul(2)
+                    / 1_000_000;
                 while self
                     .ref_hist
                     .front()
@@ -135,21 +159,12 @@ impl CondTracker {
 
     /// The condition of a decision at record time `t` and engine UTC `utc_ns`.
     pub fn condition(&self, t: Tsc, utc_ns: i64) -> Cond {
-        let one_s = self.hz_milli / 1_000;
+        let win = self.hz_milli.saturating_mul(u64::from(self.cfg.mv_window_ms)) / 1_000_000;
         let mv = match (
-            self.ref_hist.iter().find(|x| t.0.saturating_sub(x.0) <= one_s),
+            self.ref_hist.iter().find(|x| t.0.saturating_sub(x.0) <= win),
             self.ref_hist.back(),
         ) {
-            (Some(a), Some(b)) if a.1 > 0 => {
-                let d = (b.1 - a.1).abs();
-                if d * 40_000 <= a.1 {
-                    0
-                } else if d * 10_000 <= a.1 {
-                    1
-                } else {
-                    2
-                }
-            }
+            (Some(a), Some(b)) if a.1 > 0 => move_bucket((b.1 - a.1).abs(), a.1, &self.cfg.mv_thr),
             _ => 0,
         };
         let s = utc_ns.div_euclid(1_000_000_000);
