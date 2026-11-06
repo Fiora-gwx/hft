@@ -264,7 +264,15 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             // Coinbase samples of the cb_feed sidecar (InjectWarmup local_kind 3, payload v1:
             // version u8 = 1, count u16 LE, then count × (kind u8, local_ns, ex_ns, a, b, c i64 LE);
             // kind 1 = BBO (a bid, b ask, 1e-8 USD), 2 = trade (a px, b qty, c side)).
-            if let Ok((_, ControlCmd::InjectWarmup { local_kind: 3, payload, .. })) = decoded {
+            if let Ok((
+                _,
+                ControlCmd::InjectWarmup {
+                    local_kind: 3,
+                    payload,
+                    ..
+                },
+            )) = decoded
+            {
                 if payload.len() >= 3 && payload[0] == 1 {
                     let n_s = usize::from(u16::from_le_bytes([payload[1], payload[2]]));
                     for s in payload[3..].chunks_exact(41).take(n_s) {

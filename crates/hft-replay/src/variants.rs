@@ -59,7 +59,10 @@ pub fn parse_file(text: &str) -> Result<Vec<Variant>, String> {
             return Err(format!("variants: empty or duplicate name {:?}", v.name));
         }
         if !matches!(v.base.as_deref(), None | Some("journal" | "defaults")) {
-            return Err(format!("variants: {}: base must be \"journal\" or \"defaults\"", v.name));
+            return Err(format!(
+                "variants: {}: base must be \"journal\" or \"defaults\"",
+                v.name
+            ));
         }
     }
     Ok(f.variant)

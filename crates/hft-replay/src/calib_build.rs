@@ -74,7 +74,10 @@ pub fn build(o: &CalibOpts) -> Result<serde_json::Value, String> {
         };
         let hz = clk.tsc_hz_milli.max(1);
         let win = hz.saturating_mul(u64::from(o.mv_window_ms)) / 1_000_000;
-        let keep = hz.saturating_mul(u64::from(o.mv_window_ms.max(1_000))).saturating_mul(2) / 1_000_000;
+        let keep = hz
+            .saturating_mul(u64::from(o.mv_window_ms.max(1_000)))
+            .saturating_mul(2)
+            / 1_000_000;
         let utc = |t: u64| -> i64 {
             let d = i128::from(t) - i128::from(clk.calib_tsc);
             clk.calib_realtime_ns + (d * 1_000_000_000_000 / i128::from(hz)) as i64

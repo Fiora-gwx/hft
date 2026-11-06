@@ -202,7 +202,10 @@ pub fn read_only_error(name: &str, v: &Venue) -> Option<Error> {
     (READ_ONLY_PROTOCOLS.contains(&v.protocol.as_str()) && !v.accounts.is_empty()).then(|| {
         Error::config(
             "ReadOnlyVenue",
-            format!("venues.{name}: {} is market data only and takes no accounts", v.protocol),
+            format!(
+                "venues.{name}: {} is market data only and takes no accounts",
+                v.protocol
+            ),
         )
     })
 }

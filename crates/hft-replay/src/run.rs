@@ -290,7 +290,7 @@ pub fn run_one<S: StrategySet>(cfg: &RunCfg) -> Result<RunOut, String> {
             .filter_map(|c| read_body::<CmdResult>(&c.body))
             .filter(|r| r.cmd_id[..8] == *b"forcelve")
         {
-            *tally.entry((u16::from(r.status), r.detail as u32)).or_default() += 1;
+            *tally.entry((u16::from(r.status), r.detail)).or_default() += 1;
         }
         eprintln!("replayer: force-live SetMode results (status, detail) -> count: {tally:?}");
     }

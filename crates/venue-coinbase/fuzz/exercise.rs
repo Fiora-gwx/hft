@@ -52,7 +52,12 @@ pub fn run(data: &[u8]) {
 
 #[test]
 fn cbx_016_decoder_truncation_smoke() {
-    for (mt, case) in [("ticker", "normal"), ("match", "taker_buy"), ("last_match", "on_subscribe"), ("heartbeat", "normal")] {
+    for (mt, case) in [
+        ("ticker", "normal"),
+        ("match", "taker_buy"),
+        ("last_match", "on_subscribe"),
+        ("heartbeat", "normal"),
+    ] {
         let (sample, _) = crate::support::fixture(mt, case);
         for n in 0..=sample.len() {
             run(&sample[..n]);

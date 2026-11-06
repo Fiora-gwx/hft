@@ -820,7 +820,9 @@ fn write_pm(
                 },
             );
         }
-        b.caps(venue_coinbase::CoinbaseSpot::default_caps(|s| (s == "USD").then_some(usd)));
+        b.caps(venue_coinbase::CoinbaseSpot::default_caps(|s| {
+            (s == "USD").then_some(usd)
+        }));
         b.fee(FeeSpec {
             venue: cb,
             tier: 0,

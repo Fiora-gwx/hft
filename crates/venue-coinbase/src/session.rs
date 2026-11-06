@@ -2,7 +2,9 @@
 
 use hft_refdata::RefData;
 use hft_types::InstId;
-use hft_venue_proto::{EndpointSpec, ProtoErr, Role, RouteId, RouteKind, RouteSpec, StreamKind, SubFrames, SubSpec};
+use hft_venue_proto::{
+    EndpointSpec, ProtoErr, Role, RouteId, RouteKind, RouteSpec, StreamKind, SubFrames, SubSpec,
+};
 
 use crate::VENUE;
 
@@ -64,7 +66,11 @@ fn product(rd: &RefData, inst: InstId) -> Result<&[u8], ProtoErr> {
         return Err(ProtoErr::Cfg);
     }
     let s = rd.inst_meta(inst).symbol.as_bytes();
-    if s.is_empty() || !s.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'-') {
+    if s.is_empty()
+        || !s
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'-')
+    {
         return Err(ProtoErr::Cfg);
     }
     Ok(s)
@@ -88,7 +94,10 @@ struct Frame {
 impl Frame {
     fn push(&mut self, b: &[u8]) -> Result<(), ProtoErr> {
         let end = self.n.checked_add(b.len()).ok_or(ProtoErr::BufFull)?;
-        self.buf.get_mut(self.n..end).ok_or(ProtoErr::BufFull)?.copy_from_slice(b);
+        self.buf
+            .get_mut(self.n..end)
+            .ok_or(ProtoErr::BufFull)?
+            .copy_from_slice(b);
         self.n = end;
         Ok(())
     }

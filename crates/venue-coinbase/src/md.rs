@@ -107,7 +107,13 @@ fn peek_of(inst: InstId, stream: StreamKind, last: u64) -> Peek {
 /// Parses `p` into `T`; the input ending early → `Truncated`, anything else → `Shape`.
 fn from<'a, T: Deserialize<'a>>(p: &'a [u8]) -> Result<T, DecodeErr> {
     let text = core::str::from_utf8(p).map_err(|_| DecodeErr::Shape)?;
-    sonic_rs::from_str::<T>(text).map_err(|e| if e.is_eof() { DecodeErr::Truncated } else { DecodeErr::Shape })
+    sonic_rs::from_str::<T>(text).map_err(|e| {
+        if e.is_eof() {
+            DecodeErr::Truncated
+        } else {
+            DecodeErr::Shape
+        }
+    })
 }
 
 fn fixed(s: &str, exp: i8) -> Result<i64, DecodeErr> {

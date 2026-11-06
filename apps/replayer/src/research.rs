@@ -97,7 +97,11 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                     "queue-cap" => hft_sim::MakerFill::QueueCap,
                     "queue-strict" => hft_sim::MakerFill::QueueStrict,
                     "through" => hft_sim::MakerFill::TradeThrough,
-                    _ => return Err(format!("--maker-fill {value}: queue|queue-cap|queue-strict|through")),
+                    _ => {
+                        return Err(format!(
+                            "--maker-fill {value}: queue|queue-cap|queue-strict|through"
+                        ));
+                    }
                 }
             }
             "--calib" => {
@@ -306,8 +310,7 @@ pub(crate) fn execute_features<S: StrategySet>(
     Ok(0)
 }
 
-const CALIB_USAGE: &str =
-    "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N] \n[--mv-thr-bp BP[,BP...]] [--mv-window-ms N] [--mv-ref-inst N]";
+const CALIB_USAGE: &str = "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N] \n[--mv-thr-bp BP[,BP...]] [--mv-window-ms N] [--mv-ref-inst N]";
 
 /// `replayer calib`: the conditional latency pools of one account from a live journal.
 pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
@@ -347,7 +350,8 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
                         .trim()
                         .parse()
                         .map_err(|_| (2, format!("--mv-thr-bp {value}: comma list of bp")))?;
-                    if !(bp.is_finite() && bp > 0.0) || v.last().is_some_and(|l| f64::from(*l) >= bp * 100.0) {
+                    if !(bp.is_finite() && bp > 0.0) || v.last().is_some_and(|l| f64::from(*l) >= bp * 100.0)
+                    {
                         return Err((2, format!("--mv-thr-bp {value}: positive and ascending")));
                     }
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

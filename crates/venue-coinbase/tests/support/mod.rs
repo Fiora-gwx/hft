@@ -35,15 +35,28 @@ pub fn blob() -> Vec<u8> {
             id,
             name: name.into(),
             class,
-            exp: AssetExp { px_exp: px, qty_exp: qty },
+            exp: AssetExp {
+                px_exp: px,
+                qty_exp: qty,
+            },
             px_max: Px(1_000_000_000_000),
             qty_max: Qty(1_000_000_000_000_000),
             dust: Qty(1),
         });
     }
     for (v, exchange, ms, guard) in [
-        (VenueId::BINANCE_SPOT, Exchange::Binance, 5u16, StaleGuardKind::RecvWindow),
-        (VenueId::COINBASE_SPOT, Exchange::Coinbase, 8, StaleGuardKind::None),
+        (
+            VenueId::BINANCE_SPOT,
+            Exchange::Binance,
+            5u16,
+            StaleGuardKind::RecvWindow,
+        ),
+        (
+            VenueId::COINBASE_SPOT,
+            Exchange::Coinbase,
+            8,
+            StaleGuardKind::None,
+        ),
     ] {
         b.venue(VenueSpec {
             id: v,
@@ -65,7 +78,10 @@ pub fn blob() -> Vec<u8> {
         b.fee(FeeSpec {
             venue: v,
             tier: 0,
-            fee: FeePair { maker: Rate(0), taker: Rate(0) },
+            fee: FeePair {
+                maker: Rate(0),
+                taker: Rate(0),
+            },
         });
     }
     b.caps(venue_binance_caps());
@@ -82,7 +98,10 @@ pub fn blob() -> Vec<u8> {
             },
         );
     }
-    for (id, venue) in [(BTC_USD, VenueId::COINBASE_SPOT), (FOREIGN, VenueId::BINANCE_SPOT)] {
+    for (id, venue) in [
+        (BTC_USD, VenueId::COINBASE_SPOT),
+        (FOREIGN, VenueId::BINANCE_SPOT),
+    ] {
         b.inst(InstSpec {
             id,
             venue,

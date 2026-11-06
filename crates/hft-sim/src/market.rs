@@ -112,7 +112,9 @@ impl SimExchange {
     pub(crate) fn queue_model(&self) -> bool {
         matches!(
             self.tune.maker_fill,
-            crate::types::MakerFill::Queue | crate::types::MakerFill::QueueCap | crate::types::MakerFill::QueueStrict
+            crate::types::MakerFill::Queue
+                | crate::types::MakerFill::QueueCap
+                | crate::types::MakerFill::QueueStrict
         )
     }
 
@@ -387,11 +389,7 @@ impl SimExchange {
 
     /// Trade-through of the public trade `(px, qty)` on resting orders of inst `ii`.
     fn trade_through(&mut self, ii: usize, px: i64, qty: i64, t: u64, ex_ts: i64) {
-        let qty = if self.full_remainder() {
-            i64::MAX
-        } else {
-            qty
-        };
+        let qty = if self.full_remainder() { i64::MAX } else { qty };
         for ai in 0..self.accts.len() {
             if self.accts.get(ai).is_none_or(|a| a.n_resting == 0) {
                 continue;

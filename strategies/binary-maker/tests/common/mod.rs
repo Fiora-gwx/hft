@@ -169,7 +169,16 @@ pub fn refdata() -> RefData {
         );
     }
     inst(&mut b, R, VR, BTC, USDT, "BTCUSDT".into(), "0.01", "0.00000001");
-    inst(&mut b, R2, VR2, BTC, USDT, "BTC-USDT".into(), "0.01", "0.00000001");
+    inst(
+        &mut b,
+        R2,
+        VR2,
+        BTC,
+        USDT,
+        "BTC-USDT".into(),
+        "0.01",
+        "0.00000001",
+    );
     b.instance(InstanceSpec {
         id: S1,
         kind_id: 7,

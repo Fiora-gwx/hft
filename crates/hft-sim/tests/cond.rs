@@ -102,4 +102,3 @@ fn sim_245_move_thresholds_window_and_reference() {
     assert_eq!(hft_sim::move_bucket(50, 2_000_000, &[25, 100]), 0, "SIM-245.3");
     assert_eq!(hft_sim::move_bucket(52, 2_000_000, &[25, 100]), 1, "SIM-245.3");
 }
-

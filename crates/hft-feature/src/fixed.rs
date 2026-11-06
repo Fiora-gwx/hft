@@ -43,32 +43,6 @@ fn isqrt_newton(v: u128) -> u128 {
     x
 }
 
-#[cfg(test)]
-mod isqrt_tests {
-    use super::{isqrt, isqrt_newton};
-
-    #[test]
-    fn isqrt_matches_newton() {
-        let mut edge: Vec<u128> = (0..=10_000u128).collect();
-        for k in 1..128u32 {
-            let p = 1u128 << k;
-            edge.extend([p - 1, p, p + 1]);
-        }
-        for r in [u64::MAX as u128, (1u128 << 63) + 12_345, 3_037_000_499, 1_000_000_007] {
-            edge.extend([r * r - 1, r * r, r * r + 1, r * r + 2 * r]);
-        }
-        edge.push(u128::MAX);
-        let mut s = 0x9E37_79B9_7F4A_7C15u128;
-        for _ in 0..200_000 {
-            s = s.wrapping_mul(0x5851_F42D_4C95_7F2D_1405_7B7E_F767_814F).wrapping_add(1);
-            edge.push(s >> (s % 128));
-        }
-        for v in edge {
-            assert_eq!(isqrt(v), isqrt_newton(v), "v = {v}");
-        }
-    }
-}
-
 /// 2·atanh(u / 1e9) × 1e9 = ln((1 + u)/(1 − u)) for |u| < 1e9: 2·Σ_{j=0}^{11} u^(2j+1) / (2j+1),
 /// with u² = ⌊u·u / 1e9⌋, every power ⌊power·u² / 1e9⌋ and every term ⌊power / (2j+1)⌋
 /// (truncation toward zero).
@@ -128,4 +102,37 @@ pub fn quantile_x10(v: &[i64], q10: i64) -> Option<i64> {
         a.saturating_mul(10)
             .saturating_add(fr.saturating_mul(b.saturating_sub(a))),
     )
+}
+
+#[cfg(test)]
+mod isqrt_tests {
+    use super::{isqrt, isqrt_newton};
+
+    #[test]
+    fn isqrt_matches_newton() {
+        let mut edge: Vec<u128> = (0..=10_000u128).collect();
+        for k in 1..128u32 {
+            let p = 1u128 << k;
+            edge.extend([p - 1, p, p + 1]);
+        }
+        for r in [
+            u64::MAX as u128,
+            (1u128 << 63) + 12_345,
+            3_037_000_499,
+            1_000_000_007,
+        ] {
+            edge.extend([r * r - 1, r * r, r * r + 1, r * r + 2 * r]);
+        }
+        edge.push(u128::MAX);
+        let mut s = 0x9E37_79B9_7F4A_7C15u128;
+        for _ in 0..200_000 {
+            s = s
+                .wrapping_mul(0x5851_F42D_4C95_7F2D_1405_7B7E_F767_814F)
+                .wrapping_add(1);
+            edge.push(s >> (s % 128));
+        }
+        for v in edge {
+            assert_eq!(isqrt(v), isqrt_newton(v), "v = {v}");
+        }
+    }
 }

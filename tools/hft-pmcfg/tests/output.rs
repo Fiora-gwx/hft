@@ -465,7 +465,10 @@ fn pmc_008_coinbase_reference() {
         t.contains("[venues.cb]\nprotocol = 'coinbase-spot'\nid = 16\nmax_sub_insts = 1\n"),
         "PMC-008.1"
     );
-    assert!(t.contains("task = 'feed:cb'") && t.contains("task = 'conn-builder:cb'"), "PMC-008.1");
+    assert!(
+        t.contains("task = 'feed:cb'") && t.contains("task = 'conn-builder:cb'"),
+        "PMC-008.1"
+    );
     let r = rd(&with);
     let cb = VenueId::COINBASE_SPOT;
     assert_eq!(r.insts_of_venue(cb), &[hft_types::InstId(8)], "PMC-008.1");
@@ -496,9 +499,12 @@ fn pmc_008_coinbase_reference() {
         std::fs::read(with.join("strategy_params.bin")).unwrap(),
         std::fs::read(without.join("strategy_params.bin")).unwrap(),
     );
-    let (sw, so) = (hft_event::parse_spb1(&bw).unwrap(), hft_event::parse_spb1(&bo).unwrap());
+    let (sw, so) = (
+        hft_event::parse_spb1(&bw).unwrap(),
+        hft_event::parse_spb1(&bo).unwrap(),
+    );
     assert_eq!((sw.hdr.n_groups, so.hdr.n_groups), (8, 7), "PMC-008.2");
-    assert_eq!(&sw.groups[..7], &so.groups[..], "PMC-008.2");
+    assert_eq!(&sw.groups[..7], so.groups, "PMC-008.2");
     let g = sw.groups[7];
     assert_eq!(
         (g.n_legs, g.open_allowed, g.legs[0].inst, g.legs[0].venue),
@@ -516,7 +522,10 @@ fn pmc_008_coinbase_reference() {
     let v: toml::Value = toml::from_str(&core(&lw)).unwrap();
     let cbv = &v["venues"]["cb"];
     assert_eq!(cbv["protocol"].as_str(), Some("coinbase-spot"), "PMC-008.4");
-    assert!(cbv.get("live_feed").is_none() && cbv.get("accounts").is_none(), "PMC-008.4");
+    assert!(
+        cbv.get("live_feed").is_none() && cbv.get("accounts").is_none(),
+        "PMC-008.4"
+    );
     l.coinbase = false;
     hft_pmcfg::write_polymarket_maker_live(&lo, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
     let v: toml::Value = toml::from_str(&core(&lo)).unwrap();

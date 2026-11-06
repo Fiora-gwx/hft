@@ -94,10 +94,21 @@ impl CbFeed {
         }
         let n = usize::from(u16::from_le_bytes([payload[1], payload[2]]));
         let body = payload.get(3..).unwrap_or(&[]);
-        let f = |s: &[u8], o: usize| s.get(o..o + 8).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(i64::from_le_bytes);
-        let last_rx = body.chunks_exact(41).take(n).filter_map(|s| f(s, 1)).max().unwrap_or(0);
+        let f = |s: &[u8], o: usize| {
+            s.get(o..o + 8)
+                .and_then(|b| <[u8; 8]>::try_from(b).ok())
+                .map(i64::from_le_bytes)
+        };
+        let last_rx = body
+            .chunks_exact(41)
+            .take(n)
+            .filter_map(|s| f(s, 1))
+            .max()
+            .unwrap_or(0);
         for s in body.chunks_exact(41).take(n) {
-            let (Some(rx), Some(a), Some(b)) = (f(s, 1), f(s, 17), f(s, 25)) else { continue };
+            let (Some(rx), Some(a), Some(b)) = (f(s, 1), f(s, 17), f(s, 25)) else {
+                continue;
+            };
             if s.first() != Some(&1) || a <= 0 || b < a {
                 continue;
             }
@@ -138,11 +149,18 @@ impl ClFeed {
     /// 1e-8 USD i64. Other versions, short payloads and non-positive prices are ignored; a sample
     /// older than the latest only fills its own second.
     pub fn on_payload(&mut self, payload: &[u8]) {
-        let field = |a: usize| payload.get(a..a + 8).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(i64::from_le_bytes);
+        let field = |a: usize| {
+            payload
+                .get(a..a + 8)
+                .and_then(|b| <[u8; 8]>::try_from(b).ok())
+                .map(i64::from_le_bytes)
+        };
         if payload.first() != Some(&1) {
             return;
         }
-        let (Some(ts), Some(px)) = (field(1), field(9)) else { return };
+        let (Some(ts), Some(px)) = (field(1), field(9)) else {
+            return;
+        };
         if px <= 0 {
             return;
         }
@@ -164,7 +182,10 @@ impl ClFeed {
 /// venue, at most two counted (the fair-value reference, then the fast Coinbase reference).
 pub fn reference_count(groups: &GroupTable) -> u16 {
     let n = usize::from(groups.len());
-    let slot_venue = groups.iter().next().and_then(|(_, g)| g.legs.first().map(|l| l.venue));
+    let slot_venue = groups
+        .iter()
+        .next()
+        .and_then(|(_, g)| g.legs.first().map(|l| l.venue));
     let mut k = 0;
     while k < n.min(3) {
         let off = groups
@@ -384,7 +405,10 @@ impl OfiRing {
             self.first = k;
         } else if k > self.last {
             // Buckets without events keep the cumulative value.
-            let from = self.last.saturating_add(1).max(k.saturating_sub(OFI_N as i64 - 1));
+            let from = self
+                .last
+                .saturating_add(1)
+                .max(k.saturating_sub(OFI_N as i64 - 1));
             for b in from..k {
                 self.ring[Self::slot(b)] = self.cum;
             }
@@ -420,7 +444,9 @@ impl OfiRing {
         if self.last == i64::MIN {
             return None;
         }
-        let back = ens.div_euclid(OFI_BUCKET_NS).saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
+        let back = ens
+            .div_euclid(OFI_BUCKET_NS)
+            .saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
         if back >= self.last {
             return Some(0);
         }
@@ -472,7 +498,10 @@ impl TrdRing {
             self.first = k;
             self.last = k;
         } else if k > self.last {
-            let from = self.last.saturating_add(1).max(k.saturating_sub(OFI_N as i64 - 1));
+            let from = self
+                .last
+                .saturating_add(1)
+                .max(k.saturating_sub(OFI_N as i64 - 1));
             for b in from..k {
                 self.ring[Self::slot(b)] = self.cum;
             }
@@ -494,7 +523,9 @@ impl TrdRing {
         if self.last == i64::MIN {
             return None;
         }
-        let back = ens.div_euclid(OFI_BUCKET_NS).saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
+        let back = ens
+            .div_euclid(OFI_BUCKET_NS)
+            .saturating_sub(ms / (OFI_BUCKET_NS / 1_000_000));
         if back >= self.last {
             return Some(0);
         }
@@ -539,7 +570,9 @@ impl Chop {
         let mut n = 0usize;
         let mut prev = i64::MIN;
         for j in 0..usize::from(count) {
-            let (Some(w), Some(er)) = (field(2 + 16 * j), field(10 + 16 * j)) else { break };
+            let (Some(w), Some(er)) = (field(2 + 16 * j), field(10 + 16 * j)) else {
+                break;
+            };
             if w <= prev || !(0..=ONE).contains(&er) || (self.win > 0 && w >= self.win) {
                 continue;
             }
@@ -872,7 +905,12 @@ impl Fast {
                         .and_then(|q| v.book(q.inst).best(s).map(|l| l.px.0))
                         .unwrap_or(hft_strategy_sdk::features::NA)
                 };
-                self.comp_book = [side(up, Side::Buy), side(up, Side::Sell), side(dn, Side::Buy), side(dn, Side::Sell)];
+                self.comp_book = [
+                    side(up, Side::Buy),
+                    side(up, Side::Sell),
+                    side(dn, Side::Buy),
+                    side(dn, Side::Sell),
+                ];
             }
             _ => self.comp.ok = false,
         }
@@ -884,18 +922,23 @@ impl Fast {
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
-            EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
-            EventRef::Warmup { local_kind, payload, .. } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
+            EventRef::Warmup {
+                local_kind, payload, ..
+            } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
+            EventRef::Warmup {
+                local_kind, payload, ..
+            } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
             EventRef::Bbo { inst, b, .. } if inst == self.reference2 && inst != INST_NONE => {
-                self.cb.on_bbo(v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
+                self.cb
+                    .on_bbo(v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
                 if self.p.defaults().cb_win_ms > 0 {
                     self.run(v, ctx);
                 }
             }
             // The sidecar's samples only without a native Coinbase reference (different units).
-            EventRef::Warmup { local_kind, payload, .. }
-                if local_kind == CB_WARMUP_KIND && self.reference2 == INST_NONE =>
-            {
+            EventRef::Warmup {
+                local_kind, payload, ..
+            } if local_kind == CB_WARMUP_KIND && self.reference2 == INST_NONE => {
                 self.cb.on_payload(payload, v.now().engine_ns);
                 if self.p.defaults().cb_win_ms > 0 {
                     self.run(v, ctx);
@@ -1221,7 +1264,11 @@ impl Fast {
             self.chop.n += 1;
             self.chop.last_sec = sec_c;
         }
-        let chop_mean = if d.chop_k > 0 { self.chop.mean(d.chop_k as usize) } else { None };
+        let chop_mean = if d.chop_k > 0 {
+            self.chop.mean(d.chop_k as usize)
+        } else {
+            None
+        };
         let chop_ok = d.chop_k == 0 || chop_mean.is_some_and(|e| e <= d.chop_er_max.0);
         let den = self.feat.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
             let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
@@ -1233,12 +1280,15 @@ impl Fast {
         // Φ(Φ⁻¹(Up mid) + r / den) − Up mid; at least cb_shock against a leg holds it cb_hold_ms.
         if d.cb_win_ms > 0 && d.cb_shock.0 > 0 && den > 0 {
             let ens = now.engine_ns;
-            if let (Some(a), Some(b)) = (self.cb.at(ens), self.cb.at(ens.saturating_sub(i64::from(d.cb_win_ms) * 1_000_000)))
-                && b > 0
+            if let (Some(a), Some(b)) = (
+                self.cb.at(ens),
+                self.cb.at(ens.saturating_sub(i64::from(d.cb_win_ms) * 1_000_000)),
+            ) && b > 0
             {
                 let one = i128::from(ONE);
                 let r = (i128::from(a) - i128::from(b)) * one / i128::from(b);
-                let z = (i128::from(inv_cdf(up_mid)) + r * one / i128::from(den)).clamp(-6 * one, 6 * one) as i64;
+                let z =
+                    (i128::from(inv_cdf(up_mid)) + r * one / i128::from(den)).clamp(-6 * one, 6 * one) as i64;
                 let shock = cdf(z) - up_mid;
                 let until = ens.saturating_add(i64::from(d.cb_hold_ms) * 1_000_000);
                 let leg = if shock <= -d.cb_shock.0 {
@@ -1254,16 +1304,27 @@ impl Fast {
             }
         }
         let lims = if d.fv_limit && quoting {
-            self.fair_limits(v, start, up, den, qu.saturating_sub(qd) / i64::from(ab), now.engine_ns)
+            self.fair_limits(
+                v,
+                start,
+                up,
+                den,
+                qu.saturating_sub(qd) / i64::from(ab),
+                now.engine_ns,
+            )
         } else {
             None
         };
         // Stop-loss pairing window (rescue_ms, v32): from rescue_ms until the stop-loss minute.
-        let rescue_on = ok
-            && d.rescue_ms > 0
-            && age_c >= i64::from(d.rescue_ms)
-            && left_ms > i64::from(d.stop_before_ms);
-        self.comp_update(v, quoting || hedging || pair_window || d.comp_always || rescue_on, start, up, now.utc_ns);
+        let rescue_on =
+            ok && d.rescue_ms > 0 && age_c >= i64::from(d.rescue_ms) && left_ms > i64::from(d.stop_before_ms);
+        self.comp_update(
+            v,
+            quoting || hedging || pair_window || d.comp_always || rescue_on,
+            start,
+            up,
+            now.utc_ns,
+        );
         let comp = self.comp;
         // Up-mid path over the last 60 s (fraction of one), for mm_min_path: sum of |Δ 2 × mid| / 2 of
         // consecutive recorded seconds.
@@ -1374,7 +1435,9 @@ impl Fast {
             // Public sweep gate (mkt_drop_min_c): the best bid fell by at least mkt_drop_min_c cents.
             if d.mkt_drop_min_c > 0 && m.lvl_px > 0 && b_now > 0 {
                 let c1 = (unit_px / 100).max(1);
-                let fell = b_now <= m.lvl_px.saturating_sub(i64::from(d.mkt_drop_min_c).saturating_mul(c1));
+                let fell = b_now
+                    <= m.lvl_px
+                        .saturating_sub(i64::from(d.mkt_drop_min_c).saturating_mul(c1));
                 let traded = !d.mkt_drop_need_trade || {
                     let t_oth = self.mic.get(i ^ 1).map_or(0, |o| o.trade_ens);
                     m.trade_ens.max(t_oth) >= ens.saturating_sub(100_000_000)
@@ -1406,9 +1469,13 @@ impl Fast {
             }
             let (obb, oba) = self.quotes.get(i ^ 1).map_or((0, 0), |o| {
                 let b = v.book(o.inst);
-                (b.best(Side::Buy).map_or(0, |l| l.px.0), b.best(Side::Sell).map_or(0, |l| l.px.0))
+                (
+                    b.best(Side::Buy).map_or(0, |l| l.px.0),
+                    b.best(Side::Sell).map_or(0, |l| l.px.0),
+                )
             });
-            let oth_up = d.oth_up_cancel && ((m.oth_bb > 0 && obb > m.oth_bb) || (m.oth_ba > 0 && oba > m.oth_ba));
+            let oth_up =
+                d.oth_up_cancel && ((m.oth_bb > 0 && obb > m.oth_bb) || (m.oth_ba > 0 && oba > m.oth_ba));
             m.oth_bb = obb;
             m.oth_ba = oba;
             if oth_up && own_q >= other_q {
@@ -1418,7 +1485,9 @@ impl Fast {
             let dropped = d.mkt_drop_min_c > 0 && own_q >= other_q && ens < m.drop_until;
             // Dip bids (dip_mode): the token rose and the score turned -> bid below the best bid.
             let (dip_active, dip_depth_c) = if d.dip_mode {
-                let zk = (comp.ok && comp.win == start && i / 2 == up / 2).then(|| comp.z.get(i % 2).copied()).flatten();
+                let zk = (comp.ok && comp.win == start && i / 2 == up / 2)
+                    .then(|| comp.z.get(i % 2).copied())
+                    .flatten();
                 let mom = (comp.ok && comp.win == start && i / 2 == up / 2)
                     .then(|| self.comp_f.get(i % 2).and_then(|f| f.get(2)).copied())
                     .flatten()
@@ -1447,7 +1516,10 @@ impl Fast {
                 }
                 let range_c = if hi_m >= lo_m { (hi_m - lo_m) / 2 / c1 } else { 0 };
                 let depth = (i128::from(range_c) * i128::from(d.dip_depth_k.0) / i128::from(ONE)) as i64;
-                let depth = depth.clamp(i64::from(d.dip_depth_min_c), i64::from(d.dip_depth_max_c.max(d.dip_depth_min_c)));
+                let depth = depth.clamp(
+                    i64::from(d.dip_depth_min_c),
+                    i64::from(d.dip_depth_max_c.max(d.dip_depth_min_c)),
+                );
                 (ens < m.dip_until, depth)
             } else {
                 (false, 0)
@@ -1459,7 +1531,8 @@ impl Fast {
             // or while the unpaired risk exceeds pair_risk_usd.
             let no_pair = d.pair_window_ms > 0 && other_q > own_q && {
                 let long_fill = self.mic.get(i ^ 1).map_or(0, |o| o.fill_ens);
-                let in_window = long_fill > 0 && ens.saturating_sub(long_fill) <= i64::from(d.pair_window_ms) * 1_000_000;
+                let in_window =
+                    long_fill > 0 && ens.saturating_sub(long_fill) <= i64::from(d.pair_window_ms) * 1_000_000;
                 let risky = d.pair_risk_usd.0 > 0 && {
                     let e = i32::from(hot.qty_exp) + i32::from(hot.px_exp) + 6;
                     let raw = i128::from(other_q.saturating_sub(own_q)) * i128::from(other_c);
@@ -1515,20 +1588,21 @@ impl Fast {
             let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
-            let lim = (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0 || swept)).then(|| {
-                let pm = if swept {
-                    -d.swept_pair_cap.0
-                } else if free_fav {
-                    -d.fav_pair_cap.0
-                } else if late_pair {
-                    d.pair_late_margin.0
-                } else {
-                    d.pair_margin.0
-                };
-                let margin = (i128::from(pm) * i128::from(unit_px) / i128::from(ONE)) as i64;
-                let cent = (unit_px / 100).max(1);
-                (unit_px - other_c - margin).div_euclid(cent) * cent
-            });
+            let lim =
+                (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0 || swept)).then(|| {
+                    let pm = if swept {
+                        -d.swept_pair_cap.0
+                    } else if free_fav {
+                        -d.fav_pair_cap.0
+                    } else if late_pair {
+                        d.pair_late_margin.0
+                    } else {
+                        d.pair_margin.0
+                    };
+                    let margin = (i128::from(pm) * i128::from(unit_px) / i128::from(ONE)) as i64;
+                    let cent = (unit_px / 100).max(1);
+                    (unit_px - other_c - margin).div_euclid(cent) * cent
+                });
             // rescue_cap: a stop-loss pair locks at a cost of at most 1 + rescue_cap.
             let lim = if rescue && d.rescue_cap.0 > 0 {
                 let c1 = (unit_px / 100).max(1);
@@ -1612,7 +1686,8 @@ impl Fast {
             // or adding.
             let no_open = no_open || (swept && own_q >= other_q) || oth_cool || dropped;
             // open_from_ms: no opening or adding before this window age.
-            let no_open = no_open || (d.open_from_ms > 0 && own_q >= other_q && age_ms < i64::from(d.open_from_ms));
+            let no_open =
+                no_open || (d.open_from_ms > 0 && own_q >= other_q && age_ms < i64::from(d.open_from_ms));
             let no_open = no_open || (dip_leg && !dip_active);
             // After a stop-loss pairing bid the window opens nothing more.
             let no_open = no_open || (self.rescued == start && own_q >= other_q);
@@ -1654,7 +1729,9 @@ impl Fast {
                 let ms = i64::from(d.trd_win_ms);
                 let leg = |k: usize| {
                     let inst = self.quotes.get(k).map_or(INST_NONE, |q| q.inst);
-                    self.trd.get(k).and_then(|t| if t.inst == inst { t.over(ens, ms) } else { Some(0) })
+                    self.trd
+                        .get(k)
+                        .and_then(|t| if t.inst == inst { t.over(ens, ms) } else { Some(0) })
                 };
                 match (leg(i), leg(i ^ 1)) {
                     (Some(a), Some(b)) => a.saturating_add(b) < i64::from(d.trd_min),
@@ -1684,7 +1761,10 @@ impl Fast {
                     };
                     // Front of the queue (bid_improve_c): a new level above the best bid, below the ask.
                     let up_c = i64::from(d.bid_improve_c).saturating_mul(cent);
-                    let b = if up_c > 0 && (!d.bid_improve_short || other_q > own_q) && b.saturating_add(up_c) < a {
+                    let b = if up_c > 0
+                        && (!d.bid_improve_short || other_q > own_q)
+                        && b.saturating_add(up_c) < a
+                    {
                         b.saturating_add(up_c)
                     } else {
                         b
@@ -1696,7 +1776,10 @@ impl Fast {
                     };
                     let t = lim.map_or(b, |l| b.min(l));
                     // Lazy pairing (pair_lazy_c): a short leg the score does not favour waits lower.
-                    let t = if other_q > own_q && d.pair_lazy_c > 0 && !z.is_some_and(|z| z >= d.pair_eager_z.0) {
+                    let t = if other_q > own_q
+                        && d.pair_lazy_c > 0
+                        && !z.is_some_and(|z| z >= d.pair_eager_z.0)
+                    {
                         t.min(b.saturating_sub(i64::from(d.pair_lazy_c).saturating_mul(cent)))
                     } else {
                         t
@@ -1731,10 +1814,12 @@ impl Fast {
                     if undercut && d.hold_thin_undercut {
                         undercut = (d.undercut_min_bq > 0
                             && bq_ex >= i64::from(d.undercut_min_bq).saturating_mul(unit_qty))
-                            || (d.undercut_min_level_ms > 0 && lvl_age_ms >= i64::from(d.undercut_min_level_ms))
+                            || (d.undercut_min_level_ms > 0
+                                && lvl_age_ms >= i64::from(d.undercut_min_level_ms))
                             || (d.hold_below_max_ms > 0
                                 && m.below_since > 0
-                                && ens.saturating_sub(m.below_since) >= i64::from(d.hold_below_max_ms) * 1_000_000);
+                                && ens.saturating_sub(m.below_since)
+                                    >= i64::from(d.hold_below_max_ms) * 1_000_000);
                     }
                     // Leave a thinning level (leave_bq).
                     cancel |= d.leave_bq > 0
@@ -1855,7 +1940,11 @@ impl Fast {
         let lock_from = start + w - SETTLE_TWAP_S;
         let n_lock = sec - lock_from;
         let n_fut = start + w - sec;
-        let r_now = if cl { self.cl.now(sec).unwrap_or(0) } else { self.feat.top.mid_x2 };
+        let r_now = if cl {
+            self.cl.now(sec).unwrap_or(0)
+        } else {
+            self.feat.top.mid_x2
+        };
         if n_lock < 0 || !(1..=SETTLE_TWAP_S).contains(&n_fut) || r_now <= 0 {
             return None;
         }
@@ -1867,7 +1956,11 @@ impl Fast {
         if ln * 5 < n_lock * 4 {
             return None;
         }
-        let sigma = self.feat.vol.sigma(d.vol_min_samples as usize).filter(|s| *s > 0)?;
+        let sigma = self
+            .feat
+            .vol
+            .sigma(d.vol_min_samples as usize)
+            .filter(|s| *s > 0)?;
         let one = i128::from(ONE);
         // A × 60 × 1e9 = (n_lock × mean(locked) + n_fut × R_now) × 1e9; μ = A / K − 1.
         let locked = if ln > 0 {
@@ -1900,7 +1993,15 @@ impl Fast {
     /// probability is at least `settle_p_min` and the price is inside the band; cancelled on a
     /// probability below `settle_cancel_p`, a flip of the favourite or an undercut; held to
     /// settlement.
-    fn settle_run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>, settling: bool, start: i64, up: usize, w: i64) {
+    fn settle_run<V: Views>(
+        &mut self,
+        v: &V,
+        ctx: &mut Ctx<'_>,
+        settling: bool,
+        start: i64,
+        up: usize,
+        w: i64,
+    ) {
         use hft_strategy_sdk::features::NA;
         if !settling {
             self.settle.out = [NA; 3];
@@ -1921,7 +2022,8 @@ impl Fast {
         } else {
             i128::from(10i64.saturating_pow(u32::from(v.inst(self.reference).px_exp.unsigned_abs())))
         };
-        let k_mean = (self.settle.k_ok && self.settle.k_n > 0).then(|| self.settle.k_sum / i128::from(self.settle.k_n));
+        let k_mean = (self.settle.k_ok && self.settle.k_n > 0)
+            .then(|| self.settle.k_sum / i128::from(self.settle.k_n));
         let lead_c = prob.zip(k_mean).map(|((_, mu, _), k)| {
             let raw = i128::from(mu) * k / i128::from(ONE);
             (if d.settle_src == 1 {
@@ -1964,13 +2066,17 @@ impl Fast {
             let want = fav
                 && (d.settle_lead_usd == 0 || lead.is_some_and(|l| l >= lead_min))
                 && (d.settle_edge.0 == 0
-                    || p_leg.zip(target).is_some_and(|(p, t)| t <= px_of(p.saturating_sub(d.settle_edge.0))))
+                    || p_leg
+                        .zip(target)
+                        .is_some_and(|(p, t)| t <= px_of(p.saturating_sub(d.settle_edge.0))))
                 && !stopped
                 && p_leg.is_some_and(|p| p >= d.settle_p_min.0)
                 && target.is_some_and(|t| t >= px_of(d.settle_bid_lo.0) && t <= hi)
-                && self.settle.bought.saturating_add(clip) <= i64::from(d.settle_max_shares).saturating_mul(unit_qty)
+                && self.settle.bought.saturating_add(clip)
+                    <= i64::from(d.settle_max_shares).saturating_mul(unit_qty)
                 && prob.is_some_and(|(_, mu, n)| {
-                    n >= i64::from(d.settle_min_lock_s) && mu.unsigned_abs() >= d.settle_mu_min.0.unsigned_abs()
+                    n >= i64::from(d.settle_min_lock_s)
+                        && mu.unsigned_abs() >= d.settle_mu_min.0.unsigned_abs()
                 });
             match q.state {
                 QState::Live if owned => {

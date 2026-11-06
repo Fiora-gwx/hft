@@ -67,13 +67,43 @@ fn cbx_001_classify() {
     let rows: [(&str, &[u8], MsgOp, MdClass); 9] = [
         ("CBX-001.1", TICKER.as_bytes(), MsgOp::Text, MdClass::Ticker),
         ("CBX-001.2", MATCH.as_bytes(), MsgOp::Text, MdClass::Match),
-        ("CBX-001.3", b"{\"type\":\"last_match\",\"trade_id\":1", MsgOp::Text, MdClass::LastMatch),
-        ("CBX-001.4", b"{\"type\":\"heartbeat\",\"last_trade_id\":1", MsgOp::Text, MdClass::Heartbeat),
-        ("CBX-001.5", b"{\"type\":\"subscriptions\",\"channels\":[]}", MsgOp::Text, MdClass::Subscriptions),
-        ("CBX-001.6", b"{\"type\":\"error\",\"message\":\"x\"}", MsgOp::Text, MdClass::Error),
-        ("CBX-001.7", b"{\"type\":\"l2update\",\"product_id\":\"BTC-USD\"}", MsgOp::Text, MdClass::Unknown),
+        (
+            "CBX-001.3",
+            b"{\"type\":\"last_match\",\"trade_id\":1",
+            MsgOp::Text,
+            MdClass::LastMatch,
+        ),
+        (
+            "CBX-001.4",
+            b"{\"type\":\"heartbeat\",\"last_trade_id\":1",
+            MsgOp::Text,
+            MdClass::Heartbeat,
+        ),
+        (
+            "CBX-001.5",
+            b"{\"type\":\"subscriptions\",\"channels\":[]}",
+            MsgOp::Text,
+            MdClass::Subscriptions,
+        ),
+        (
+            "CBX-001.6",
+            b"{\"type\":\"error\",\"message\":\"x\"}",
+            MsgOp::Text,
+            MdClass::Error,
+        ),
+        (
+            "CBX-001.7",
+            b"{\"type\":\"l2update\",\"product_id\":\"BTC-USD\"}",
+            MsgOp::Text,
+            MdClass::Unknown,
+        ),
         ("CBX-001.8", TICKER.as_bytes(), MsgOp::Binary, MdClass::Unknown),
-        ("CBX-001.9", b" {\"type\":\"ticker\"}", MsgOp::Text, MdClass::Unknown),
+        (
+            "CBX-001.9",
+            b" {\"type\":\"ticker\"}",
+            MsgOp::Text,
+            MdClass::Unknown,
+        ),
     ];
     for (row, p, op, want) in rows {
         for route in [ROUTE_BBO, ROUTE_MD] {
@@ -86,8 +116,16 @@ fn cbx_001_classify() {
 fn cbx_002_routes_and_seq_rules() {
     let r = Cb::routes();
     assert_eq!(r.len(), 2, "CBX-002.1");
-    assert_eq!((r[0].id, r[0].kind, r[0].race), (ROUTE_BBO, RouteKind::Bbo, true), "CBX-002.1");
-    assert_eq!((r[1].id, r[1].kind, r[1].race), (ROUTE_MD, RouteKind::Md, false), "CBX-002.1");
+    assert_eq!(
+        (r[0].id, r[0].kind, r[0].race),
+        (ROUTE_BBO, RouteKind::Bbo, true),
+        "CBX-002.1"
+    );
+    assert_eq!(
+        (r[1].id, r[1].kind, r[1].race),
+        (ROUTE_MD, RouteKind::Md, false),
+        "CBX-002.1"
+    );
     assert!(r.iter().all(|x| x.topn_levels.is_empty()), "CBX-002.1");
     assert_eq!(Cb::stream_route(StreamKind::Bbo), Some(ROUTE_BBO), "CBX-002.2");
     assert_eq!(Cb::stream_route(StreamKind::Trade), Some(ROUTE_MD), "CBX-002.2");
@@ -113,7 +151,11 @@ fn cbx_002_routes_and_seq_rules() {
         assert_eq!(Cb::seq_rule(c), want, "CBX-002.3 {c:?}");
     }
     let mut out = RestReqBuf::default();
-    assert_eq!(Cb::bbo_snapshot_request(rd(), &FeedCtx, &[BTC_USD], &mut out), Ok(false), "CBX-002.4");
+    assert_eq!(
+        Cb::bbo_snapshot_request(rd(), &FeedCtx, &[BTC_USD], &mut out),
+        Ok(false),
+        "CBX-002.4"
+    );
 }
 
 #[test]
@@ -121,18 +163,42 @@ fn cbx_003_endpoint_and_login() {
     for route in [ROUTE_BBO, ROUTE_MD] {
         let mut e = EndpointSpec::default();
         Cb::endpoint(Role::Md, route, &CFG, None, None, 0, &mut e).unwrap();
-        assert_eq!((e.path_query.as_slice(), e.headers.as_slice()), (&b"/"[..], &b""[..]), "CBX-003.1");
+        assert_eq!(
+            (e.path_query.as_slice(), e.headers.as_slice()),
+            (&b"/"[..], &b""[..]),
+            "CBX-003.1"
+        );
     }
     let mut e = EndpointSpec::default();
-    assert_eq!(Cb::endpoint(Role::Md, RouteId(3), &CFG, None, None, 0, &mut e), Err(ProtoErr::Unsupported), "CBX-003.2");
+    assert_eq!(
+        Cb::endpoint(Role::Md, RouteId(3), &CFG, None, None, 0, &mut e),
+        Err(ProtoErr::Unsupported),
+        "CBX-003.2"
+    );
     for role in [Role::Order, Role::UserStream, Role::Rest] {
-        assert_eq!(Cb::endpoint(role, ROUTE_BBO, &CFG, None, None, 0, &mut e), Err(ProtoErr::Unsupported), "CBX-003.2");
+        assert_eq!(
+            Cb::endpoint(role, ROUTE_BBO, &CFG, None, None, 0, &mut e),
+            Err(ProtoErr::Unsupported),
+            "CBX-003.2"
+        );
     }
     let cred = Credential::default();
     let mut v = Vec::new();
-    assert_eq!(Cb::login(Role::Md, &CFG, &cred, 0, 0, &mut v), Ok(LoginStep::NotNeeded), "CBX-003.3");
-    assert_eq!(Cb::login(Role::Order, &CFG, &cred, 0, 0, &mut v), Err(ProtoErr::Unsupported), "CBX-003.3");
-    assert_eq!(Cb::login_result(TICKER.as_bytes()), LoginResult::NotMine, "CBX-003.3");
+    assert_eq!(
+        Cb::login(Role::Md, &CFG, &cred, 0, 0, &mut v),
+        Ok(LoginStep::NotNeeded),
+        "CBX-003.3"
+    );
+    assert_eq!(
+        Cb::login(Role::Order, &CFG, &cred, 0, 0, &mut v),
+        Err(ProtoErr::Unsupported),
+        "CBX-003.3"
+    );
+    assert_eq!(
+        Cb::login_result(TICKER.as_bytes()),
+        LoginResult::NotMine,
+        "CBX-003.3"
+    );
     assert!(Cb::bootstrap(Role::Md, &CFG, None).is_none(), "CBX-003.3");
 }
 
@@ -160,28 +226,55 @@ fn frames(subs: &[SubSpec], unsub: bool) -> Result<Vec<(String, u16)>, ProtoErr>
 fn cbx_004_subscribe_frames() {
     assert_eq!(
         frames(&[sub(BTC_USD, StreamKind::Bbo)], false).unwrap(),
-        vec![(r#"{"type":"subscribe","product_ids":["BTC-USD"],"channels":["ticker","heartbeat"]}"#.to_string(), 1)],
+        vec![(
+            r#"{"type":"subscribe","product_ids":["BTC-USD"],"channels":["ticker","heartbeat"]}"#.to_string(),
+            1
+        )],
         "CBX-004.1"
     );
     assert_eq!(
         frames(&[sub(BTC_USD, StreamKind::Trade)], false).unwrap(),
-        vec![(r#"{"type":"subscribe","product_ids":["BTC-USD"],"channels":["matches","heartbeat"]}"#.to_string(), 1)],
+        vec![(
+            r#"{"type":"subscribe","product_ids":["BTC-USD"],"channels":["matches","heartbeat"]}"#
+                .to_string(),
+            1
+        )],
         "CBX-004.2"
     );
     assert_eq!(
         frames(&[sub(BTC_USD, StreamKind::Bbo)], true).unwrap(),
-        vec![(r#"{"type":"unsubscribe","product_ids":["BTC-USD"],"channels":["ticker"]}"#.to_string(), 1)],
+        vec![(
+            r#"{"type":"unsubscribe","product_ids":["BTC-USD"],"channels":["ticker"]}"#.to_string(),
+            1
+        )],
         "CBX-004.3"
     );
     // A batch stops at the first spec of another stream.
     assert_eq!(
-        frames(&[sub(BTC_USD, StreamKind::Bbo), sub(BTC_USD, StreamKind::Trade)], false).unwrap()[0].1,
+        frames(
+            &[sub(BTC_USD, StreamKind::Bbo), sub(BTC_USD, StreamKind::Trade)],
+            false
+        )
+        .unwrap()[0]
+            .1,
         1,
         "CBX-004.4"
     );
-    assert_eq!(frames(&[sub(BTC_USD, StreamKind::Mark)], false), Err(ProtoErr::Unsupported), "CBX-004.5");
-    assert_eq!(frames(&[sub(FOREIGN, StreamKind::Bbo)], false), Err(ProtoErr::Cfg), "CBX-004.6");
-    assert_eq!(frames(&[sub(InstId(0), StreamKind::Bbo)], false), Err(ProtoErr::Cfg), "CBX-004.6");
+    assert_eq!(
+        frames(&[sub(BTC_USD, StreamKind::Mark)], false),
+        Err(ProtoErr::Unsupported),
+        "CBX-004.5"
+    );
+    assert_eq!(
+        frames(&[sub(FOREIGN, StreamKind::Bbo)], false),
+        Err(ProtoErr::Cfg),
+        "CBX-004.6"
+    );
+    assert_eq!(
+        frames(&[sub(InstId(0), StreamKind::Bbo)], false),
+        Err(ProtoErr::Cfg),
+        "CBX-004.6"
+    );
     assert_eq!(frames(&[], false), Err(ProtoErr::Cfg), "CBX-004.7");
     const { assert!(Cb::SUB_ACKS, "CBX-004.8") };
 }
@@ -190,19 +283,31 @@ fn cbx_004_subscribe_frames() {
 fn cbx_005_control_hints() {
     let ack = |p: &str| Cb::control(class(p.as_bytes()), p.as_bytes());
     assert_eq!(
-        ack(r#"{"type":"subscriptions","channels":[{"name":"heartbeat","product_ids":["BTC-USD"],"account_ids":null}]}"#),
+        ack(
+            r#"{"type":"subscriptions","channels":[{"name":"heartbeat","product_ids":["BTC-USD"],"account_ids":null}]}"#
+        ),
         Some(ControlHint::SubAck { ok: true, code: 0 }),
         "CBX-005.1"
     );
-    assert_eq!(ack(r#"{"type":"subscriptions","channels":[]}"#), None, "CBX-005.2");
-    assert_eq!(ack(r#"{"type":"subscriptions","channels": [ ] }"#), None, "CBX-005.2");
+    assert_eq!(
+        ack(r#"{"type":"subscriptions","channels":[]}"#),
+        None,
+        "CBX-005.2"
+    );
+    assert_eq!(
+        ack(r#"{"type":"subscriptions","channels": [ ] }"#),
+        None,
+        "CBX-005.2"
+    );
     assert_eq!(
         ack(r#"{"type":"error","message":"Failed to subscribe","reason":"x"}"#),
         Some(ControlHint::SubAck { ok: false, code: 1 }),
         "CBX-005.3"
     );
     assert_eq!(
-        ack(r#"{"type":"heartbeat","last_trade_id":1,"product_id":"BTC-USD","sequence":2,"time":"2026-11-06T15:58:53.000000Z"}"#),
+        ack(
+            r#"{"type":"heartbeat","last_trade_id":1,"product_id":"BTC-USD","sequence":2,"time":"2026-11-06T15:58:53.000000Z"}"#
+        ),
         Some(ControlHint::Pong),
         "CBX-005.4"
     );
@@ -214,19 +319,48 @@ fn cbx_005_control_hints() {
 fn cbx_006_peek() {
     let p = |s: &str| Cb::peek(rd(), &FeedCtx, class(s.as_bytes()), s.as_bytes());
     let t = p(TICKER).unwrap();
-    assert_eq!((t.inst, t.stream, t.ids.prev_id, t.ids.last_id), (BTC_USD, StreamKind::Bbo, 0, 138_933_168_161), "CBX-006.1");
+    assert_eq!(
+        (t.inst, t.stream, t.ids.prev_id, t.ids.last_id),
+        (BTC_USD, StreamKind::Bbo, 0, 138_933_168_161),
+        "CBX-006.1"
+    );
     let m = p(MATCH).unwrap();
-    assert_eq!((m.inst, m.stream, m.ids.last_id), (BTC_USD, StreamKind::Trade, 1_116_405_767), "CBX-006.2");
+    assert_eq!(
+        (m.inst, m.stream, m.ids.last_id),
+        (BTC_USD, StreamKind::Trade, 1_116_405_767),
+        "CBX-006.2"
+    );
     let lm = MATCH.replace("\"type\":\"match\"", "\"type\":\"last_match\"");
     assert_eq!(p(&lm).unwrap().ids.last_id, 1_116_405_767, "CBX-006.3");
-    assert_eq!(p(&TICKER.replace("BTC-USD", "ETH-USD")).unwrap().inst, InstId(0), "CBX-006.4");
+    assert_eq!(
+        p(&TICKER.replace("BTC-USD", "ETH-USD")).unwrap().inst,
+        InstId(0),
+        "CBX-006.4"
+    );
     // `peek` does not parse prices.
-    assert_eq!(p(&TICKER.replace("\"75750.28\"", "\"x\"")).unwrap(), t, "CBX-006.5");
+    assert_eq!(
+        p(&TICKER.replace("\"75750.28\"", "\"x\"")).unwrap(),
+        t,
+        "CBX-006.5"
+    );
     // Field order changed: the checked decoder gives the same ids.
     let reordered = r#"{"product_id":"BTC-USD","type":"ticker","sequence":138933168161}"#;
-    assert_eq!(Cb::peek(rd(), &FeedCtx, MdClass::Ticker, reordered.as_bytes()).unwrap(), t, "CBX-006.6");
-    for c in [MdClass::Heartbeat, MdClass::Subscriptions, MdClass::Error, MdClass::Unknown] {
-        assert_eq!(Cb::peek(rd(), &FeedCtx, c, TICKER.as_bytes()), Err(DecodeErr::UnknownClass), "CBX-006.7");
+    assert_eq!(
+        Cb::peek(rd(), &FeedCtx, MdClass::Ticker, reordered.as_bytes()).unwrap(),
+        t,
+        "CBX-006.6"
+    );
+    for c in [
+        MdClass::Heartbeat,
+        MdClass::Subscriptions,
+        MdClass::Error,
+        MdClass::Unknown,
+    ] {
+        assert_eq!(
+            Cb::peek(rd(), &FeedCtx, c, TICKER.as_bytes()),
+            Err(DecodeErr::UnknownClass),
+            "CBX-006.7"
+        );
     }
 }
 
@@ -256,30 +390,73 @@ fn cbx_007_time() {
         "1969-12-31T23:59:59Z",
         "",
     ] {
-        assert_eq!(iso8601_ns(s.as_bytes()), Err(DecodeErr::Number), "CBX-007.2 {s:?}");
+        assert_eq!(
+            iso8601_ns(s.as_bytes()),
+            Err(DecodeErr::Number),
+            "CBX-007.2 {s:?}"
+        );
     }
 }
 
 #[test]
 fn cbx_008_decode_errors() {
     let rows: [(&str, String, DecodeErr); 6] = [
-        ("CBX-008.1", MATCH.replace("\"side\":\"sell\"", "\"side\":\"x\""), DecodeErr::Shape),
-        ("CBX-008.2", TICKER.replace("\"best_ask\":\"75750.29\"", "\"best_ask\":\"7a\""), DecodeErr::Number),
-        ("CBX-008.3", TICKER.replace("\"best_bid_size\":\"0.06203374\"", "\"best_bid_size\":\"0.062033741\""), DecodeErr::Number),
-        ("CBX-008.4", MATCH.replace("15:58:52.630047Z", "15:58:52"), DecodeErr::Number),
-        ("CBX-008.5", TICKER[..TICKER.len() - 20].to_string(), DecodeErr::Truncated),
-        ("CBX-008.6", TICKER.replace("\"sequence\":138933168161", "\"sequence\":\"1\""), DecodeErr::Shape),
+        (
+            "CBX-008.1",
+            MATCH.replace("\"side\":\"sell\"", "\"side\":\"x\""),
+            DecodeErr::Shape,
+        ),
+        (
+            "CBX-008.2",
+            TICKER.replace("\"best_ask\":\"75750.29\"", "\"best_ask\":\"7a\""),
+            DecodeErr::Number,
+        ),
+        (
+            "CBX-008.3",
+            TICKER.replace(
+                "\"best_bid_size\":\"0.06203374\"",
+                "\"best_bid_size\":\"0.062033741\"",
+            ),
+            DecodeErr::Number,
+        ),
+        (
+            "CBX-008.4",
+            MATCH.replace("15:58:52.630047Z", "15:58:52"),
+            DecodeErr::Number,
+        ),
+        (
+            "CBX-008.5",
+            TICKER[..TICKER.len() - 20].to_string(),
+            DecodeErr::Truncated,
+        ),
+        (
+            "CBX-008.6",
+            TICKER.replace("\"sequence\":138933168161", "\"sequence\":\"1\""),
+            DecodeErr::Shape,
+        ),
     ];
     for (row, p, want) in rows {
         let mut sink = VecSink::default();
-        let r = Cb::decode_md(rd(), &mut FeedCtx, class(p.as_bytes()), p.as_bytes(), &RX, &mut sink);
+        let r = Cb::decode_md(
+            rd(),
+            &mut FeedCtx,
+            class(p.as_bytes()),
+            p.as_bytes(),
+            &RX,
+            &mut sink,
+        );
         assert_eq!(r.map(|o| o.events), Err(want), "{row}");
         assert!(sink.md.is_empty(), "{row}: partial events");
     }
     // Unknown product: no event, no error.
     let other = TICKER.replace("BTC-USD", "ETH-USD");
     assert_eq!(decode(other.as_bytes()), Ok(vec![]), "CBX-008.7");
-    for c in [MdClass::Heartbeat, MdClass::Subscriptions, MdClass::Error, MdClass::Unknown] {
+    for c in [
+        MdClass::Heartbeat,
+        MdClass::Subscriptions,
+        MdClass::Error,
+        MdClass::Unknown,
+    ] {
         let mut sink = VecSink::default();
         assert_eq!(
             Cb::decode_md(rd(), &mut FeedCtx, c, TICKER.as_bytes(), &RX, &mut sink),
@@ -296,22 +473,46 @@ fn cbx_009_contracts_and_defaults() {
     assert_eq!(caps.flags.0, 0, "CBX-009.1");
     assert_eq!(Cb::stale_guard(), StaleGuard::None, "CBX-009.1");
     let samples = [
-        MdSample { name: "ticker", route: ROUTE_BBO, op: MsgOp::Text, payload: TICKER.as_bytes(), rx: RX },
-        MdSample { name: "match", route: ROUTE_MD, op: MsgOp::Text, payload: MATCH.as_bytes(), rx: RX },
+        MdSample {
+            name: "ticker",
+            route: ROUTE_BBO,
+            op: MsgOp::Text,
+            payload: TICKER.as_bytes(),
+            rx: RX,
+        },
+        MdSample {
+            name: "match",
+            route: ROUTE_MD,
+            op: MsgOp::Text,
+            payload: MATCH.as_bytes(),
+            rx: RX,
+        },
     ];
     check_md_basics::<Cb>(&samples, rd(), &mut FeedCtx).unwrap();
     let hb = Cb::heartbeat(Role::Md);
     assert_eq!(
-        (hb.interval_ms, hb.unconditional, hb.pong_timeout_ms, hb.idle_timeout_ms),
+        (
+            hb.interval_ms,
+            hb.unconditional,
+            hb.pong_timeout_ms,
+            hb.idle_timeout_ms
+        ),
         (5_000, false, 5_000, 0),
         "CBX-009.2"
     );
     assert_eq!(Cb::bbo_probe(), hft_venue_proto::PingKind::WsPing, "CBX-009.2");
-    let rules: Vec<_> = Cb::rate_rules().iter().map(|r| (r.scope, r.bucket, r.window_ms, r.limit)).collect();
+    let rules: Vec<_> = Cb::rate_rules()
+        .iter()
+        .map(|r| (r.scope, r.bucket, r.window_ms, r.limit))
+        .collect();
     use hft_refdata::{LimitBucket as B, LimitScope as S};
     assert_eq!(
         rules,
-        vec![(S::Ip, B::WsInMsgs, 1000, 8), (S::Conn, B::WsInMsgs, 1000, 10), (S::Ip, B::NewConns, 1000, 8)],
+        vec![
+            (S::Ip, B::WsInMsgs, 1000, 8),
+            (S::Conn, B::WsInMsgs, 1000, 10),
+            (S::Ip, B::NewConns, 1000, 8)
+        ],
         "CBX-009.3"
     );
 }
@@ -322,8 +523,14 @@ fn cbx_010_golden_ticker() {
         let (input, want) = fixture("ticker", case);
         let recs = decode(&input).unwrap();
         assert_eq!(render(&recs), want, "CBX-010 {case}");
-        let MdRec::Bbo(Bbo { h, .. }) = &recs[0] else { panic!("CBX-010") };
-        assert_eq!((h.conn, h.rx_tsc, h.sw_rx_ns, h.rx_empty_gap_ns), (RX.conn, RX.rx_tsc, RX.sw_rx_ns, 77), "CBX-010 {case}");
+        let MdRec::Bbo(Bbo { h, .. }) = &recs[0] else {
+            panic!("CBX-010")
+        };
+        assert_eq!(
+            (h.conn, h.rx_tsc, h.sw_rx_ns, h.rx_empty_gap_ns),
+            (RX.conn, RX.rx_tsc, RX.sw_rx_ns, 77),
+            "CBX-010 {case}"
+        );
     }
 }
 
@@ -392,7 +599,11 @@ fn cbx_014_race_two_connections() {
             None => {}
         }
         let pk = Cb::peek(rd(), &FeedCtx, c, p).unwrap();
-        assert_eq!((pk.inst, Cb::seq_rule(c)), (BTC_USD, SeqRule::Monotonic), "CBX-014");
+        assert_eq!(
+            (pk.inst, Cb::seq_rule(c)),
+            (BTC_USD, SeqRule::Monotonic),
+            "CBX-014"
+        );
         if pk.ids.last_id <= last_fwd {
             dups += 1;
             continue;
@@ -400,37 +611,90 @@ fn cbx_014_race_two_connections() {
         last_fwd = pk.ids.last_id;
         first_by_conn[f["conn"].as_u64().unwrap() as usize] += 1;
         let recs = decode(p).unwrap();
-        let [MdRec::Bbo(b)] = recs.as_slice() else { panic!("CBX-014") };
+        let [MdRec::Bbo(b)] = recs.as_slice() else {
+            panic!("CBX-014")
+        };
         out.push(b.update_id);
     }
     assert_eq!(out, want, "CBX-014.1 no duplicate, no gap against the union");
     assert_eq!(acks, 2, "CBX-014.2");
     assert!(pongs > 0 && dups > 0, "CBX-014.2");
-    assert!(first_by_conn.iter().all(|n| *n > 0), "CBX-014.3 both connections won some frames: {first_by_conn:?}");
+    assert!(
+        first_by_conn.iter().all(|n| *n > 0),
+        "CBX-014.3 both connections won some frames: {first_by_conn:?}"
+    );
 }
 
 #[test]
 fn cbx_015_read_only_forms() {
     let cred = Credential::default();
-    assert_eq!(Cb::build_templates(&CFG, rd(), hft_types::AccountId(1), &cred), Err(ProtoErr::Unsupported), "CBX-015.1");
-    let mut out = SubFrames::with_capacity(256, 2);
-    assert_eq!(Cb::private_subscribe(&CFG, hft_types::AccountId(1), false, &mut out), Err(ProtoErr::Unsupported), "CBX-015.2");
-    let mut req = RestReqBuf::default();
-    assert_eq!(Cb::session_identity_request(&CFG, &cred, 0, &mut req), Err(ProtoErr::Unsupported), "CBX-015.3");
-    assert_eq!(Cb::account_request(&CFG, &cred, &Query::Balances, 0, &mut req), Err(ProtoErr::Unsupported), "CBX-015.4");
     assert_eq!(
-        Cb::account_decode(rd(), hft_types::AccountId(1), &Query::Balances, 200, b"{}", 0, &mut State::default()),
+        Cb::build_templates(&CFG, rd(), hft_types::AccountId(1), &cred),
+        Err(ProtoErr::Unsupported),
+        "CBX-015.1"
+    );
+    let mut out = SubFrames::with_capacity(256, 2);
+    assert_eq!(
+        Cb::private_subscribe(&CFG, hft_types::AccountId(1), false, &mut out),
+        Err(ProtoErr::Unsupported),
+        "CBX-015.2"
+    );
+    let mut req = RestReqBuf::default();
+    assert_eq!(
+        Cb::session_identity_request(&CFG, &cred, 0, &mut req),
+        Err(ProtoErr::Unsupported),
+        "CBX-015.3"
+    );
+    assert_eq!(
+        Cb::account_request(&CFG, &cred, &Query::Balances, 0, &mut req),
+        Err(ProtoErr::Unsupported),
+        "CBX-015.4"
+    );
+    assert_eq!(
+        Cb::account_decode(
+            rd(),
+            hft_types::AccountId(1),
+            &Query::Balances,
+            200,
+            b"{}",
+            0,
+            &mut State::default()
+        ),
         Err(DecodeErr::UnknownClass),
         "CBX-015.4"
     );
     assert_eq!(Cb::dead_man(), hft_venue_proto::DeadManSpec::None, "CBX-015.5");
     let mut cid = [0u8; 48];
-    assert_eq!(Cb::render_cid(&hft_types::ClientOrderId { epoch: 1, venue: hft_types::VenueId::COINBASE_SPOT, account: hft_types::AccountId(1), slot: 1, r#gen: 1 }, &mut cid), 0, "CBX-015.6");
+    assert_eq!(
+        Cb::render_cid(
+            &hft_types::ClientOrderId {
+                epoch: 1,
+                venue: hft_types::VenueId::COINBASE_SPOT,
+                account: hft_types::AccountId(1),
+                slot: 1,
+                r#gen: 1
+            },
+            &mut cid
+        ),
+        0,
+        "CBX-015.6"
+    );
     assert_eq!(Cb::parse_cid(b"000000000000000000000000"), None, "CBX-015.6");
-    assert_eq!(Cb::classify_report(MsgOp::Text, TICKER.as_bytes()), venue_coinbase::ReportClass::Unknown, "CBX-015.7");
+    assert_eq!(
+        Cb::classify_report(MsgOp::Text, TICKER.as_bytes()),
+        venue_coinbase::ReportClass::Unknown,
+        "CBX-015.7"
+    );
     let mut rs = fuzz_exercise::NullReports;
     assert_eq!(
-        Cb::decode_report(rd(), &mut (), venue_coinbase::ReportClass::Unknown, TICKER.as_bytes(), &RX, &mut rs),
+        Cb::decode_report(
+            rd(),
+            &mut (),
+            venue_coinbase::ReportClass::Unknown,
+            TICKER.as_bytes(),
+            &RX,
+            &mut rs
+        ),
         Err(DecodeErr::UnknownClass),
         "CBX-015.7"
     );
@@ -451,7 +715,9 @@ fn cbx_017_matches_run() {
         last = pk.ids.last_id;
         let recs = decode(p).unwrap();
         if c == MdClass::Match {
-            let [MdRec::Trade(t)] = recs.as_slice() else { panic!("CBX-017.2") };
+            let [MdRec::Trade(t)] = recs.as_slice() else {
+                panic!("CBX-017.2")
+            };
             assert_eq!(t.trade_id, pk.ids.last_id, "CBX-017.2");
             trades += 1;
         } else {

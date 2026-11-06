@@ -52,7 +52,20 @@ pub fn iso8601_ns(s: &[u8]) -> Result<i64, DecodeErr> {
     let mi = digits(s, 14, 2)?;
     sep(s, 16, b':')?;
     let se = digits(s, 17, 2)?;
-    let mdays = [31, if leap(y) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mdays = [
+        31,
+        if leap(y) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let dim = usize::try_from(mo - 1)
         .ok()
         .and_then(|i| mdays.get(i).copied())
@@ -64,7 +77,12 @@ pub fn iso8601_ns(s: &[u8]) -> Result<i64, DecodeErr> {
     let mut frac = 0i64;
     if s.get(at) == Some(&b'.') {
         at += 1;
-        let n = s.get(at..).unwrap_or(&[]).iter().take_while(|b| b.is_ascii_digit()).count();
+        let n = s
+            .get(at..)
+            .unwrap_or(&[])
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
         if n == 0 || n > 9 {
             return Err(DecodeErr::Number);
         }

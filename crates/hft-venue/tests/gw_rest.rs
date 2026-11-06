@@ -1006,7 +1006,8 @@ fn ven_414_cancel_race_companion() {
     response_on(&mut h, 115, 503, 6000);
     let v = h.reps();
     assert!(
-        !v.iter().any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.what == OrderEventKind::OutcomeUnknown)),
+        !v.iter()
+            .any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.what == OrderEventKind::OutcomeUnknown)),
         "VEN-414.2 {v:?}"
     );
     // .3 off: no companion.

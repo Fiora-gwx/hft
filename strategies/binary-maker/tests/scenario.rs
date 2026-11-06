@@ -1110,7 +1110,11 @@ fn bmk_024_schema_v6() {
     // .17 schema v21 appends dir_phase_ms (0 = off).
     assert_eq!(n_fields_at(schema, 21), Some(87), "BMK-024.17");
     let f = schema.field(86).unwrap();
-    assert_eq!((f.name, f.since, f.default), ("dir_phase_ms", 21, 0), "BMK-024.17");
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("dir_phase_ms", 21, 0),
+        "BMK-024.17"
+    );
     // .18 schema v22 appends comp_always (0 = off).
     assert_eq!(n_fields_at(schema, 22), Some(88), "BMK-024.18");
     let f = schema.field(87).unwrap();
@@ -1159,7 +1163,11 @@ fn bmk_024_schema_v6() {
         ("settle_improve", 0),
     ];
     let n24 = 90 + v24.len() as u16;
-    assert_eq!(n_fields_at(schema, 25), Some(n24 + v25.len() as u16), "BMK-024.21");
+    assert_eq!(
+        n_fields_at(schema, 25),
+        Some(n24 + v25.len() as u16),
+        "BMK-024.21"
+    );
     for (k, (name, default)) in v25.iter().enumerate() {
         let f = schema.field(n24 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 25, *default), "BMK-024.21");
@@ -1168,7 +1176,11 @@ fn bmk_024_schema_v6() {
     let n25 = n24 + v25.len() as u16;
     assert_eq!(n_fields_at(schema, 26), Some(n25 + 1), "BMK-024.22");
     let f = schema.field(n25).unwrap();
-    assert_eq!((f.name, f.since, f.default), ("settle_stop_ms", 26, 0), "BMK-024.22");
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("settle_stop_ms", 26, 0),
+        "BMK-024.22"
+    );
     // .23 schema v27 appends dir_from_ms, pair_eager_z, pair_lazy_c (0 = off).
     assert_eq!(n_fields_at(schema, 27), Some(n25 + 4), "BMK-024.23");
     for (k, name) in ["dir_from_ms", "pair_eager_z", "pair_lazy_c"].iter().enumerate() {
@@ -1184,7 +1196,11 @@ fn bmk_024_schema_v6() {
         "pair_risk_usd",
         "open_from_ms",
     ];
-    assert_eq!(n_fields_at(schema, 28), Some(n25 + 4 + v28.len() as u16), "BMK-024.24");
+    assert_eq!(
+        n_fields_at(schema, 28),
+        Some(n25 + 4 + v28.len() as u16),
+        "BMK-024.24"
+    );
     for (k, name) in v28.iter().enumerate() {
         let f = schema.field(n25 + 4 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 28, 0), "BMK-024.24");
@@ -1201,7 +1217,11 @@ fn bmk_024_schema_v6() {
         ("dip_depth_max_c", 5),
     ];
     let n28 = n25 + 4 + v28.len() as u16;
-    assert_eq!(n_fields_at(schema, 29), Some(n28 + v29.len() as u16), "BMK-024.25");
+    assert_eq!(
+        n_fields_at(schema, 29),
+        Some(n28 + v29.len() as u16),
+        "BMK-024.25"
+    );
     for (k, (name, default)) in v29.iter().enumerate() {
         let f = schema.field(n28 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 29, *default), "BMK-024.25");
@@ -1220,8 +1240,20 @@ fn bmk_024_schema_v6() {
         assert_eq!((f.name, f.since, f.default), (*name, 31, 0), "BMK-024.27");
     }
     // .28 schema v32 appends the stop-loss pairing and the rule 12 Chainlink fields (0 = off).
-    let v32 = ["rescue_ms", "rescue_z", "rescue_px", "rescue_cap", "settle_src", "settle_lead_usd", "settle_edge"];
-    assert_eq!(n_fields_at(schema, 32), Some(n29 + 5 + v32.len() as u16), "BMK-024.28");
+    let v32 = [
+        "rescue_ms",
+        "rescue_z",
+        "rescue_px",
+        "rescue_cap",
+        "settle_src",
+        "settle_lead_usd",
+        "settle_edge",
+    ];
+    assert_eq!(
+        n_fields_at(schema, 32),
+        Some(n29 + 5 + v32.len() as u16),
+        "BMK-024.28"
+    );
     for (k, name) in v32.iter().enumerate() {
         let f = schema.field(n29 + 5 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 32, 0), "BMK-024.28");
@@ -1235,8 +1267,19 @@ fn bmk_024_schema_v6() {
     }
     // .30 schema v34 appends the chop scope / trend gate and the low-volatility band (0 = off).
     let n33 = n32 + 2;
-    let v34 = ["chop_all", "chop_er_min", "sigma_lo", "lo_er_max", "lo_obi_on", "lo_obi_min"];
-    assert_eq!(n_fields_at(schema, 34), Some(n33 + v34.len() as u16), "BMK-024.30");
+    let v34 = [
+        "chop_all",
+        "chop_er_min",
+        "sigma_lo",
+        "lo_er_max",
+        "lo_obi_on",
+        "lo_obi_min",
+    ];
+    assert_eq!(
+        n_fields_at(schema, 34),
+        Some(n33 + v34.len() as u16),
+        "BMK-024.30"
+    );
     for (k, name) in v34.iter().enumerate() {
         let f = schema.field(n33 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 34, 0), "BMK-024.30");
@@ -1253,7 +1296,10 @@ fn bmk_024_schema_v6() {
     assert_eq!((f.name, f.since, f.default), ("ab_scale", 36, 0), "BMK-024.32");
     // .33 v37 appends the Coinbase guard (0 = off).
     assert_eq!(n_fields_at(schema, 37), Some(n34 + 7), "BMK-024.33");
-    for (k, name) in ["cb_win_ms", "cb_shock", "cb_hold_ms", "cb_pair"].iter().enumerate() {
+    for (k, name) in ["cb_win_ms", "cb_shock", "cb_hold_ms", "cb_pair"]
+        .iter()
+        .enumerate()
+    {
         let f = schema.field(n34 + 3 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 37, 0), "BMK-024.33");
     }
@@ -2488,7 +2534,12 @@ type SettlePlaces = Vec<(i64, InstId, i64, u32)>;
 /// Rule 12 harness (main rules off by `sigma_min`): settle_ms 60 s and `extra`; Up book of pair 1
 /// `ub` / `ua`, Down the complement; reference ticks from 100 s to `to_s` (exclusive). Returns the
 /// harness and every place.
-fn settle_h(extra: &[(&str, i64)], ub: i64, ua: i64, to_s: i64) -> (StrategyHarness<BinaryMaker>, SettlePlaces) {
+fn settle_h(
+    extra: &[(&str, i64)],
+    ub: i64,
+    ua: i64,
+    to_s: i64,
+) -> (StrategyHarness<BinaryMaker>, SettlePlaces) {
     let mut f = vec![("settle_ms", 60_000), ("sigma_min", 1_000_000_000)];
     f.extend_from_slice(extra);
     let mut h = harness(&params_with(&f));
@@ -2508,9 +2559,15 @@ fn settle_h(extra: &[(&str, i64)], ub: i64, ua: i64, to_s: i64) -> (StrategyHarn
 fn phi_f64(z: f64) -> f64 {
     let x = z.abs() / std::f64::consts::SQRT_2;
     let t = 1.0 / (1.0 + 0.327_591_1 * x);
-    let poly = t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    let poly = t
+        * (0.254_829_592
+            + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
     let erf = 1.0 - poly * (-x * x).exp();
-    if z >= 0.0 { 0.5 * (1.0 + erf) } else { 0.5 * (1.0 - erf) }
+    if z >= 0.0 {
+        0.5 * (1.0 + erf)
+    } else {
+        0.5 * (1.0 - erf)
+    }
 }
 
 #[test]
@@ -2558,7 +2615,11 @@ fn bmk_044_settlement_window_liquidity() {
     let (_, got) = settle_h(&[("settle_improve", 1)], 940, 970, 546);
     assert_eq!(got, vec![(545, SLOTS[2], 950, tag)], "BMK-044.2 improve");
     // settle_ms 0: off.
-    assert_eq!(settle_h(&[("settle_ms", 0)], 950, 960, 560).1, vec![], "BMK-044.2 off");
+    assert_eq!(
+        settle_h(&[("settle_ms", 0)], 950, 960, 560).1,
+        vec![],
+        "BMK-044.2 off"
+    );
     // .3 live bid (OMS slot 21); the reference falls back to 100 000.00 at 550 s: p_Up < 0.90 →
     // cancel.
     let live = |h: &mut StrategyHarness<BinaryMaker>| {
@@ -2596,14 +2657,25 @@ fn bmk_044_settlement_window_liquidity() {
     for (max, want) in [(20, 0usize), (60, 1)] {
         let (mut h, _) = settle_h(&[("settle_max_shares", max)], 950, 960, 546);
         live(&mut h);
-        update_at(&mut h, 546_200_000_000, 2, 21, filled(20_000_000, 20_000_000, true));
+        update_at(
+            &mut h,
+            546_200_000_000,
+            2,
+            21,
+            filled(20_000_000, 20_000_000, true),
+        );
         assert_eq!(h.strategy().fast.settle.bought, 20_000_000, "BMK-044.5");
         let out = settle_tick(&mut h, 547, settle_mid(547));
         assert_eq!(out.places().count(), want, "BMK-044.5 max {max}");
     }
     // .6 the main rules quoting (default sigma_min, stop_before_ms 30 s; bids outside [p_min, p_max]
     // so they have no target): the module waits for the last 30 s.
-    let (_, got) = settle_h(&[("sigma_min", 50_000), ("stop_before_ms", 30_000)], 950, 960, 571);
+    let (_, got) = settle_h(
+        &[("sigma_min", 50_000), ("stop_before_ms", 30_000)],
+        950,
+        960,
+        571,
+    );
     assert_eq!(got, vec![(570, SLOTS[2], 950, tag)], "BMK-044.6");
 }
 
@@ -2612,14 +2684,22 @@ fn bmk_045_stop_loss_pairing() {
     // Long 10 Down at 0.600, both books bid 0.450 / ask 0.470, the score favours Up (Up bid 190
     // shares vs Down 10); sigma_min closes the main rules. 399.5 s = age 99.5 s of window 300.
     let run = |extra: &[(&str, i64)]| {
-        let mut f = vec![("clip_shares", 5), ("inv_max_shares", 10), ("sigma_min", 1_000_000_000)];
+        let mut f = vec![
+            ("clip_shares", 5),
+            ("inv_max_shares", 10),
+            ("sigma_min", 1_000_000_000),
+        ];
         f.extend_from_slice(extra);
         let mut h = harness(&comp_params(&f));
         hold(&mut h, 3, 10, 600);
         let out = warm_sized(&mut h, 190, 10);
         (placed(&out), h.strategy().fast.rescued)
     };
-    let on = [("rescue_ms", 90_000), ("rescue_z", 500_000_000), ("rescue_px", 500_000_000)];
+    let on = [
+        ("rescue_ms", 90_000),
+        ("rescue_z", 500_000_000),
+        ("rescue_px", 500_000_000),
+    ];
     // .1 rescue_ms 0: nothing.
     assert_eq!(run(&[]), (vec![], i64::MIN), "BMK-045.1");
     // .2 on: Up pairs at the best bid 0.450 without the pair-cost limit (0.390); the window is marked.
@@ -2692,29 +2772,69 @@ fn bmk_046_settlement_on_chainlink() {
     // .1 settle_src 1 on the same path: the same p, μ and the same bid as the reference.
     let (hb, gb) = settle_h(&[], 950, 960, 546);
     let (hc, gc) = settle_hc(&[("settle_src", 1)], 950, 960, 546, same);
-    assert_eq!(hc.strategy().fast.settle.out, hb.strategy().fast.settle.out, "BMK-046.1");
+    assert_eq!(
+        hc.strategy().fast.settle.out,
+        hb.strategy().fast.settle.out,
+        "BMK-046.1"
+    );
     assert_eq!(gc, gb, "BMK-046.1");
     assert_eq!(gc, vec![(545, SLOTS[2], 950, tag)], "BMK-046.1");
     // .2 no Chainlink samples, or none after 541 s (stale at 545 s): no bid; the reference source
     // ignores the samples.
-    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 560, |_| None).1, vec![], "BMK-046.2");
+    assert_eq!(
+        settle_hc(&[("settle_src", 1)], 950, 960, 560, |_| None).1,
+        vec![],
+        "BMK-046.2"
+    );
     let stale = |s: i64| (s <= 541).then(|| settle_mid(s) * 1_000_000);
-    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 546, stale).1, vec![], "BMK-046.2 stale");
-    assert_eq!(settle_hc(&[], 950, 960, 546, |_| None).1, gb, "BMK-046.2 reference");
+    assert_eq!(
+        settle_hc(&[("settle_src", 1)], 950, 960, 546, stale).1,
+        vec![],
+        "BMK-046.2 stale"
+    );
+    assert_eq!(
+        settle_hc(&[], 950, 960, 546, |_| None).1,
+        gb,
+        "BMK-046.2 reference"
+    );
     // .3 Chainlink stays at the strike while the reference moves: μ ~ 0, no bid.
-    let flat = |s: i64| Some(if s >= 540 { 10_000_500 * 1_000_000 } else { settle_mid(s) * 1_000_000 });
-    assert_eq!(settle_hc(&[("settle_src", 1)], 950, 960, 560, flat).1, vec![], "BMK-046.3");
+    let flat = |s: i64| {
+        Some(if s >= 540 {
+            10_000_500 * 1_000_000
+        } else {
+            settle_mid(s) * 1_000_000
+        })
+    };
+    assert_eq!(
+        settle_hc(&[("settle_src", 1)], 950, 960, 560, flat).1,
+        vec![],
+        "BMK-046.3"
+    );
     // .4 settle_lead_usd: the projected average 100 100.00 leads the strike 100 005.00 by 95 USD.
     for (lead, want) in [(90, 1usize), (100, 0)] {
-        let got = settle_hc(&[("settle_src", 1), ("settle_lead_usd", lead)], 950, 960, 546, same).1;
+        let got = settle_hc(
+            &[("settle_src", 1), ("settle_lead_usd", lead)],
+            950,
+            960,
+            546,
+            same,
+        )
+        .1;
         assert_eq!(got.len(), want, "BMK-046.4 lead {lead}");
         let got = settle_h(&[("settle_lead_usd", lead)], 950, 960, 546).1;
         assert_eq!(got.len(), want, "BMK-046.4 reference lead {lead}");
     }
     // .5 settle_edge: a bid only at most at p - edge.
     let p = hb.strategy().fast.settle.out[0];
-    for (edge, want) in [(p - 950_000_000 - 1_000_000, 1usize), (p - 950_000_000 + 1_000_000, 0)] {
-        assert_eq!(settle_h(&[("settle_edge", edge)], 950, 960, 546).1.len(), want, "BMK-046.5 {edge}");
+    for (edge, want) in [
+        (p - 950_000_000 - 1_000_000, 1usize),
+        (p - 950_000_000 + 1_000_000, 0),
+    ] {
+        assert_eq!(
+            settle_h(&[("settle_edge", edge)], 950, 960, 546).1.len(),
+            want,
+            "BMK-046.5 {edge}"
+        );
     }
     // .6 payload decoding: version, length, price sign; an older sample fills only its second.
     let mut c = ClFeed {
@@ -2750,12 +2870,18 @@ fn chop_payload(e: &[(i64, i64)]) -> Vec<u8> {
 #[test]
 fn bmk_047_chop_seed() {
     use binary_maker::fast::Chop;
-    let e: Vec<(i64, i64)> = (0..12).map(|k| (1_000 + 300 * k, 100_000_000 + k * 10_000_000)).collect();
+    let e: Vec<(i64, i64)> = (0..12)
+        .map(|k| (1_000 + 300 * k, 100_000_000 + k * 10_000_000))
+        .collect();
     // .1 twelve windows into an empty ring: mean of the last 12 = 0.155, of the last 6 = 0.185.
     let mut c = Chop::default();
     c.seed(&chop_payload(&e));
     assert_eq!((c.len, c.pos), (12, 12), "BMK-047.1");
-    assert_eq!((c.mean(12), c.mean(6)), (Some(155_000_000), Some(185_000_000)), "BMK-047.1");
+    assert_eq!(
+        (c.mean(12), c.mean(6)),
+        (Some(155_000_000), Some(185_000_000)),
+        "BMK-047.1"
+    );
     // .2 a ring with entries ignores a seed; a bad version is ignored.
     let mut c2 = c;
     c2.seed(&chop_payload(&[(9_000, 0)]));
@@ -2770,13 +2896,27 @@ fn bmk_047_chop_seed() {
         win: 2_200,
         ..Chop::default()
     };
-    c4.seed(&chop_payload(&[(1_000, 2_000_000_000), (1_300, 300_000_000), (1_200, 100_000_000), (1_600, 200_000_000), (2_200, 400_000_000)]));
-    assert_eq!((c4.len, c4.ring[0], c4.ring[1]), (2, 300_000_000, 200_000_000), "BMK-047.3");
+    c4.seed(&chop_payload(&[
+        (1_000, 2_000_000_000),
+        (1_300, 300_000_000),
+        (1_200, 100_000_000),
+        (1_600, 200_000_000),
+        (2_200, 400_000_000),
+    ]));
+    assert_eq!(
+        (c4.len, c4.ring[0], c4.ring[1]),
+        (2, 300_000_000, 200_000_000),
+        "BMK-047.3"
+    );
     // .4 thirty windows: the last 24 kept, the newest last.
     let e30: Vec<(i64, i64)> = (0..30).map(|k| (300 * k, k * 1_000_000)).collect();
     let mut c5 = Chop::default();
     c5.seed(&chop_payload(&e30));
-    assert_eq!((c5.len, c5.pos, c5.ring[0], c5.ring[23]), (24, 0, 6_000_000, 29_000_000), "BMK-047.4");
+    assert_eq!(
+        (c5.len, c5.pos, c5.ring[0], c5.ring[23]),
+        (24, 0, 6_000_000, 29_000_000),
+        "BMK-047.4"
+    );
     assert_eq!(c5.mean(1), Some(29_000_000), "BMK-047.4");
     // .5 through the strategy: InjectWarmup local kind 2 fills the chop ring.
     let mut h = harness(&params_with(&[("chop_k", 12)]));
@@ -2853,7 +2993,10 @@ fn bmk_048_pressure_block() {
     let got = ofi_run(&on, &flat);
     assert!(!has(&got, SLOTS[2]) && has(&got, SLOTS[3]), "BMK-048.4 {got:?}");
     let got = ofi_run(&[], &flat);
-    assert!(has(&got, SLOTS[2]) && has(&got, SLOTS[3]), "BMK-048.4 off {got:?}");
+    assert!(
+        has(&got, SLOTS[2]) && has(&got, SLOTS[3]),
+        "BMK-048.4 off {got:?}"
+    );
     // .5 the Up bid grows 10 → 30 at 397 s (order flow +20 within 5 s, imbalance still −0.54):
     // Up quotes.
     let got = ofi_run(&on, &[10, 10, 10, 10, 10, 30, 30]);
@@ -2894,8 +3037,11 @@ fn bmk_049_second_reference_group() {
     );
     // .4 a native BBO on R2 is one guard sample (mid × 2 in R2's price units).
     h.views_mut().at_engine_ns(1_000_000_000);
-    h.views_mut()
-        .bbo(R2, (Px(9_999_999), Qty(1_000_000)), (Px(10_000_001), Qty(1_000_000)));
+    h.views_mut().bbo(
+        R2,
+        (Px(9_999_999), Qty(1_000_000)),
+        (Px(10_000_001), Qty(1_000_000)),
+    );
     let b = h.views_mut().bbo_of(R2);
     h.feed(&ev::bbo(R2, 7, b).as_ref());
     let cb = &h.strategy().fast.cb;

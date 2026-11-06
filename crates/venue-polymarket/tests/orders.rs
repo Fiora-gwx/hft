@@ -1936,24 +1936,51 @@ fn pmk_041_cancel_race_companion() {
     let ack = format!(
         "{{\"errorMsg\":\"\",\"orderID\":\"{H1}\",\"takingAmount\":\"\",\"makingAmount\":\"\",\"status\":\"live\",\"success\":true}}"
     );
-    Pm::decode_rest(rd(), &mut c, &origin(GwOp::Place, UP), 200, ack.as_bytes(), &RX, &mut s).unwrap();
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Place, UP),
+        200,
+        ack.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
     let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
     let companion = |c: &mut GwCtx, cmd: &GwCmd, t: &TargetRef| {
         let mut out = RestReqBuf::default();
         Pm::encode_rest_companion(rd(), &tpl, c, &cred(), cmd, t, &clk(), &mut out).map(|b| (b, out))
     };
     // .1 the companion of a cancel by hash: every order of the account on the token, signed.
-    let (yes, r) = companion(&mut c, &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(key_of(H1))).unwrap();
+    let (yes, r) = companion(
+        &mut c,
+        &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc),
+        &tgt(key_of(H1)),
+    )
+    .unwrap();
     assert!(yes, "PMK-041.1");
     assert_eq!(
         (r.method, text(r.path_query.as_slice()), text(r.body.as_slice())),
-        (Method::Delete, "/cancel-market-orders", format!("{{\"asset_id\":\"{T_UP}\"}}").as_str()),
+        (
+            Method::Delete,
+            "/cancel-market-orders",
+            format!("{{\"asset_id\":\"{T_UP}\"}}").as_str()
+        ),
         "PMK-041.1"
     );
     assert!(header(&r, "POLY_SIGNATURE").is_some(), "PMK-041.1");
     // .2 none for other operations, nor for a cancel that already goes by token (unknown hash).
-    for (op, t) in [(GwOp::Place, tgt(0)), (GwOp::CancelAll, tgt(0)), (GwOp::Cancel, tgt(42))] {
-        assert!(!companion(&mut c, &cmd(op, UP, Side::Buy, 400, 5_000_000, Tif::Gtc), &t).unwrap().0, "PMK-041.2 {op:?}");
+    for (op, t) in [
+        (GwOp::Place, tgt(0)),
+        (GwOp::CancelAll, tgt(0)),
+        (GwOp::Cancel, tgt(42)),
+    ] {
+        assert!(
+            !companion(&mut c, &cmd(op, UP, Side::Buy, 400, 5_000_000, Tif::Gtc), &t)
+                .unwrap()
+                .0,
+            "PMK-041.2 {op:?}"
+        );
     }
     // .3 the race: the companion's answer cancels the order (one CancelAck); the later "already
     // canceled" answer of the cancel by hash is no CancelReject.
@@ -1968,15 +1995,42 @@ fn pmk_041_cancel_race_companion() {
     let lost = format!(
         "{{\"not_canceled\":{{\"{H1}\":\"order can't be found - already canceled or matched\"}},\"canceled\":[]}}"
     );
-    Pm::decode_rest(rd(), &mut c, &origin(GwOp::Cancel, UP), 200, lost.as_bytes(), &RX, &mut s).unwrap();
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Cancel, UP),
+        200,
+        lost.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
     let kinds: Vec<_> = orders(&s).iter().map(|e| e.what).collect();
     assert_eq!(kinds, vec![OrderEventKind::CancelAck], "PMK-041.3");
     // .4 the same "already canceled" answer without a confirmed cancel stays a CancelReject.
     let mut c = ctx();
     let mut s = VecSink::default();
-    Pm::decode_rest(rd(), &mut c, &origin(GwOp::Place, UP), 200, ack.as_bytes(), &RX, &mut s).unwrap();
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Place, UP),
+        200,
+        ack.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
     let mut s = VecSink::default();
-    Pm::decode_rest(rd(), &mut c, &origin(GwOp::Cancel, UP), 200, lost.as_bytes(), &RX, &mut s).unwrap();
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Cancel, UP),
+        200,
+        lost.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
     let kinds: Vec<_> = orders(&s).iter().map(|e| e.what).collect();
     assert_eq!(kinds, vec![OrderEventKind::CancelReject], "PMK-041.4");
 }

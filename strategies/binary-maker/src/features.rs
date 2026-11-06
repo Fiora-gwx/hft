@@ -79,7 +79,9 @@ impl RefSecs {
     /// The value of exactly second `t`.
     pub fn exact(&self, t: i64) -> Option<i64> {
         let k = Self::slot(t);
-        (self.sec.get(k) == Some(&t)).then(|| self.val.get(k).copied()).flatten()
+        (self.sec.get(k) == Some(&t))
+            .then(|| self.val.get(k).copied())
+            .flatten()
     }
     /// Sum and count of the recorded seconds in `[from, to)`.
     pub fn sum(&self, from: i64, to: i64) -> (i128, i64) {
