@@ -25,7 +25,7 @@ use hft_rt::{
 use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, SlotId, Tsc};
 use hft_venue_proto::{
     Credential, DeadManOut, DecodeErr, ExchIdHint, MsgOp, OrderChannel, ReportCtl, ReportOutcome, ReportSink,
-    ReqRef, RxMeta, Skip, TargetRef, VenueProtocol, WallClock,
+    ReqRef, RestWhat, RxMeta, Skip, TargetRef, VenueProtocol, WallClock,
 };
 use zerocopy::IntoBytes;
 
@@ -148,6 +148,10 @@ pub struct GwCounters {
     /// waiting (queue full, waited longer than `gw.inflight_timeout_ms`).
     pub rest_cancel_queued: u64,
     pub rest_cancel_dropped: u64,
+    /// Companion requests of raced cancels written, and those skipped (no free connection, rate
+    /// limit, encode refusal).
+    pub rest_companion_sent: u64,
+    pub rest_companion_skipped: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -784,7 +788,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             )
         };
         let (key, n, over) = (sink.key, sink.key_len, sink.over);
-        let outcome = match result {
+        let companion = r.origin.what == RestWhat::OrderCompanion;
+        let mut outcome = match result {
             Ok(o) if !over => o,
             _ => {
                 self.sink_evs.clear();
@@ -796,6 +801,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
             }
         };
+        // A raced cancel's companion only adds what it confirms; its failure is not the order's.
+        if companion {
+            outcome.outcome_unknown = None;
+        }
         self.apply_outcome(
             a,
             conn,

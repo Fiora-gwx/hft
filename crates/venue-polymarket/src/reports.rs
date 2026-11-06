@@ -79,6 +79,9 @@ struct Row {
     cancel_nf: bool,
     /// The place answer said the order rests (`live` / `delayed`).
     live: bool,
+    /// A cancel of this process was confirmed (`CancelAck` produced): a later "already canceled"
+    /// answer of a raced cancel's other request is no `CancelReject` (README "撤单赛跑").
+    cancel_acked: bool,
     /// A FAK / FOK order this process signed: fills come from `trade` events and the place
     /// answer, never from `order` events (README "吃单").
     taker: Option<Taker>,
@@ -463,7 +466,7 @@ pub(crate) fn decode_rest(
     out: &mut impl ReportSink,
 ) -> Result<ReportOutcome, DecodeErr> {
     let r = match (req.what, req.req) {
-        (RestWhat::Order, Some(r)) => r,
+        (RestWhat::Order | RestWhat::OrderCompanion, Some(r)) => r,
         _ => return Err(DecodeErr::UnknownClass),
     };
     let mut o = ReportOutcome {
@@ -572,6 +575,8 @@ pub(crate) fn decode_rest(
                 o.raw_code = raw_code_str(why.as_bytes());
                 let row = parse_hash(id).and_then(|h| ctx.row_mut(key_of(&h)));
                 let detail = match row {
+                    // The other request of a raced cancel already confirmed it.
+                    Some(w) if w.cancel_acked => None,
                     // Sent before the place answer and the order is not known yet: the cancel may
                     // have overtaken it. The place answer decides (README "下单"): refused as
                     // already cancelled → CancelAck; resting → `EARLY`.
@@ -754,6 +759,7 @@ fn cancelled(
     };
     if let Some(r) = ctx.row_mut(key) {
         r.terminal = true;
+        r.cancel_acked = true;
     }
     let mut e = blank(rx.account, rx);
     e.what = OrderEventKind::CancelAck;

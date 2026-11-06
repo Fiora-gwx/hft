@@ -319,6 +319,8 @@ impl PresignOpts {
 pub struct GwOpts {
     pub rest_conns: Option<u8>,
     pub rest_cancel_reserve: Option<u8>,
+    /// `gw.cancel_race` (hft-venue "撤单赛跑"); absent = off.
+    pub cancel_race: Option<bool>,
 }
 impl GwOpts {
     /// `(rest_conns, rest_cancel_reserve)` in effect over the protocol defaults `(conns, reserve)`.

@@ -264,6 +264,18 @@ impl VenueProtocol for PolymarketClob {
     ) -> Result<(), EncodeErr> {
         orders::encode(rd, t, ctx, cred, c, tgt, clk, out)
     }
+    fn encode_rest_companion(
+        _rd: &RefData,
+        t: &Templates,
+        ctx: &mut GwCtx,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        orders::encode_companion(t, ctx, cred, c, tgt, clk, out)
+    }
     fn encode_rest_signed(
         _rd: &RefData,
         _t: &Templates,

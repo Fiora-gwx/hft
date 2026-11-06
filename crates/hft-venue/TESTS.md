@@ -3946,3 +3946,18 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 |---|---|---|
 | VEN-409.1 | `Place{slot 7}`,轮询于 4 000 | 恰一条 `SendReport{Written}`,`sent_tsc` = 4 777(写出返回时刻,不是本圈开始的 4 000) |
 | VEN-409.2 | 同上 | 该请求的 `RawTx` 记录头 `tsc` = 4 777 |
+
+### VEN-414 撤单赛跑：伴随请求一同写出、只有一条报告、失败不判未知
+
+- 规则:[§4 撤单赛跑](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`(`V_REST_ORDERS`,`companion = true`),A1 的 REST 池 2 条连接(114、115);先下单并以 200 应答
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_414_cancel_race_companion`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-414.1 | `gw.cancel_race = true`,对该单 `Cancel` | 一条 `SendReport{Written}`;`encode_rest_companion` 调用 1 次;`rest_companion_sent` = 1 |
+| VEN-414.2 | 伴随请求所在连接 115 应答 503 | 无 `OutcomeUnknown` |
+| VEN-414.3 | `gw.cancel_race = false`,同样的撤单 | 不调用 `encode_rest_companion`;`rest_companion_sent` = 0 |
+

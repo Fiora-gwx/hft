@@ -162,6 +162,9 @@ pub struct PmLive {
     pub group_cap: Option<i64>,
     /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
     pub presign: bool,
+    /// `venues.pm.gw.cancel_race` (hft-venue "撤单赛跑"; owner decision 2026-11-06: on in live);
+    /// false (`--no-cancel-race`) = off.
+    pub cancel_race: bool,
     /// Further Live accounts 2, 3, … (`--live-account`, `--account`), bound to the same
     /// binary-maker instance with `pm-live`'s risk limits; the strategy parameters stay one blob
     /// under `pm-live`.
@@ -1215,6 +1218,9 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     );
     if l.presign {
         pm.insert("presign".into(), parse(PM_LIVE_PRESIGN)?);
+    }
+    if l.cancel_race {
+        pm.insert("gw".into(), parse("cancel_race = true")?);
     }
     let threads = config
         .get_mut("threads")

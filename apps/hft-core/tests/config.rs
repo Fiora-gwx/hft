@@ -803,6 +803,7 @@ fn core_430_production_orders_polymarket_only() {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
@@ -879,6 +880,7 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
@@ -1069,6 +1071,7 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
@@ -1165,6 +1168,7 @@ fn core_441_shared_account_ip() {
             account_cap: None,
             group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1269,6 +1273,7 @@ bind_device = 'lo'
             account_cap: None,
             group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: vec![
                 ("0f5e8d2a-4444-5555-6666-".into(), d.path().join("keys2")),
                 ("0f5e8d2a-7777-8888-9999-".into(), d.path().join("keys3")),
@@ -1354,6 +1359,7 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             account_cap: None,
             group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1411,6 +1417,13 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
         Err(e) => panic!("CORE-440.2 {e:?}"),
     };
     assert_eq!(effective(&l.cfg, "public"), (4, 1), "CORE-440.2");
+    // .2b `cancel_race` (hft-venue "撤单赛跑") is a known gw key.
+    std::fs::write(&path, with("cancel_race = true")).unwrap();
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-440.2b {e:?}"),
+    };
+    assert_eq!(l.cfg.venues["public"].gw.cancel_race, Some(true), "CORE-440.2b");
     // .3 out of range or an unknown key is refused.
     for (extra, code) in [
         ("rest_conns = 0", "BadValue"),
@@ -1434,6 +1447,7 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
             account_cap: None,
             group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1479,6 +1493,7 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
@@ -1602,6 +1617,7 @@ fn core_435_live_polymarket_daily_loss_option() {
             account_cap: None,
             group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let path = support::write_polymarket_maker_live(
@@ -1770,6 +1786,7 @@ fn core_439_polymarket_maker_param_values() {
         account_cap: None,
         group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live_with(
@@ -1875,6 +1892,7 @@ fn core_445_venue_presign() {
             account_cap: None,
             group_cap: None,
             presign: false,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1917,6 +1935,7 @@ fn core_445_venue_presign() {
         assert!(!base.contains("presign"), "CORE-445.4");
         let on = support::PmLive {
             presign: true,
+            cancel_race: true,
             ..live
         };
         let pm = support::write_polymarket_maker_live(

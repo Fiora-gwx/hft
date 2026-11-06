@@ -89,6 +89,23 @@ pub trait VenueProtocol: Sized + 'static {
         let _ = ctx;
         Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out)
     }
+    /// A second request for the same command, sent at once on another connection when the gw is
+    /// configured to race it (`gw.cancel_race`, hft-venue README "撤单赛跑"); its answer comes back
+    /// as `RestWhat::OrderCompanion`. `Ok(true)` = `out` holds a request; the default has none.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_rest_companion(
+        rd: &RefData,
+        t: &Self::Templates,
+        ctx: &mut Self::GwCtx,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        let _ = (rd, t, ctx, cred, c, tgt, clk, out);
+        Ok(false)
+    }
     /// One bounded unit of the account's idle-time preparation in `GwCtx` (contract 32; Polymarket
     /// pre-signs orders). The gw calls it only in a poll round with no other work, at most once
     /// per round; `true` = did work. No frames, no events. The default does nothing.
