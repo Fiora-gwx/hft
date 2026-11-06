@@ -1,0 +1,30 @@
+[package]
+name = "venue-coinbase"
+description = "Coinbase Exchange spot market data (read-only): ticker BBO on a raced route, matches trades, heartbeat liveness, subscription frames, capability and rate defaults; no orders, no keys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+autotests = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-venue-proto.workspace = true
+# Per-message structs over borrowed strings (README "解码"); no generic JSON values.
+sonic-rs = "0.5"
+serde = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+hft-venue-proto = { workspace = true, features = ["testkit"] }
+# Golden comparison only (never in [dependencies]).
+serde_json = "1"
+
+[[test]]
+name = "coinbase"
+path = "tests/main.rs"

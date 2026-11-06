@@ -38,6 +38,7 @@
 | [crates/hft-venue](crates/hft-venue/README.md) | hot | core | feed(BBO 与其他行情分任务)/gw 运行时、行情 REST 获取(`snap-fetch`)、账户查询(`acct-fetch`)、重同步、会话驱动 |
 | [crates/venue-binance](crates/venue-binance/README.md) · [venue-okx](crates/venue-okx/README.md) · [venue-bitget](crates/venue-bitget/README.md) | pure | core | 首批三所的纯协议:现货 + USDT 永续(Binance 现货 SBE 为可选) |
 | [crates/venue-polymarket](crates/venue-polymarket/README.md) | pure | optional | Polymarket CLOB 二元结果代币的纯协议:行情(整簿、增量、成交)与运行期代币绑定;下单待实现 |
+| [crates/venue-coinbase](crates/venue-coinbase/README.md) | pure | optional | Coinbase Exchange 现货只读行情:ticker → Bbo(双路赛马)、matches → 成交;无下单、无账户 |
 | [crates/venue-gate](crates/venue-gate/README.md) · [bybit](crates/venue-bybit/README.md) · [kucoin](crates/venue-kucoin/README.md) | pure | optional | 其余 CEX(冻结) |
 | [crates/venue-hyperliquid](crates/venue-hyperliquid/README.md) | pure | optional | 链上永续场所(冻结) |
 | [crates/hft-oms](crates/hft-oms/README.md) | hot | core | 订单槽、状态机、LegLink、LegTracker |

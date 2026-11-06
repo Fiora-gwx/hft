@@ -740,6 +740,9 @@ pub fn load_timed(
         if let Some(e) = crate::venues::presign_error(name, v) {
             errors.push(e);
         }
+        if let Some(e) = crate::venues::read_only_error(name, v) {
+            errors.push(e);
+        }
         if v.net.rest_timeout_ms == Some(0) {
             errors.push(Error::config(
                 "BadValue",

@@ -38,7 +38,7 @@ status: spec
 ```
 fixtures/
   <venue>/                         venue = VenueProtocol 名:core 为 binance-usdm、binance-spot、okx-swap、okx-spot、bitget-usdt-futures、bitget-spot;
-                                   可选扩展 venue(gate-*、bybit-*、kucoin-*、hyperliquid-perp)启用时加目录
+                                   可选扩展 venue(gate-*、bybit-*、kucoin-*、hyperliquid-perp、coinbase-spot)启用时加目录
     <msg_type>/                    交易所频道/消息类型原名:bookTicker、depth20、depthUpdate、ORDER_TRADE_UPDATE、ACCOUNT_UPDATE、bbo-tbt、books5、books1 …;
                                    REST 响应以 rest.<endpoint> 命名(如 rest.positionRisk、rest.account_config;只读查询族的响应同样放这里,
                                    如 rest.openOrders、rest.userTrades、rest.income);分档快照按档数命名(如 binance-usdm/depth20/)

@@ -170,8 +170,41 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        // Market data only (no accounts: `read_only_error`).
+        "coinbase-spot" => build::<venue_coinbase::CoinbaseSpot>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            utc,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_coinbase::FeedCtx,
+            || (),
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
+}
+
+/// Protocols without order entry or accounts (market data only).
+pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot"];
+
+/// Load-time check: a read-only protocol takes no `accounts` (it has no order, report or account
+/// methods; venue-coinbase README "账户").
+pub fn read_only_error(name: &str, v: &Venue) -> Option<Error> {
+    (READ_ONLY_PROTOCOLS.contains(&v.protocol.as_str()) && !v.accounts.is_empty()).then(|| {
+        Error::config(
+            "ReadOnlyVenue",
+            format!("venues.{name}: {} is market data only and takes no accounts", v.protocol),
+        )
+    })
 }
 
 /// Local demo credentials must never be sent to a production host hidden under a testnet tag.
@@ -222,6 +255,8 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("bitget-usdt-futures" | "bitget-spot", _) => host == "ws.bitget.com",
         ("polymarket-clob", EndpointRole::Rest) => host == "clob.polymarket.com",
         ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
+        ("coinbase-spot", EndpointRole::Rest) => host == "api.exchange.coinbase.com",
+        ("coinbase-spot", _) => host == "ws-feed.exchange.coinbase.com",
         _ => false,
     }
 }
@@ -1135,6 +1170,7 @@ pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
         "bitget-spot" => of::<venue_bitget::BitgetSpot>(),
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
+        "coinbase-spot" => of::<venue_coinbase::CoinbaseSpot>(),
         _ => return None,
     })
 }
@@ -1162,6 +1198,7 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
                 "Polymarket requires the polymarket Cargo feature",
             ));
         }
+        "coinbase-spot" => VenueId::COINBASE_SPOT,
         _ => return Err(Error::config("UnknownVenue", protocol)),
     };
     if id != expected {
@@ -1211,6 +1248,7 @@ pub fn shared_egress_ip(protocol: &str) -> bool {
         "bitget-spot" => venue_bitget::BitgetSpot::SHARED_EGRESS_IP,
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
+        "coinbase-spot" => venue_coinbase::CoinbaseSpot::SHARED_EGRESS_IP,
         _ => false,
     }
 }
