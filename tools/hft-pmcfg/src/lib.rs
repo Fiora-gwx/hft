@@ -636,8 +636,9 @@ fn write_pm(
             stale_guard: StaleGuardKind::RecvWindow,
         });
         for (role, url) in [
-            (EndpointRole::MdPublic, "wss://stream.binance.com/ws"),
-            (EndpointRole::MdMarket, "wss://stream.binance.com/ws"),
+            // Port 9443: ~3.6 ms earlier than 443 at eu-west-1 (2026-11-06, 181k trades on both).
+            (EndpointRole::MdPublic, "wss://stream.binance.com:9443/ws"),
+            (EndpointRole::MdMarket, "wss://stream.binance.com:9443/ws"),
             (EndpointRole::Rest, "https://api.binance.com"),
         ] {
             b.endpoint(

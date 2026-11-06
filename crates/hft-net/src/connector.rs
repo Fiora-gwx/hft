@@ -685,6 +685,10 @@ impl Connector {
         });
         r.extend_from_slice(b" HTTP/1.1\r\nHost: ");
         r.extend_from_slice(ep.host.as_bytes());
+        // A non-default port is part of the Host header (RFC 9110 §7.2).
+        if ep.port != 443 {
+            r.extend_from_slice(format!(":{}", ep.port).as_bytes());
+        }
         r.extend_from_slice(b"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ");
         r.extend_from_slice(&key);
         r.extend_from_slice(b"\r\nSec-WebSocket-Version: 13\r\n");

@@ -184,7 +184,9 @@ pub fn local_demo_endpoint(protocol: &str, role: EndpointRole, url: &str) -> boo
     let Some(address) = url.strip_prefix(scheme) else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("binance-usdm", EndpointRole::Rest) => host == "demo-fapi.binance.com",
         ("binance-usdm", EndpointRole::OrderWs) => host == "testnet.binancefuture.com",
@@ -208,7 +210,9 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
     let Some(address) = url.strip_prefix(scheme) else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("binance-usdm", EndpointRole::Rest) => host == "fapi.binance.com",
         ("binance-usdm", _) => host == "fstream.binance.com",
@@ -229,7 +233,9 @@ pub fn prod_order_endpoint(protocol: &str, role: EndpointRole, url: &str) -> boo
     let Some(address) = url.strip_prefix("wss://") else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("polymarket-clob", EndpointRole::OrderWs) => host == "ws-subscriptions-clob.polymarket.com",
         _ => false,
@@ -260,17 +266,31 @@ fn endpoint_for(
         .url
         .strip_prefix(scheme)
         .ok_or_else(|| Error::config("Endpoint", "requires verified TLS"))?;
-    let (host, path) = url.split_once('/').unwrap_or((url, ""));
-    if host.is_empty() || host.contains(['@', ':', '?', '#']) {
-        return Err(Error::config("Endpoint", "requires a DNS host on port 443"));
-    }
+    let path = url.split_once('/').map_or("", |(_, p)| p);
+    let (host, port) = host_port(url)
+        .ok_or_else(|| Error::config("Endpoint", "requires a DNS host, optionally with :port"))?;
     Ok(Endpoint {
         host: host.into(),
         sni: host.into(),
-        port: 443,
+        port: port.unwrap_or(443),
         path: format!("/{path}"),
         ..Endpoint::default()
     })
+}
+
+/// DNS host and optional port of a URL's authority (`host[:port]`, the part before the first `/`
+/// once the scheme is stripped). `None` for an empty host, user info, a query or fragment marker,
+/// or a port that is not a non-zero u16 (e.g. `stream.binance.com:9443`).
+pub fn host_port(address: &str) -> Option<(&str, Option<u16>)> {
+    let auth = address.split('/').next().unwrap_or("");
+    if auth.is_empty() || auth.contains(['@', '?', '#']) {
+        return None;
+    }
+    match auth.split_once(':') {
+        None => Some((auth, None)),
+        Some((h, p)) if !h.is_empty() => p.parse::<u16>().ok().filter(|p| *p > 0).map(|p| (h, Some(p))),
+        Some(_) => None,
+    }
 }
 
 pub fn credential(
