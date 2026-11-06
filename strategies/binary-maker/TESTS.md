@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,7 +382,9 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 6;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 8;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
+| BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
 ### BMK-025 定点对数
@@ -432,6 +434,9 @@ spec: README.md
 | BMK-027.4 | 399.8 s 再一条 `U1` 簿事件 | 分数重算;撤 `U1`(槽 11),不挂单 |
 | BMK-027.5 | `comp_skip` 0;10 / 190 份 | 两腿都挂 |
 | BMK-027.6 | `comp_every_ms` 0;同 .3 | 399.6 s 即撤槽 11 |
+| BMK-027.7 | `comp_skip` −0.5(方向 maker);两边各 100 份 | 两个分数都在 ±0.5 内;不挂单 |
+| BMK-027.8 | `comp_skip` −0.5;10 / 190 份 | 只有 `D1` 在 0.450 挂单 |
+| BMK-027.9 | 接 .8,两腿各有一张存活挂单(槽 11、12),399.8 s 一条 `U1` 簿事件 | 分数重算;撤 `U1`(槽 11),`D1` 保留,不挂单 |
 
 ### BMK-028 方向分数放宽有利一侧的库存上限
 
@@ -534,3 +539,128 @@ spec: README.md
 - 步骤:`MakerFeatures::export` 写入 7 列的缓冲;另以 9 列的缓冲与 3 列的缓冲各写一次
 - 期望:列名与 `features::COLUMNS` 一致;值依次为 `ref_mid_x2` 20 001 000、`ref_imb` 0、`ref_sigma` = `RealizedVol::sigma(1)`、`ref_samples` 399、三个延迟列 `NA`(延迟闸门关闭);较长的缓冲多出的两格不被写,较短的缓冲只写前三列且写出计数仍为 7;`Strategy::FEATURES` 等于 `COLUMNS`,`Strategy::export_features` 写出的 9 格缓冲与 `MakerFeatures::export` 的相同
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_035_feature_export_row`
+
+### BMK-036 被看好的一侧凑对不受对价上限
+
+- 规则:[规则](README.md#规则) 3、10;参数 `dir_pair_free`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_skip` = `comp_dir` = 0.5、`comp_imb1_sd` 0.1、`clip_shares` 5、`inv_max_shares` 10;持有 10 份 Down(均价 0.600);`warm(400, 399, 1)`,`U1` 买一 190 份、`D1` 10 份(分数看好 Up,Down 被跳过)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_036_favoured_side_pairs_without_the_limit`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-036.1 | `dir_pair_free` 0 | `U1` 在对价上限 0.390(1 − 0.600 − 0.01)挂单 |
+| BMK-036.2 | `dir_pair_free` 1 | `U1` 在买一 0.450 挂单 |
+| BMK-036.3 | `dir_pair_free` 1、`comp_dir` 0 | 没有被看好的代币:`U1` 在 0.390 |
+
+### BMK-037 倾斜:分数偏向的一侧挂大单
+
+- 规则:参数 `tilt_z`、`tilt_clip_shares`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_skip` = `comp_dir` = 5(不跳过、不加方向上限)、`comp_imb1_sd` 0.1、`clip_shares` 5、`inv_max_shares` 20;`U1` 买一 140 份、`D1` 60 份
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_037_tilt_quotes_the_leaning_side_larger`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-037.1 | 关 | 两腿各 5 份 |
+| BMK-037.2 | `tilt_z` 0.1、`tilt_clip_shares` 8 | `U1` 8 份、`D1` 5 份 |
+| BMK-037.3 | `tilt_clip_shares` 0 | 两腿各 5 份 |
+
+### BMK-038 最后一分钟按信号止损凑对
+
+- 规则:参数 `late_hedge_ms`、`late_hedge_z`
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_params`、`clip_shares` 5、`inv_max_shares` 10、`stop_before_ms` 250 000;持有 10 份 Down(0.600);`U1` 买一 190 份、`D1` 10 份(分数看好 Up)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_038_last_minute_stop_loss_pairs_on_the_signal`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-038.1 | `late_hedge_ms` 0 | 不挂单 |
+| BMK-038.2 | `late_hedge_ms` 10 000、`late_hedge_z` 0.5 | `U1` 在买一 0.450 挂单(无对价上限 0.390) |
+| BMK-038.3 | `late_hedge_z` 9 | 不挂单 |
+| BMK-038.4 | `late_hedge_ms` 250 000 | 不挂单(已进入最后 `late_hedge_ms`) |
+
+### BMK-045 止损配对(规则 13)
+
+- 规则:[规则](README.md#规则) 13;参数 `rescue_*`(schema v32)
+- 级别:table
+- 里程碑:M3
+- 前置:`comp_params`、`clip_shares` 5、`inv_max_shares` 10、`sigma_min` 1.0(主规则关闭);持有 10 份 Down(0.600);两腿买一 0.450 / 卖一 0.470,`U1` 买一 190 份、`D1` 10 份(分数看好 Up);399.5 s(窗口 300,年龄 99.5 s)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_045_stop_loss_pairing`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-045.1 | `rescue_ms` 0 | 不挂单,记号未设 |
+| BMK-045.2 | `rescue_ms` 90 000、`rescue_z` 0.5、`rescue_px` 0.50 | `U1` 在买一 0.450 挂单(无对价上限 0.390),记号 = 300 |
+| BMK-045.3 | `rescue_px` 0.40;`rescue_ms` 120 000;`rescue_z` 9 | 都不挂单 |
+| BMK-045.4 | 加 `rescue_cap` 0.02 | `U1` 挂 0.420 |
+
+### BMK-046 规则 12 的 Chainlink 价源
+
+- 规则:[规则](README.md#规则) 12(Chainlink);参数 `settle_src`、`settle_lead_usd`、`settle_edge`(schema v32)
+- 级别:table
+- 里程碑:M3
+- 前置:同 BMK-044;Chainlink 样本(local_kind 1)在每秒参考报价之前注入
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_046_settlement_on_chainlink`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-046.1 | `settle_src` 1,Chainlink = 参考中间价 | (p_up, μ, n_lock) 与参考版相同;545 s 挂 0.950 |
+| BMK-046.2 | 无样本;样本只到 541 s;`settle_src` 0 无样本 | 前两者不挂;参考版照常挂 |
+| BMK-046.3 | Chainlink 第 540 s 起停在行权价 | 不挂 |
+| BMK-046.4 | `settle_lead_usd` 90 / 100(领先 95 USD),两种价源 | 90 挂,100 不挂 |
+| BMK-046.5 | `settle_edge` = p − 0.95 ∓ 0.001 | 前者挂,后者不挂 |
+| BMK-046.6 | 载荷:正常、更早样本、版本 2、16 字节、负价 | 计 2 个样本,最新 (100, 7);98 秒有值、101 秒无;103 s 为当前价,104 s 不是 |
+
+### BMK-047 震荡开关预热
+
+- 规则:[规则](README.md#规则) 13 之后"震荡开关预热";`InjectWarmup` local_kind 2
+- 级别:table
+- 里程碑:M3
+- 前置:载荷 v1(版本 1、条数、条数 × (窗口起点, 效率比));12 条窗口 1 000 + 300k、效率比 0.10 + 0.01k
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_047_chop_seed`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-047.1 | 空环收 12 条 | len 12、pos 12;近 12 均值 0.155,近 6 均值 0.185 |
+| BMK-047.2 | 已有记录再收;版本 2 | 都不变 |
+| BMK-047.3 | 正在累计窗口 2 200;条目超范围、乱序、≥ 2 200 | 只留 0.30、0.20 两条 |
+| BMK-047.4 | 30 条 | 留最后 24 条,最新在最后 |
+| BMK-047.5 | 经策略注入 local_kind 2 | `chop.mean(12)` = 0.155 |
+
+### BMK-048 压力挡开仓
+
+- 规则:[规则](README.md#规则) 14;参数 `ofi_win_ms`、`ofi_obi_max`(schema v33)
+- 级别:table
+- 里程碑:M3
+- 前置:.4–.6 参考预热 392 s(槽位簿为空),392..398 s 每秒设对 1 的簿(Up 买一 0.450 按行、卖一 0.470 × 100;Down 0.450 × 100 / 0.470 × 100)并发 Up 的 `Book`,399.5 s 一条参考报价;只看 398 s 起的挂单
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_048_pressure_block`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-048.1 | 买一 100 → 150(同价);卖一 0.470 × 100 → 0.460 × 80 | 累计 +50,再 −30 |
+| BMK-048.2 | 1.3 s 时过去 1 s / 0.5 s / 5 s;1.25 s 时 0 ms | −80、−80、`None`、0 |
+| BMK-048.3 | 换合约 | 环重来(cum 0、首桶 20) |
+| BMK-048.4 | Up 买一 10(失衡 −0.82)、订单流不变;`ofi_win_ms` 5 000、`ofi_obi_max` −0.3;关闭 | 开:Up 不挂、Down 挂;关:两条都挂 |
+| BMK-048.5 | 397 s 起 Up 买一 30(订单流 +20,失衡 −0.54) | Up 挂 |
+| BMK-048.6 | Up 买一 100(失衡 0)、订单流不变 | Up 挂 |
+
+### BMK-044 结算窗口流动性(规则 12)
+
+- 规则:[规则](README.md#规则) 12;参数 `settle_*`(schema v25)
+- 级别:table
+- 里程碑:M3
+- 前置:`settle_ms` 60 000、`sigma_min` 1.0(1e9,主规则关闭),其余 `settle_*` 默认;参考每秒一条(第 100 s 起),中间价在 100 000.00 / 100 010.00 间交替,第 540 s 起 100 100.00;`U1` 买一 / 卖一按行,`D1` 为其互补
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_044_settlement_window_liquidity`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-044.1 | 555.1 s(n_lock 15、n_fut 45) | n_lock 15;μ 与浮点公式(`oct_lock.p_up_bn`,同一 σ)差 < 2e-9;p_up 差 < 1e-5;导出第 30–32 列为 (p_up, μ, n_lock);最后一分钟之前为 `NA` |
+| BMK-044.2 | 买一 0.950 / 卖一 0.960;0.980;0.850;`settle_improve` 1 且 0.940 / 0.970;`settle_ms` 0 | 545 s 在 `U1` 0.950 挂 20 份、tag `settle_tag_of(2)`,之前不挂;价带外不挂;抬价挂 0.950;关闭时不挂 |
+| BMK-044.3 | 挂单存活,550 s 参考回到 100 000.00 | p_up < 0.90,撤单 |
+| BMK-044.4 | 买一降到 0.940;再升到 0.955 | 降:留守;升:撤单,`Cancelled` 后 `settle_requote_ms` 内不挂,之后挂 0.955 |
+| BMK-044.5 | 成交 20 份,`settle_max_shares` 20 / 60 | 20:不再挂;60:再挂一张 |
+| BMK-044.6 | `sigma_min` 默认、`stop_before_ms` 30 000(主规则在挂单段但无目标) | 模块到 570 s(最后 30 s)才挂 |

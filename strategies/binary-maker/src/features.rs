@@ -18,6 +18,9 @@ use hft_strategy_sdk::prelude::*;
 
 /// Seconds kept per history (a power of two; the longest look-back is 62 s).
 pub const HIST: usize = 128;
+/// Seconds kept by the reference per-second ring of rule 12 (a power of two; the strike needs the
+/// 60 s before the window start, i.e. up to `window_s` + 60 s back).
+pub const REF_SECS: usize = 512;
 /// Large prints kept for the flow feature (the oldest is overwritten).
 pub const TRADES: usize = 256;
 /// Feature order (README "规则" 10): imb1, imb5, mom30, mom60, bret15, bret60, flow30, bdrop1.
@@ -43,6 +46,53 @@ pub type SecHist = hft_feature::SecHist<HIST>;
 pub type Trades = SignedFlow<TRADES>;
 /// Bid side of one token as the score sees it: the book's bid levels less our own resting bid.
 pub type BidSide = OwnExcludedSide<DEPTH_LEVELS>;
+
+/// Reference 2 × mid per UTC second (rule 12): the last two-sided quote of each second, exact
+/// lookup (no fill from earlier seconds, so missing seconds can be counted).
+#[derive(Clone, Debug)]
+pub struct RefSecs {
+    sec: [i64; REF_SECS],
+    val: [i64; REF_SECS],
+}
+
+impl Default for RefSecs {
+    fn default() -> RefSecs {
+        RefSecs {
+            sec: [i64::MIN; REF_SECS],
+            val: [0; REF_SECS],
+        }
+    }
+}
+
+impl RefSecs {
+    fn slot(sec: i64) -> usize {
+        sec.rem_euclid(REF_SECS as i64) as usize
+    }
+    /// Value `v` at UTC second `sec` (a later write of the same second overwrites).
+    pub fn put(&mut self, sec: i64, v: i64) {
+        let k = Self::slot(sec);
+        if let (Some(s), Some(x)) = (self.sec.get_mut(k), self.val.get_mut(k)) {
+            *s = sec;
+            *x = v;
+        }
+    }
+    /// The value of exactly second `t`.
+    pub fn exact(&self, t: i64) -> Option<i64> {
+        let k = Self::slot(t);
+        (self.sec.get(k) == Some(&t)).then(|| self.val.get(k).copied()).flatten()
+    }
+    /// Sum and count of the recorded seconds in `[from, to)`.
+    pub fn sum(&self, from: i64, to: i64) -> (i128, i64) {
+        let mut acc = (0i128, 0i64);
+        for t in from..to {
+            if let Some(x) = self.exact(t) {
+                acc.0 += i128::from(x);
+                acc.1 += 1;
+            }
+        }
+        acc
+    }
+}
 
 /// Per slot leg (same order as `Fast::quotes`): its inst, 2 × mid and best bid per second, and the
 /// last market-data stamp read for the lag gates.
@@ -142,7 +192,173 @@ pub struct PlanCfg {
     pub lag: bool,
     /// `comp_flow_min_shares`.
     pub flow_min_shares: u32,
+    /// Rule 12 is on (`settle_ms` set): the reference per-second ring runs.
+    pub settle: bool,
 }
+
+/// Research export of the composite score (after [`COLUMNS`]): window start of the cached score, z of
+/// Up and Down, the eight raw features of each, best bid / ask of both tokens (`NA` while no score is
+/// cached).
+pub const COMP_COLUMNS: &[ColumnDesc] = &[
+    ColumnDesc {
+        name: "comp_win",
+        unit: Unit::Count,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "comp_z_up",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "comp_z_dn",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_imb1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_imb5",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_mom30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_mom60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bret15",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bret60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_flow30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_up_bdrop1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_imb1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_imb5",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_mom30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_mom60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bret15",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bret60",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_flow30",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "f_dn_bdrop1",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "book_up_bb",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_up_ba",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_dn_bb",
+        unit: Unit::Px,
+        exp: 0,
+    },
+    ColumnDesc {
+        name: "book_dn_ba",
+        unit: Unit::Px,
+        exp: 0,
+    },
+];
+
+/// Research export of rule 12 (after [`COMP_COLUMNS`]): the locked settlement-average Up
+/// probability, the expected relative move of the average against the strike (1e-9 of the strike,
+/// 1 bp = 100 000) and the locked seconds, of the last decision inside `settle_ms` (`NA` otherwise).
+pub const SETTLE_COLUMNS: &[ColumnDesc] = &[
+    ColumnDesc {
+        name: "settle_p_up",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "settle_mu_bp",
+        unit: Unit::Ratio,
+        exp: -9,
+    },
+    ColumnDesc {
+        name: "settle_nlock",
+        unit: Unit::Count,
+        exp: 0,
+    },
+];
+
+/// Number of [`STRATEGY_COLUMNS`].
+pub const N_STRATEGY_COLUMNS: usize = 33;
+
+/// The strategy's export ([`COLUMNS`], [`COMP_COLUMNS`], then [`SETTLE_COLUMNS`]).
+pub const STRATEGY_COLUMNS: [ColumnDesc; N_STRATEGY_COLUMNS] = {
+    let mut out = [COLUMNS[0]; N_STRATEGY_COLUMNS];
+    let mut i = 0;
+    while i < 7 {
+        out[i] = COLUMNS[i];
+        i += 1;
+    }
+    while i < 30 {
+        out[i] = COMP_COLUMNS[i - 7];
+        i += 1;
+    }
+    while i < N_STRATEGY_COLUMNS {
+        out[i] = SETTLE_COLUMNS[i - 30];
+        i += 1;
+    }
+    out
+};
 
 /// Exported columns of [`MakerFeatures::export`].
 pub const COLUMNS: &[ColumnDesc] = &[
@@ -198,6 +414,8 @@ pub struct MakerFeatures {
     pub trades: Box<Trades>,
     /// Feed-lag statistics (venue-load gates).
     pub lag: LagQuantiles,
+    /// Reference 2 × mid per second, exact (rule 12).
+    pub ref_sec: Box<RefSecs>,
 }
 
 impl MakerFeatures {
@@ -210,6 +428,7 @@ impl MakerFeatures {
             ref_x2: Box::default(),
             trades: Box::default(),
             lag: LagQuantiles::new(),
+            ref_sec: Box::default(),
         }
     }
 
@@ -248,6 +467,14 @@ impl MakerFeatures {
     /// market-data stamps into the lag statistics.
     fn observe<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, reference: InstId, cfg: PlanCfg, utc_ns: i64) {
         let sec = utc_ns.div_euclid(1_000_000_000);
+        if cfg.settle
+            && let EventRef::Bbo { inst, b, .. } = *ev
+            && inst == reference
+            && b.bid_px.0 > 0
+            && b.ask_px.0 > 0
+        {
+            self.ref_sec.put(sec, b.bid_px.0.saturating_add(b.ask_px.0));
+        }
         if cfg.comp {
             match *ev {
                 EventRef::Bbo { inst, b, .. } if inst == reference => {

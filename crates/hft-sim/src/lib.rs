@@ -496,9 +496,14 @@ impl SimExchange {
     /// Market data and time, in journal order (README "纯核心 API").
     pub fn on_record(&mut self, hdr: &RecordHeader, ev: SimInput<'_>) {
         let t = hdr.tsc;
-        self.step_to(t);
+        // Exchange-time matching: the record happened at the venue `lag` before we received it.
+        let at = match &ev {
+            SimInput::Market(m) => t.saturating_sub(self.md_lag_tsc(&market::hdr_of(m))),
+            _ => t,
+        };
+        self.step_to(at);
         match ev {
-            SimInput::Market(m) => self.apply_market(t, m),
+            SimInput::Market(m) => self.apply_market(at, m),
             SimInput::VenueNotice { venue, kind, inst } => self.venue_notice(venue, kind, inst),
             SimInput::Clock => {}
         }
@@ -771,6 +776,17 @@ impl SimExchange {
     fn inst_index(&self, i: InstId) -> Option<usize> {
         let ix = *self.inst_ix.get(i.0 as usize)?;
         (ix != NONE16).then_some(usize::from(ix))
+    }
+
+    /// `VenueModel::ex_time_max_us` on: the record's receive − exchange time (`sw_rx_ns − ex_ts_ns`),
+    /// clamped to 0..cap, in event-time ticks; 0 when off or a timestamp is missing.
+    fn md_lag_tsc(&self, h: &hft_event::MarketHdr) -> u64 {
+        let cap = self.vm.ex_time_max_us;
+        if cap == 0 || h.ex_ts_ns <= 0 || h.sw_rx_ns <= 0 {
+            return 0;
+        }
+        let lag_us = (h.sw_rx_ns - h.ex_ts_ns).clamp(0, i64::from(cap) * 1_000) / 1_000;
+        self.us_to_tsc(u32::try_from(lag_us).unwrap_or(cap))
     }
 
     /// µs → event-time ticks.

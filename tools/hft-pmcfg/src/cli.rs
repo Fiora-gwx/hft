@@ -9,7 +9,7 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--live-account UID KEYS_DIR ...] \
          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
@@ -103,6 +103,8 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut carry = None;
     let mut daily_loss = None;
     let mut resumes = None;
+    let mut account_cap = None;
+    let mut group_cap = None;
     let mut no_presign = false;
     let mut extra = Vec::new();
     let mut params = Vec::new();
@@ -165,6 +167,25 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                         .ok_or("--daily-loss: USDC must be a decimal > 0 (at most 6 places)")?,
                 );
             }
+            "--account-cap" | "--group-cap" => {
+                let flag = if a == "--account-cap" {
+                    "--account-cap"
+                } else {
+                    "--group-cap"
+                };
+                let slot = if a == "--account-cap" {
+                    &mut account_cap
+                } else {
+                    &mut group_cap
+                };
+                once(slot.is_some(), flag)?;
+                let v = next(flag, "USDC")?;
+                *slot = Some(
+                    usdc(&v)
+                        .filter(|p| *p > 0)
+                        .ok_or(format!("{flag}: USDC must be a decimal > 0 (at most 6 places)"))?,
+                );
+            }
             "--daily-loss-resumes" => {
                 once(resumes.is_some(), "--daily-loss-resumes")?;
                 let v = next("--daily-loss-resumes", "N")?;
@@ -202,6 +223,8 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         (carry.is_some(), "--day-loss-carry"),
         (daily_loss.is_some(), "--daily-loss"),
         (resumes.is_some(), "--daily-loss-resumes"),
+        (account_cap.is_some(), "--account-cap"),
+        (group_cap.is_some(), "--group-cap"),
     ];
     if live.is_none()
         && let Some((_, flag)) = needs_live.iter().find(|(set, _)| *set)
@@ -234,6 +257,8 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 day_loss_carry: carry,
                 daily_loss_abs: daily_loss,
                 daily_loss_max_resumes: resumes,
+                account_cap,
+                group_cap,
                 presign: !no_presign,
                 extra_accounts: extra,
             };

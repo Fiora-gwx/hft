@@ -43,6 +43,11 @@ pub enum MakerFill {
     /// consumes `ahead` first and fills the rest; a trade through the price, or the opposite side
     /// crossing the price, fills the whole remainder.
     QueueCap,
+    /// `QueueCap` without the cap: the quantity ahead is the level's displayed size when the
+    /// order arrives and only trades at the price consume it (cancels never move the order up).
+    /// Fills: trades at the price beyond the quantity ahead; a trade through the price or the
+    /// opposite side crossing it fills the whole remainder. The research default (2026-11-06).
+    QueueStrict,
 }
 
 /// `[sim]` of the hft-core configuration (README "配置"). `seed` has no default: the only
@@ -186,6 +191,10 @@ pub struct VenueModel {
     /// An Ioc/Fok order that matches nothing is rejected (`RejectReason::NoMatch`, no Ack) instead
     /// of Ack + `Expired`: the Polymarket FAK/FOK HTTP 400 answer (venue-polymarket "吃单").
     pub taker_nofill_reject: bool,
+    /// Exchange-time matching (µs cap; 0 = off): a market record received at `t` happened at the
+    /// venue `lag = sw_rx_ns − ex_ts_ns` earlier (clamped to 0..cap), so only commands arriving
+    /// before `t − lag` are executed before it and it matches at `t − lag` (README "场所行为选项").
+    pub ex_time_max_us: u32,
 }
 
 impl Default for VenueModel {
@@ -199,6 +208,7 @@ impl Default for VenueModel {
             fill_resp_us: None,
             pools: None,
             taker_nofill_reject: false,
+            ex_time_max_us: 0,
         }
     }
 }

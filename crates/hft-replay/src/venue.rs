@@ -33,6 +33,10 @@ pub struct SimParams {
     pub own: bool,
     /// SHA-256 of the calibration table file the options came from (empty = none).
     pub calib_file_sha: String,
+    /// `--sim-cash`: starting balance of every quote asset, whole units (None = a large balance
+    /// that never binds). Orders beyond the free balance are then rejected `InsufficientBalance`,
+    /// like the venue's "not enough balance / allowance".
+    pub cash: Option<i64>,
 }
 
 /// Latency-condition buckets (README "条件延迟"), hft-sim's (shared with the sim-gw).
@@ -54,6 +58,7 @@ impl Default for SimParams {
             cond: CondCfg::default(),
             own: false,
             calib_file_sha: String::new(),
+            cash: None,
         }
     }
 }
@@ -148,9 +153,10 @@ fn account_offset(kind: EventKind) -> Option<usize> {
     })
 }
 
-/// A large starting balance of every quote asset on the account's venues: the engine's own ledger
-/// and risk checks govern; the simulated cash only has to never be the binding constraint.
-fn balances(rd: &RefData, a: AccountId) -> Box<[SimBalance]> {
+/// The starting balance of every quote asset on the account's venues: `cash` whole units, or by
+/// default a large one (the engine's own ledger and risk checks govern; the simulated cash only has
+/// to never be the binding constraint).
+fn balances(rd: &RefData, a: AccountId, cash: Option<i64>) -> Box<[SimBalance]> {
     let venues = rd.account(a).venues;
     let mut out: Vec<SimBalance> = Vec::new();
     for v in 1..64u8 {
@@ -167,7 +173,7 @@ fn balances(rd: &RefData, a: AccountId) -> Box<[SimBalance]> {
             out.push(SimBalance {
                 venue: VenueId(v),
                 asset,
-                qty: Qty(1_000_000_000i64.saturating_mul(unit)),
+                qty: Qty(cash.unwrap_or(1_000_000_000).saturating_mul(unit)),
             });
         }
     }
@@ -182,13 +188,13 @@ impl ResearchVenue {
             let m = rd.account(*a);
             let cfg = match &m.kind {
                 AccountKind::Sim(c) => SimAccountCfg {
-                    initial_balances: balances(rd, *a),
+                    initial_balances: balances(rd, *a, p.cash),
                     latency_model: 0,
                     fee_tier: c.fee_tier,
                     margin_model: 0,
                 },
                 AccountKind::Live => SimAccountCfg {
-                    initial_balances: balances(rd, *a),
+                    initial_balances: balances(rd, *a, p.cash),
                     latency_model: 0,
                     fee_tier: 0,
                     margin_model: 0,

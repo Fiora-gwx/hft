@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 6, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 37, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -73,8 +73,9 @@ hft_strategy_sdk::define_params! {
         /// forecast weight of the 15 s signed efficiency, sum / sum of absolute one-second returns (1e-9)
         pred_w_ser: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 187_200_000, since = 5, relax = None],
         /// a token whose composite direction score is below −comp_skip is not quoted (its resting
-        /// bid is cancelled); score in standard deviations (1e-9); 0 = off
-        comp_skip: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
+        /// bid is cancelled); score in standard deviations (1e-9); 0 = off; negative: only a token
+        /// whose score is above −comp_skip is quoted (directional maker)
+        comp_skip: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 6, relax = None],
         /// a token whose composite direction score is above comp_dir may hold up to
         /// dir_cap_shares net (instead of inv_max_shares); 1e-9 standard deviations; 0 = off
         comp_dir: Rate [min = 0, max = 10_000_000_000, default = 0, since = 6, relax = None],
@@ -125,6 +126,264 @@ hft_strategy_sdk::define_params! {
         /// no quoting while the previous UTC minute's median of the per-second median feed lag is
         /// above this (ns); 0 = off
         mdslow_gate_ns: Count [min = 0, max = 1_000_000_000, default = 0, since = 6, relax = None],
+        /// true: a token whose composite score is above comp_dir completes pairs without the pair-cost
+        /// limit (two-mode rule: the favoured side pairs off inventory left on the other side)
+        dir_pair_free: Bool [default = 0, since = 7, relax = None],
+        /// a token whose composite score is above tilt_z quotes tilt_clip_shares per order instead of
+        /// clip_shares (the side the score leans to is bid in larger size); 0 = off
+        tilt_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 8, relax = None],
+        /// order size of a token whose score is above tilt_z; 0 = off
+        tilt_clip_shares: Count [min = 0, max = 100_000, default = 0, since = 8, relax = None],
+        /// last-minute stop-loss: from stop_before_ms until late_hedge_ms before the window end only
+        /// pairing bids are placed, by the leg whose score is above late_hedge_z (the signal is against
+        /// the net position), at the best bid without the pair-cost limit; 0 = off
+        late_hedge_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 8, relax = None],
+        /// score the pairing leg needs in the last-minute stop-loss
+        late_hedge_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 8, relax = None],
+        /// opening rules (schema v9; a leg "opens" when it is not short, i.e. a fill would raise the
+        /// net; pairing bids are never affected; a token the score favours (z > comp_dir) is exempt):
+        /// no opening while the Up mid travelled less than mm_min_path over the last 60 s (quiet,
+        /// drifting market); 0 = off
+        mm_min_path: Rate [min = 0, max = 100_000_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose best-bid size is above this many shares (long queue); 0 = off
+        mm_max_bq: Count [min = 0, max = 100_000_000, default = 0, since = 9, relax = None],
+        /// in the first early_ms of the window the opening net cap is early_cap_shares; 0 = off
+        early_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 9, relax = None],
+        /// opening net cap in the first early_ms
+        early_cap_shares: Count [min = 0, max = 1_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose best bid is below this price (cheap side); 0 = off
+        open_min_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 9, relax = None],
+        /// no opening on a leg whose composite score is below -open_skip_z (it may still pair); 0 = off
+        open_skip_z: Rate [min = 0, max = 10_000_000_000, default = 0, since = 9, relax = None],
+        /// inventory absorption (schema v10): of a net position on the other token, the first
+        /// absorb_shares count as directional; beyond them a token skipped by comp_skip still bids to
+        /// pair the excess (pairing only, pair-cost limit as usual); 0 = off
+        absorb_shares: Count [min = 0, max = 1_000_000, default = 0, since = 10, relax = None],
+        /// (schema v11) no opening on a leg whose best bid is at or above this price (expensive side;
+        /// same exemptions as the other opening rules); 0 = off
+        open_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 11, relax = None],
+        /// pairing priority: until pair_stop_ms before the window end a leg that is short bids to pair
+        /// (pair-cost limit as usual) regardless of the volatility and venue-load gates, the fair-value
+        /// limit and cancel, the cooldowns and the streak pause, also inside stop_before_ms; 0 = off
+        pair_stop_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 11, relax = None],
+        /// (schema v12) pairing priority only while the window is younger than this (early pairs
+        /// earn, late ones are adversely selected); 0 = the whole window
+        pair_prio_age_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 12, relax = None],
+        /// from this window age on, a pairing bid uses pair_late_margin instead of pair_margin (a
+        /// favoured token with dir_pair_free and the last-minute stop-loss are not affected); 0 = off
+        pair_late_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 12, relax = None],
+        /// pair margin from pair_late_ms on (fraction of one; 1 = no pairing bids)
+        pair_late_margin: Rate [min = -100_000_000, max = 1_000_000_000, default = 0, since = 12, relax = None],
+        /// (schema v13) true: from pair_late_ms on the favoured token's pairing bid (dir_pair_free) also
+        /// uses pair_late_margin (no late pairing at any price)
+        pair_late_all: Bool [default = 0, since = 13, relax = None],
+        /// (schema v14) early fast phase: while the window is younger than fast_until_ms the quote
+        /// change interval is fast_requote_ms and, with fast_free, no no-chase cooldown and no streak
+        /// pause (the fair-value cooldown stays); 0 = off
+        fast_until_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 14, relax = None],
+        /// quote change interval in the fast phase
+        fast_requote_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 14, relax = None],
+        /// true: no no-chase cooldown and no streak pause in the fast phase
+        fast_free: Bool [default = 0, since = 14, relax = None],
+        /// (schema v15) true: the fast phase applies only to a leg that is short (its bid pairs);
+        /// opening legs keep requote_ms, the no-chase cooldown and the streak pause
+        fast_pair_only: Bool [default = 0, since = 15, relax = None],
+        /// (schema v16) from this window age on the leg the composite score favours (comp_dir) uses
+        /// the fast-phase settings (fast_requote_ms, fast_free); 0 = off
+        fast_dir_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 16, relax = None],
+        /// (schema v17) a leg that is not short bids this many cents below the best bid; 0 = at it
+        bid_offset_c: Count [min = 0, max = 20, default = 0, since = 17, relax = None],
+        /// (schema v18) a leg that is not short does not quote while its best-bid size over that
+        /// plus the other token's best-bid size (the mirrored ask) is below this (1e-9); 0 = off
+        open_min_imb: Rate [min = 0, max = 1_000_000_000, default = 0, since = 18, relax = None],
+        /// (schema v19) bid this many cents above the best bid while that stays below the best ask
+        /// (a new level at the front of the queue); with bid_improve_short only for a short leg; 0 = off
+        bid_improve_c: Count [min = 0, max = 5, default = 0, since = 19, relax = None],
+        /// true: bid_improve_c applies only to a leg that is short
+        bid_improve_short: Bool [default = 0, since = 19, relax = None],
+        /// (schema v20) true: once one token's net exceeds inv_max_shares in a window (a directional
+        /// position), the other token is not favoured for the rest of that window
+        dir_lock: Bool [default = 0, since = 20, relax = None],
+        /// favoured leg that is not short does not quote while its best bid is at or above this
+        /// (fraction of one, 1e-9); 0 = off
+        fav_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
+        /// favoured pairing (dir_pair_free) may lock pairs at a cost up to 1 + this (1e-9); 0 = no limit
+        fav_pair_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 20, relax = None],
+        /// (schema v21) one direction per phase: the window splits at this age into [0, it) and
+        /// [it, end); in each phase the first token the composite score favours is the only one
+        /// favoured until the phase ends (one reversal per window at most); 0 = off; the window
+        /// length = one phase
+        dir_phase_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 21, relax = None],
+        /// (schema v22, research export) true: the composite score is kept current while the
+        /// strategy does not quote too (every window, every second of it); decisions read it only
+        /// while quoting
+        comp_always: Bool [default = 0, since = 22, relax = None],
+        /// (schema v23) a token is favoured only while its score is at most this (1e-9 standard
+        /// deviations; over-extended signals are weaker); 0 = no upper bound
+        comp_dir_max: Rate [min = 0, max = 10_000_000_000, default = 0, since = 23, relax = None],
+        /// a token is favoured only within this long after its score last rose above comp_dir in
+        /// the window (a fresh signal); 0 = no limit
+        dir_fresh_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 23, relax = None],
+        /// (schema v24, mature-level admission) a leg that is not short places a new bid only while
+        /// the best bid's displayed size less our own is at least this many shares; 0 = off
+        open_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        /// and only while the best-bid price has been unchanged for this long; 0 = off
+        open_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// the same two thresholds for a short (pairing) leg; 0 = off
+        pair_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        pair_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// a resting bid of a leg that is not short at the best bid is cancelled when the level's
+        /// displayed size less our own falls below this many shares; 0 = off
+        leave_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        /// true: the favoured leg obeys the opening rules too (no exemption)
+        fav_obey_open: Bool [default = 0, since = 24, relax = None],
+        /// true: an undercut cancels only when the new best bid is mature (size at least
+        /// undercut_min_bq, or unchanged for undercut_min_level_ms, or we have been below it for
+        /// hold_below_max_ms)
+        hold_thin_undercut: Bool [default = 0, since = 24, relax = None],
+        undercut_min_bq: Count [min = 0, max = 100_000_000, default = 0, since = 24, relax = None],
+        undercut_min_level_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        hold_below_max_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// a fill whose price level disappears within 1 s (swept) pauses the leg's opening and adding
+        /// for this long; pairing during the pause is limited to cost 1 + swept_pair_cap; 0 = off
+        swept_pause_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        swept_pair_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 24, relax = None],
+        /// true: the complement's best bid or ask moving up cancels this leg's bid when it is not
+        /// short and pauses it for oth_up_cool_ms
+        oth_up_cancel: Bool [default = 0, since = 24, relax = None],
+        oth_up_cool_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 24, relax = None],
+        /// (schema v25, rule 12 settlement-window liquidity) in the last settle_ms of the window, while
+        /// the main rules have no target, rest a post-only bid at the best bid of the token the locked
+        /// settlement-average probability favours (held to settlement); 0 = off
+        settle_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 25, relax = None],
+        /// lowest locked-average probability of the favoured token to bid (1e-9)
+        settle_p_min: Rate [min = 0, max = 1_000_000_000, default = 950_000_000, since = 25, relax = None],
+        /// price band of the module's bid, lowest and highest (fraction of one, 1e-9)
+        settle_bid_lo: Rate [min = 0, max = 1_000_000_000, default = 900_000_000, since = 25, relax = None],
+        settle_bid_hi: Rate [min = 0, max = 1_000_000_000, default = 970_000_000, since = 25, relax = None],
+        /// shares per module bid
+        settle_clip_shares: Count [min = 1, max = 100_000, default = 20, since = 25, relax = None],
+        /// shares the module buys per window at most (a new bid needs bought + clip within it)
+        settle_max_shares: Count [min = 0, max = 1_000_000, default = 60, since = 25, relax = None],
+        /// multiplier of the reference realized sigma in the probability (1e-9; 1.3 = 1_300_000_000)
+        settle_vol_mult: Rate [min = 1, max = 10_000_000_000, default = 1_300_000_000, since = 25, relax = None],
+        /// a module bid is cancelled when its token's probability falls below this (1e-9)
+        settle_cancel_p: Rate [min = 0, max = 1_000_000_000, default = 900_000_000, since = 25, relax = None],
+        /// no new module bid before this many seconds of the settlement average are locked
+        settle_min_lock_s: Count [min = 0, max = 60, default = 5, since = 25, relax = None],
+        /// no new module bid while the expected relative move of the average against the strike is
+        /// below this in absolute value (1e-9; 0.5 bp = 50_000)
+        settle_mu_min: Rate [min = 0, max = 1_000_000_000, default = 50_000, since = 25, relax = None],
+        /// minimum engine time between two changes of a module bid of one leg
+        settle_requote_ms: DurationMs [min = 0, max = 60_000, default = 200, since = 25, relax = None],
+        /// true: bid one cent above the best bid when the spread is at least two cents
+        settle_improve: Bool [default = 0, since = 25, relax = None],
+        /// (schema v26) no module bid in the last this-long of the window (resting ones are
+        /// cancelled); 0 = to the end
+        settle_stop_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 26, relax = None],
+        /// (schema v27, phased direction) a token can be favoured (directional holding, dir_cap_shares,
+        /// dir_pair_free) only from this window age on; before it the score only skips and times
+        /// pairing; 0 = from the start
+        dir_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 27, relax = None],
+        /// lazy pairing: a short leg whose score is below pair_eager_z bids pair_lazy_c cents below
+        /// the best bid (still under the pair-cost limit); at or above it, it bids at the best bid
+        pair_eager_z: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 27, relax = None],
+        pair_lazy_c: Count [min = 0, max = 20, default = 0, since = 27, relax = None],
+        /// (schema v28, first-leg rules) public sweep gate: a fall of a token's best bid by at least
+        /// this many cents cancels its non-short bid and pauses it for mkt_drop_pause_ms; 0 = off
+        mkt_drop_min_c: Count [min = 0, max = 20, default = 0, since = 28, relax = None],
+        mkt_drop_pause_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// true: the fall counts only with a trade on either token in the 100 ms before it
+        mkt_drop_need_trade: Bool [default = 0, since = 28, relax = None],
+        /// short pairing window: a short leg pairs only within this long after the long leg's last
+        /// fill (then the net is held), unless the unpaired risk exceeds pair_risk_usd; 0 = off
+        pair_window_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// unpaired risk (net shares x the long leg's average cost) above which pairing has no time
+        /// limit; 0 = never
+        pair_risk_usd: Notional [min = 0, max = 1_000_000_000_000, default = 0, since = 28, relax = None],
+        /// no opening or adding (a leg that is not short) before this window age; 0 = off
+        open_from_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 28, relax = None],
+        /// (schema v29, dip bids) true: a leg that is not short and not favoured opens only through
+        /// a dip bid: after its token rose (30 s mid change at least dip_mom_min) and the score turned
+        /// (at most dip_z_max), for dip_ttl_ms it bids below the best bid by a depth set by the
+        /// token's recent price range; otherwise it does not open
+        dip_mode: Bool [default = 0, since = 29, relax = None],
+        dip_mom_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 29, relax = None],
+        dip_z_max: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 29, relax = None],
+        dip_ttl_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 29, relax = None],
+        /// depth = dip_depth_k x the token mid's high-low range over the last dip_range_s seconds,
+        /// in cents, clamped to [dip_depth_min_c, dip_depth_max_c]
+        dip_depth_k: Rate [min = 0, max = 10_000_000_000, default = 0, since = 29, relax = None],
+        dip_range_s: Count [min = 1, max = 120, default = 30, since = 29, relax = None],
+        dip_depth_min_c: Count [min = 0, max = 50, default = 1, since = 29, relax = None],
+        dip_depth_max_c: Count [min = 0, max = 50, default = 5, since = 29, relax = None],
+        /// (schema v30) true: the dip bid goes to the token that FELL (30 s mid change at most
+        /// -dip_mom_min) once its score turned up (at least dip_z_min): buy the loser on a predicted
+        /// reversal, pair later
+        dip_falling: Bool [default = 0, since = 30, relax = None],
+        dip_z_min: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 30, relax = None],
+        /// (schema v31) chop gate: dip bids only while the mean efficiency ratio of the Up mid
+        /// (|end - start| / path, 30..240 s of each window) over the last chop_k windows is at most
+        /// chop_er_max (a choppy, mean-reverting market); 0 = off
+        chop_k: Count [min = 0, max = 24, default = 0, since = 31, relax = None],
+        chop_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 31, relax = None],
+        /// a dip bid needs the leg's window holding plus one clip to stay within this many shares; 0 = no cap
+        dip_max_shares: Count [min = 0, max = 1_000_000, default = 0, since = 31, relax = None],
+        /// (schema v32) stop-loss pairing: from this window age until stop_before_ms, a short leg whose
+        /// score is above rescue_z while the held leg's best bid is at most rescue_px pairs at the best
+        /// bid, without the pair-cost limit and the volatility gate; once it bid, the window opens
+        /// nothing more; 0 = off
+        rescue_ms: DurationMs [min = 0, max = 600_000, default = 0, since = 32, relax = None],
+        rescue_z: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 0, since = 32, relax = None],
+        rescue_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// a stop-loss pair may lock at a cost up to 1 + rescue_cap (fraction of one, 1e-9); 0 = no limit
+        rescue_cap: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// (schema v32) rule 12 price source: 0 = the Binance reference; 1 = Chainlink BTC/USD pushed
+        /// by InjectWarmup (local_kind 1, README "Chainlink"): strike, locked seconds and the current
+        /// price from Chainlink, σ still from the reference; without a fresh Chainlink price no bids
+        settle_src: Count [min = 0, max = 1, default = 0, since = 32, relax = None],
+        /// rule 12 bids only while the projected settlement average leads the strike by at least this
+        /// many US dollars towards the token (Up above, Down below); a bid is cancelled below half; 0 = off
+        settle_lead_usd: Count [min = 0, max = 100_000, default = 0, since = 32, relax = None],
+        /// rule 12 bids at most at the token's probability less this (fraction of one, 1e-9) and
+        /// cancels a bid above the probability; 0 = off
+        settle_edge: Rate [min = 0, max = 1_000_000_000, default = 0, since = 32, relax = None],
+        /// (schema v33) pressure block (Albers et al. 2025 "reversal"): a leg that is not short opens
+        /// nothing (and cancels its opening bid) while its own book's L1 imbalance (bid qty - ask qty) /
+        /// (bid qty + ask qty) is below ofi_obi_max and its order-flow imbalance (Cont-Kukanov-Stoikov,
+        /// own best bid / ask) over the last ofi_win_ms is at most 0; 0 = off
+        ofi_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 33, relax = None],
+        ofi_obi_max: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 33, relax = None],
+        /// (schema v34) chop gate scope: true = the chop gate (chop_k, chop_er_max) holds back every
+        /// opening of a leg that is not short, not only dip bids
+        chop_all: Bool [default = 0, since = 34, relax = None],
+        /// (schema v34) trend gate: a leg that is not short opens only while the mean efficiency ratio
+        /// over the last chop_k windows is at least chop_er_min (needs chop_k > 0); 0 = off
+        chop_er_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        /// (schema v34) low-volatility band: implied sigma in [sigma_lo, sigma_min) still quotes, but a
+        /// leg that is not short opens only while the chop mean is at most lo_er_max (0 = no chop
+        /// condition) and, with lo_obi_on, its own L1 imbalance is at least lo_obi_min; 0 = off
+        sigma_lo: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        lo_er_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        lo_obi_on: Bool [default = 0, since = 34, relax = None],
+        lo_obi_min: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 0, since = 34, relax = None],
+        /// (schema v35) trade-activity gate: a leg that is not short opens only while the window's two
+        /// tokens printed at least trd_min trades over the last trd_win_ms (a drop on active selling
+        /// reverts more often than a quiet repricing); history shorter than trd_win_ms does not block; 0 = off
+        trd_win_ms: DurationMs [min = 0, max = 25_000, default = 0, since = 35, relax = None],
+        trd_min: Count [min = 0, max = 1_000_000, default = 0, since = 35, relax = None],
+        /// (schema v36) A/B sizing: above 1, windows with an odd index (window start / window_s) scale
+        /// clip_shares, inv_max_shares, dip_max_shares and early_cap_shares by ab_scale (the fair-value
+        /// skew sees the net scaled back); 0 or 1 = off
+        ab_scale: Count [min = 0, max = 4, default = 0, since = 36, relax = None],
+        /// (schema v37) Coinbase guard: the Up fair-value move implied by the Coinbase mid over the
+        /// last cb_win_ms (InjectWarmup local_kind 3 samples through the digital delta of the Up mid)
+        /// against a leg by at least cb_shock (fraction of one) blocks and cancels that leg's opening
+        /// bids for cb_hold_ms (with cb_pair also its pairing bids); 0 = off
+        cb_win_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 37, relax = None],
+        cb_shock: Rate [min = 0, max = 1_000_000_000, default = 0, since = 37, relax = None],
+        cb_hold_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 37, relax = None],
+        cb_pair: Bool [default = 0, since = 37, relax = None],
     }
 }
 

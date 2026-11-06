@@ -800,6 +800,8 @@ fn core_430_production_orders_polymarket_only() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: Vec::new(),
     };
@@ -874,6 +876,8 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: Vec::new(),
     };
@@ -1062,6 +1066,8 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: Vec::new(),
     };
@@ -1156,6 +1162,8 @@ fn core_441_shared_account_ip() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
             extra_accounts: Vec::new(),
         };
@@ -1258,6 +1266,8 @@ bind_device = 'lo'
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
             extra_accounts: vec![
                 ("0f5e8d2a-4444-5555-6666-".into(), d.path().join("keys2")),
@@ -1341,6 +1351,8 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
             extra_accounts: Vec::new(),
         };
@@ -1419,6 +1431,8 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
             extra_accounts: Vec::new(),
         };
@@ -1462,6 +1476,8 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         day_loss_carry: Some((day, -28_510_000)),
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: Vec::new(),
     };
@@ -1583,6 +1599,8 @@ fn core_435_live_polymarket_daily_loss_option() {
             day_loss_carry: carry.map(|p| (day, p)),
             daily_loss_abs: abs,
             daily_loss_max_resumes: resumes,
+            account_cap: None,
+            group_cap: None,
             presign: true,
             extra_accounts: Vec::new(),
         };
@@ -1749,6 +1767,8 @@ fn core_439_polymarket_maker_param_values() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
         extra_accounts: Vec::new(),
     };
@@ -1852,6 +1872,8 @@ fn core_445_venue_presign() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: false,
             extra_accounts: Vec::new(),
         };
