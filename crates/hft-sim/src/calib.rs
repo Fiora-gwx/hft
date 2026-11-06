@@ -48,6 +48,10 @@ struct CalibJson {
     /// Window and opening-phase lengths (s) of the phase bucket.
     window_s: Option<u32>,
     phase_s: Option<u32>,
+    /// Move bucket thresholds (bp, ascending), look-back (ms) and reference inst (0 = first).
+    mv_thr_bp: Option<Vec<f64>>,
+    mv_window_ms: Option<u32>,
+    mv_ref_inst: Option<u32>,
     /// `"leg|load|move|phase"`, `"leg|load"` or `"leg"` (leg `ack` = place, `cxl` = cancel,
     /// `take` = taker) → samples in seconds.
     pools: Option<BTreeMap<String, Vec<f64>>>,
@@ -164,6 +168,20 @@ pub fn apply(
     }
     if let Some(ph) = c.phase_s {
         cond.phase_s = ph;
+    }
+    if let Some(t) = &c.mv_thr_bp {
+        if t.iter().any(|x| !x.is_finite() || *x <= 0.0) || t.windows(2).any(|w| w[0] >= w[1]) {
+            return Err("calibration: mv_thr_bp must be positive and ascending".into());
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let x: Vec<u32> = t.iter().map(|bp| (bp * 100.0).round() as u32).collect();
+        cond.mv_thr = x;
+    }
+    if let Some(w) = c.mv_window_ms {
+        cond.mv_window_ms = w.max(1);
+    }
+    if let Some(r) = c.mv_ref_inst {
+        cond.ref_inst = r;
     }
     Ok(())
 }

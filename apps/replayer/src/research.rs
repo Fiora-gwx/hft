@@ -291,7 +291,7 @@ pub(crate) fn execute_features<S: StrategySet>(
 }
 
 const CALIB_USAGE: &str =
-    "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N]";
+    "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N] \n[--mv-thr-bp BP[,BP...]] [--mv-window-ms N] [--mv-ref-inst N]";
 
 /// `replayer calib`: the conditional latency pools of one account from a live journal.
 pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
@@ -299,6 +299,8 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
     let mut out = None;
     let mut account = None;
     let (mut window_s, mut phase_s) = (300u32, 5u32);
+    let d = hft_sim::CondCfg::default();
+    let (mut mv_thr, mut mv_window_ms, mut ref_inst) = (d.mv_thr, d.mv_window_ms, d.ref_inst);
     let mut i = 1;
     while i < args.len() {
         let key = args[i].as_str();
@@ -322,6 +324,23 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
             }
             "--window-s" => window_s = n(&value)?,
             "--phase-s" => phase_s = n(&value)?,
+            "--mv-thr-bp" => {
+                let mut v = Vec::new();
+                for x in value.split(',') {
+                    let bp: f64 = x
+                        .trim()
+                        .parse()
+                        .map_err(|_| (2, format!("--mv-thr-bp {value}: comma list of bp")))?;
+                    if !(bp.is_finite() && bp > 0.0) || v.last().is_some_and(|l| f64::from(*l) >= bp * 100.0) {
+                        return Err((2, format!("--mv-thr-bp {value}: positive and ascending")));
+                    }
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    v.push((bp * 100.0).round() as u32);
+                }
+                mv_thr = v;
+            }
+            "--mv-window-ms" => mv_window_ms = n(&value)?.max(1),
+            "--mv-ref-inst" => ref_inst = n(&value)?,
             _ => return Err((2, format!("unsupported option {key}; {CALIB_USAGE}"))),
         }
     }
@@ -340,6 +359,9 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
         reassembly: 128 << 20,
         window_s,
         phase_s,
+        mv_thr,
+        mv_window_ms,
+        ref_inst,
     })
     .map_err(|e| (3, e))?;
     let text = serde_json::to_string_pretty(&v).map_err(|e| (2, e.to_string()))?;

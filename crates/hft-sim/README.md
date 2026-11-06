@@ -185,6 +185,7 @@ pub struct VenueModel {
     pub fill_resp_us: Option<u32>,       // 挂单成交的回报延迟;None = 账户的 resp
     pub pools: Option<LatPools>,         // 条件延迟池
     pub taker_nofill_reject: bool,       // Ioc/Fok 一笔也没成交 → Reject(NoMatch),无 Ack(Polymarket FAK/FOK 的 HTTP 400)
+    pub ex_time_max_us: u32,             // 按交易所时间撮合:一条行情在接收时刻 t 应用前只执行到达早于 t − lag 的指令(lag = sw_rx_ns − ex_ts_ns,截在 0..上限);0 = 关
 }
 pub struct TakerDelay { pub base_us: u32, pub slow_us: u32, pub slow_ppm: u32, pub resp_us: u32 }
 pub struct LatPools { pub split_us: u32, pub min_n: u16, pub pools: Vec<Pool> }
@@ -198,10 +199,12 @@ impl SimExchange {
 ```
 
 - **`MakerFill::QueueCap`**:挂单到达时 `ahead` = 该价显示量;此后该档每次更新 `ahead = min(ahead, 显示量)`;同价、对手方向的成交先消耗 `ahead` 再成交本单;穿价成交与对手侧越过本单价格都成交全部剩余(不受成交量或越价档位量限制)。`Queue` 的 500 ms 未解释减少规则不变。
+- **`MakerFill::QueueStrict`**(研究默认,2026-11-06):同 `QueueCap`,但挂单到达时的显示量一直算在前面,只被同价成交消耗——撤单不让本单前移;同价成交越过前方量才成交,穿价成交与对手侧越过本单价格成交全部剩余。依据:11-05/06 四轮实盘,`QueueCap` 回放比实盘乐观约 64 美元,主因是把档位减少全算作前方撤单。
 - **撤单竞速**:撤单的到达延迟取 `cancel_us`(或 `Cancel` 池);`tombstone` 开时,到达时找不到订单记录的撤单不回报、记下 (账户, 槽, gen)(至多 4 096 条),之后该订单到达即以 `CancelAck` 拒绝、不挂(计数 `tombstone_refusals`);订单已到达的撤单照常在到达时下架,其间的成交照常发生;回报延迟取 `cancel_us.1`(有 `Cancel` 池时取 `split_us`)。
 - **吃单延迟**:`taker` 开时,非 PostOnly、非 Gtc 的订单在到达时只做拒单检查,撮合排在到达 + `base_us`(以 `slow_ppm`/10⁶ 的概率为 `slow_us`;有 `Taker` 池时取池中样本)之后,用那一刻的簿(含叠加层)撮合,Ack、成交与剩余的 Expired 在撮合 + `resp_us` 回报。
 - **吃单费**:`BinaryTaker{k_e9}` 下吃单的费率 = `k_e9 × (1 − p)`(p 为价格占 1 的比例),即费 = k·p·(1−p)·qty;挂单不收费;返利只在研究报告里计,不进成交。2026-10-30 实盘 FAK 探针的应答金额与 `trade` 事件都不显示费用(`fee_rate_bps "0"`,卖 9.09 份 @ 0.11 收到 0.9999 USDC = 份数 × 价),扣费方式待核实,这里保留按文档的费用(偏保守;方法见 [venue-polymarket 已知限制](../venue-polymarket/README.md#已知限制与后续工作))。
 - **吃单无成交即拒单**:`taker_nofill_reject` 开时,Ioc/Fok 单撮合时一笔也没成交(FOK 不能全部成交同样)→ 只回 `Reject`(`NoMatch`,n = 13),没有 `Ack`、没有 `Expired`,与 venue-polymarket 对 400 应答产出的 `Reject` 同一终态(码不同:实盘码取消息);关时照旧 `Ack` + `Expired`。有成交的吃单不受影响。
+- **按交易所时间撮合**:`ex_time_max_us > 0` 时,`on_record` 对行情记录先算 lag = `sw_rx_ns − ex_ts_ns`(截在 0..`ex_time_max_us`,缺戳为 0),只执行到达早于 `t − lag` 的指令,再在 `t − lag` 撮合该记录(其成交回报从这一刻起算);到达在 `[t − lag, t)` 的指令留到下一条记录前执行。
 - **GTD**:挂单自到达起 `gtd_ms` 到期,与指令按事件时间排序,到期回 `Expired`(计数 `gtd_expired`);OMS 把交易所的 Expired 当作终态(hft-oms 自己的 `ExpireAt` 只处理 Unknown 槽,不重复终结)。
 - **条件延迟池**:Place/Cancel 的一次抽样 `T` 是决策到回报的延迟,到达 = `max(T − split_us, 1 ms)`;依次取 (leg, load, mv, phase)、(leg, load)、(leg) 中第一个样本数 ≥ `min_n` 的池,从账户子流均匀抽一个样本;都没有时用账户模型。条件由调用者在每条指令前用 `set_condition` 给出;撮合本身不看条件,条件由下面的 `CondTracker` 从喂给它的行情算出。
 - **自有挂单叠加层**:`hide_own` 登记的量从显示簿中扣除:挂单的 `ahead`/档位量、吃单与越价撮合看到的对手档位都不含它。
@@ -209,7 +212,7 @@ impl SimExchange {
 #### 条件跟踪与校准表
 
 ```rust
-pub struct CondCfg { pub load_thr_ns: Vec<i64>, pub window_s: u32 /* 缺省 300 */, pub phase_s: u32 /* 缺省 5 */ }
+pub struct CondCfg { pub load_thr_ns: Vec<i64>, pub window_s: u32 /* 缺省 300 */, pub phase_s: u32 /* 缺省 5 */, pub mv_thr: Vec<u32> /* bp × 100,缺省 [25, 100] */, pub mv_window_ms: u32 /* 缺省 1000 */, pub ref_inst: u32 /* 0 = 第一个 */ }
 impl CondTracker {
     pub fn new(cfg: CondCfg, venues: u64 /* 每个 VenueId 一位 */, tsc_hz_milli: u64) -> CondTracker;
     pub fn on_market(&mut self, kind: EventKind, body: &[u8], tsc: u64);   // 行情记录,按记录顺序
@@ -220,7 +223,7 @@ pub mod calib { pub fn apply(text: &[u8], maker_fill: &mut MakerFill, venue: &mu
 ```
 
 - `load`:`venues` 中各 venue 的 `L2Batch`/`L2Snapshot`/`Trade` 以 `sw_rx_ns − ex_ts_ns` 为一个延迟样本(两个戳都 > 0),按接收秒归组取 90 分位(第 ⌊0.9 n⌋ 个),每个 UTC 分钟的各秒值取中位数;上一个结束的分钟的中位数大于几个 `load_thr_ns` 阈值,`load` 就是几;第一个分钟结束前为 1。
-- `mv`:不在 `venues` 中的第一个出现的 inst 的 `Bbo` 是参考报价,保留最近 2 s 的 (记录 tsc, bid + ask);决策时取 1 s 内最早的一条与最新一条比较:变动 ≤ 0.25 bp → 0,≤ 1 bp → 1,否则 2;没有报价 → 0。
+- `mv`:参考报价是 `ref_inst`(缺省 0:不在 `venues` 中的第一个出现的 inst)的 `Bbo`,保留最近 max(2 s, 2 × `mv_window_ms`) 的 (记录 tsc, bid + ask);决策时取 `mv_window_ms` 内最早的一条与最新一条比较,变动 d 相对基准 b 超过 `mv_thr` 中几个阈值(bp × 100:`d × 10⁶ > b × t`)就是几(缺省 0.25 / 1 bp → 0、1、2,与旧版相同);没有报价 → 0。分档函数 `move_bucket` 与 `replayer calib` 共用。
 - `phase`:`utc_ns` 所在秒在 `window_s` 窗口内的位置 < `phase_s` → 0,否则 1。
 - `calib::apply`(`calib` feature,serde + serde_json):读校准表 JSON(字段与研究侧 `latc.json` 形式见 [hft-replay 校准表](../hft-replay/README.md#polymarket-场所行为校准表与条件延迟)),有的字段覆盖传入的值,缺的保留;未知字段、非法 `maker_fill`、`fee_k` 不在 0..=1 → `Err`;研究侧 `latc_v3.json` 的 `probe_thr`(吃单探针研究的阈值,`bm_sim.py` 也不读)接受并忽略,研究的表可以原样使用。研究回放与 sim-gw 共用这一份解析与跟踪,两边的条件因此同一口径。
 

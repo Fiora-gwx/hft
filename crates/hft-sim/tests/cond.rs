@@ -41,6 +41,7 @@ fn sim_240_condition_buckets() {
         load_thr_ns: vec![1_000_000, 5_000_000],
         window_s: 300,
         phase_s: 5,
+        ..CondCfg::default()
     };
     // Venue 1 tracked; venue 2 carries the reference quote.
     let mut t = CondTracker::new(cfg, 1 << 1, HZ_MILLI);
@@ -78,3 +79,27 @@ fn sim_240_condition_buckets() {
     assert_eq!(t.condition(Tsc(0), 300 * S + 4 * S).phase, 0, "SIM-240.3");
     assert_eq!(t.condition(Tsc(0), 300 * S + 5 * S).phase, 1, "SIM-240.3");
 }
+
+#[test]
+fn sim_245_move_thresholds_window_and_reference() {
+    let base = 10_000_000_000u64;
+    // .1 four buckets (0.25 / 1 / 2 bp) over 500 ms, reference = inst 8 (inst 9 comes first).
+    let cfg = CondCfg {
+        mv_thr: vec![25, 100, 200],
+        mv_window_ms: 500,
+        ref_inst: 8,
+        ..CondCfg::default()
+    };
+    let mut t = CondTracker::new(cfg, 1 << 1, HZ_MILLI);
+    t.on_market(EventKind::BBO, &bbo(2, 9, 1, 3), base);
+    t.on_market(EventKind::BBO, &bbo(2, 8, 999_000, 1_001_000), base + 100_000_000);
+    // 3 bp over 400 ms: > 2 bp → bucket 3 (inst 9 was not taken as the reference).
+    t.on_market(EventKind::BBO, &bbo(2, 8, 999_300, 1_001_300), base + 500_000_000);
+    assert_eq!(t.condition(Tsc(base + 550_000_000), 0).mv, 3, "SIM-245.1");
+    // .2 the 500 ms look-back: 650 ms after the first quote only the last one is in the window.
+    assert_eq!(t.condition(Tsc(base + 750_000_000), 0).mv, 0, "SIM-245.2");
+    // .3 the shared bucket function: 0.25 bp is not above 25; 0.26 bp is.
+    assert_eq!(hft_sim::move_bucket(50, 2_000_000, &[25, 100]), 0, "SIM-245.3");
+    assert_eq!(hft_sim::move_bucket(52, 2_000_000, &[25, 100]), 1, "SIM-245.3");
+}
+

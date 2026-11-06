@@ -123,7 +123,9 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 
 #### 校准表的生成(`replayer calib`)
 
-`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s, mv_thr, mv_window_ms, ref_inst})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+
+变动档位(2026-11-06):`mv` 用 hft-sim `move_bucket` 与 `CondCfg` 同一定义——阈值 `mv_thr`(命令行 `--mv-thr-bp 0.25,1,2`,bp)、窗口 `mv_window_ms`(`--mv-window-ms`)、参考品种 `ref_inst`(`--mv-ref-inst`,0 = 第一个);缺省 0.25 / 1 bp、1 s、第一个,与旧表相同。表中写出 `mv_thr_bp`、`mv_window_ms`、`mv_ref_inst`,`calib::apply` 读回到 `CondCfg`,所以回放按生成时的档位抽样。
 
 每次交出 Input 前驱动记下它的引擎 UTC,`emit` 时交给 `ResearchVenue::on_utc`:重播种区间与 `phase` 都按决策所在 Input 的引擎 UTC。
 
