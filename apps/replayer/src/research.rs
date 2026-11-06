@@ -12,7 +12,7 @@ const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
 [--maker-fill queue|queue-cap|queue-strict|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
-[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--features EVERY_MS]";
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--param-base journal|defaults] [--features EVERY_MS]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -20,8 +20,9 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut accounts = Vec::new();
     let mut variants = vec![Variant {
         name: "base".into(),
-        set: Default::default(),
+        ..Variant::default()
     }];
+    let mut param_base: Option<String> = None;
     let mut seeds = vec![1u64];
     let mut sim = SimParams::default();
     let mut driver = DriverCfg::default();
@@ -64,7 +65,14 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
             "--set" => variants.push(Variant {
                 name: format!("set{}", variants.len()),
                 set: hft_replay::variants::parse_sets(&value)?,
+                ..Variant::default()
             }),
+            "--param-base" => {
+                if !matches!(value.as_str(), "journal" | "defaults") {
+                    return Err(format!("--param-base {value}: journal|defaults"));
+                }
+                param_base = Some(value);
+            }
             "--seeds" => {
                 seeds = value
                     .split(',')
@@ -179,6 +187,14 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut files = Vec::new();
     crate::discover(&journal, &mut files).map_err(|(_, m)| m)?;
     files.sort();
+    // --param-base: every variant without its own `base` (not the journal's own "base" run).
+    if let Some(b) = param_base {
+        for v in variants.iter_mut().skip(1) {
+            if v.base.is_none() {
+                v.base = Some(b.clone());
+            }
+        }
+    }
     Ok(ResearchOpts {
         files,
         accounts: (!accounts.is_empty()).then_some(accounts),
