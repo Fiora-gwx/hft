@@ -9,11 +9,24 @@ use sha2::{Digest, Sha256};
 use zerocopy::{IntoBytes, TryFromBytes};
 
 /// One parameter variant: `sets` are `(field name, raw schema value)`, applied in order.
+/// `base`: `None` / `"journal"` — the sets apply on the journal's active parameters (fields the
+/// variant does not set keep that run's values); `"defaults"` — every field starts at its schema
+/// default first, so a variant means the same parameters on every journal (give `enabled` and the
+/// live base parameters explicitly).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct Variant {
     pub name: String,
     #[serde(default)]
     pub set: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+impl Variant {
+    /// The variant starts from the schema defaults (`base = "defaults"`).
+    pub fn from_defaults(&self) -> bool {
+        self.base.as_deref() == Some("defaults")
+    }
 }
 
 #[derive(Deserialize)]
@@ -44,6 +57,9 @@ pub fn parse_file(text: &str) -> Result<Vec<Variant>, String> {
     for v in &f.variant {
         if v.name.is_empty() || !seen.insert(v.name.clone()) {
             return Err(format!("variants: empty or duplicate name {:?}", v.name));
+        }
+        if !matches!(v.base.as_deref(), None | Some("journal" | "defaults")) {
+            return Err(format!("variants: {}: base must be \"journal\" or \"defaults\"", v.name));
         }
     }
     Ok(f.variant)
@@ -84,6 +100,13 @@ pub fn variant_blob<S: StrategySet>(
         .ok_or("params body length")?;
     let mut raw = decode_body(schema, h.schema_ver, h.n_groups, &base[body_start..])
         .map_err(|e| format!("params body: {e:?}"))?;
+    if v.from_defaults() {
+        for (i, d) in raw.defaults.iter_mut().enumerate() {
+            if let Some(f) = u16::try_from(i).ok().and_then(|i| schema.field(i)) {
+                *d = f.default;
+            }
+        }
+    }
     for (name, value) in &v.set {
         let ix = field_ix(schema, name).ok_or_else(|| {
             let names: Vec<&str> = (0..schema.n_fields())

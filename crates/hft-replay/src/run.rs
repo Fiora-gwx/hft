@@ -362,7 +362,7 @@ fn inject_variant<S: StrategySet>(
     mask: &[AccountId],
     v: &Variant,
 ) -> Result<Vec<[u8; 16]>, String> {
-    if v.set.is_empty() {
+    if v.set.is_empty() && !v.from_defaults() {
         return Ok(Vec::new());
     }
     let targets: Vec<(StrategyId, AccountId, hft_event::BlobRef)> = seq
@@ -402,8 +402,9 @@ fn inject_variant<S: StrategySet>(
                 .filter(|(n, _)| known.contains(&n.as_str()))
                 .map(|(n, x)| (n.clone(), *x))
                 .collect(),
+            base: v.base.clone(),
         };
-        if mine.set.is_empty() {
+        if mine.set.is_empty() && !mine.from_defaults() {
             continue;
         }
         used.extend(mine.set.keys().cloned());
