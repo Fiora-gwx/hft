@@ -113,6 +113,9 @@ pub struct Connector {
     napi_n: usize,
     sys: SysCount,
     retries: Vec<(u32, i64)>,
+    /// Per endpoint: connections built so far, picking the next of its addresses (README
+    /// "多地址轮转").
+    addr_rr: Vec<u32>,
     now_ns: i64,
     #[cfg(feature = "test-io")]
     scripts: std::collections::VecDeque<crate::sock::ScriptIo>,
@@ -208,6 +211,7 @@ impl Connector {
             napi_n: 0,
             sys: SysCount::default(),
             retries: vec![(0, 0); cfg.endpoints.len() * cfg.src_ips.len()],
+            addr_rr: vec![0; cfg.endpoints.len()],
             now_ns: 0,
             #[cfg(feature = "test-io")]
             scripts: std::collections::VecDeque::new(),
@@ -489,20 +493,32 @@ impl Connector {
         None
     }
 
+    /// The address of the endpoint's next connection: its pinned `ips`, else the IPv4 answers of
+    /// the resolver, in turn (README "多地址轮转": connections of one stream spread over the
+    /// server's addresses — some are measurably faster, 2026-11-06 Coinbase).
     fn resolve(&mut self, ep: usize) -> Option<(Ipv4Addr, u16)> {
         let e = self.cfg.endpoints.get(ep)?;
-        if let Some(ip) = e.ips.first() {
-            return Some((*ip, e.port));
+        let turn = self.addr_rr.get(ep).copied().unwrap_or(0) as usize;
+        if let Some(n) = self.addr_rr.get_mut(ep) {
+            *n = n.wrapping_add(1);
+        }
+        if !e.ips.is_empty() {
+            return e.ips.get(turn % e.ips.len()).map(|ip| (*ip, e.port));
         }
         self.sys.getaddrinfo += 1;
         use std::net::ToSocketAddrs;
-        let addrs = (e.host.as_str(), e.port).to_socket_addrs().ok()?;
-        for a in addrs {
-            if let std::net::SocketAddr::V4(v4) = a {
-                return Some((*v4.ip(), v4.port()));
+        let mut v4 = [Ipv4Addr::UNSPECIFIED; 16];
+        let mut n = 0;
+        for a in (e.host.as_str(), e.port).to_socket_addrs().ok()? {
+            if let std::net::SocketAddr::V4(a) = a
+                && n < v4.len()
+                && !v4[..n].contains(a.ip())
+            {
+                v4[n] = *a.ip();
+                n += 1;
             }
         }
-        None
+        (n > 0).then(|| (v4[turn % n], e.port))
     }
 
     fn step_init(&mut self, i: usize, slot: u16, req: BuildReq, now: i64) -> Option<BuildEvent> {
