@@ -8,7 +8,7 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 
-本文件的记号:夹具 `tests/common`:二元 venue `VB` 的六个槽位 inst(`U0, D0, U1, D1, U2, D2`;px_exp −3、qty_exp −6、计价 USDC)与参考 venue `VR` 的现货 inst `R`(px_exp −2);Sim 账户 `A1`;group 表 = 六个槽位按序加参考。参数:默认值且 `enabled = 1`、`vol_min_samples = 60`。`warm(secs, end_s, pair)`:参考价在 `end_s` 之前 `secs` 秒里每秒一个报价,中间价在 100 000.00 与 100 010.00 之间交替(σ ≈ 1 bp/s),随后该对的两个槽位簿为买一 0.450、卖一 0.470,再在 `end_s + 0.5 s` 送一条参考报价。测试里 UTC = 引擎时间。
+本文件的记号:夹具 `tests/common`:二元 venue `VB` 的六个槽位 inst(`U0, D0, U1, D1, U2, D2`;px_exp −3、qty_exp −6、计价 USDC)与参考 venue `VR` 的现货 inst `R`(px_exp −2);第二参考 venue `VR2`(OKX 现货,代替原生 Coinbase)的 inst `R2`;Sim 账户 `A1`;group 表 = 六个槽位按序加参考(`specs2` 再加 `R2`)。参数:默认值且 `enabled = 1`、`vol_min_samples = 60`。`warm(secs, end_s, pair)`:参考价在 `end_s` 之前 `secs` 秒里每秒一个报价,中间价在 100 000.00 与 100 010.00 之间交替(σ ≈ 1 bp/s),随后该对的两个槽位簿为买一 0.450、卖一 0.470,再在 `end_s + 0.5 s` 送一条参考报价。测试里 UTC = 引擎时间。
 
 ## 覆盖
 
@@ -17,7 +17,7 @@ spec: README.md
 | 概要 | BMK-003 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| group 形态 | BMK-001 |
+| group 形态 | BMK-001, BMK-049 |
 | 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022, BMK-024, BMK-033 |
 | 订阅 | BMK-003、BMK-009、BMK-026 |
 | 波动率 | BMK-002 |
@@ -664,3 +664,19 @@ spec: README.md
 | BMK-044.4 | 买一降到 0.940;再升到 0.955 | 降:留守;升:撤单,`Cancelled` 后 `settle_requote_ms` 内不挂,之后挂 0.955 |
 | BMK-044.5 | 成交 20 份,`settle_max_shares` 20 / 60 | 20:不再挂;60:再挂一张 |
 | BMK-044.6 | `sigma_min` 默认、`stop_before_ms` 30 000(主规则在挂单段但无目标) | 模块到 570 s(最后 30 s)才挂 |
+
+### BMK-049 第二参考组(Coinbase 快参考)
+
+- 规则:[group 形态](README.md#group-形态)
+- 级别:table
+- 前置:默认参数
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_049_second_reference_group`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-049.1 | 六个槽位 + `R` + `R2` | `Ok` |
+| BMK-049.2 | 去掉第一个槽位(五个槽位);四个槽位 + 三个参考 | 都是 `GroupShape{gix 0, code 1}` |
+| BMK-049.3 | 八个 group 的表 | `reference` = `R`,`reference2` = `R2` |
+| BMK-049.4 | 1 s 时 `R2` 的 BBO 99 999.99 / 100 000.01 | Coinbase 样本 1 个,1 s 时中间价 × 2 = 20 000 000 |
+| BMK-049.5 | 再来一条 local_kind 3 的旁路样本 | 被忽略(样本仍 1 个) |
+| BMK-049.6 | 夹具七个 group 的表,同一旁路样本 | `reference2` 未设,样本 1 个 |
