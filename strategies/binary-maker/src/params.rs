@@ -406,8 +406,9 @@ pub mod invalid {
 }
 
 impl BinaryMakerParams {
-    /// Groups: `2 × pairs` single-leg slot groups on one venue (Up, Down of pair 0, then pair 1, …)
-    /// and a last single-leg reference group on another venue.
+    /// Groups: `2 × pairs` single-leg slot groups on one venue (Up, Down of pair 0, then pair 1, …),
+    /// then one or two single-leg reference groups on other venues: the first is the fair-value
+    /// reference (Binance), a second one the fast reference of the v37 Coinbase guard.
     pub fn check(&self, groups: &GroupTable, rd: &RefView<'_>) -> Result<(), ParamError> {
         let n = groups.len();
         let d = self.defaults();
@@ -417,7 +418,8 @@ impl BinaryMakerParams {
                 code: invalid::PRICE_BAND,
             });
         }
-        if n < 3 || n.is_multiple_of(2) {
+        let refs = crate::fast::reference_count(groups).max(1);
+        if n < 3 || refs > 2 || (n - refs) < 2 || !(n - refs).is_multiple_of(2) {
             return Err(ParamError::GroupShape {
                 gix: 0,
                 code: shape::COUNT,
@@ -433,7 +435,7 @@ impl BinaryMakerParams {
             if rd.try_inst(l.inst).is_none() {
                 return Err(err(shape::INST));
             }
-            let reference = gix + 1 == n;
+            let reference = gix + refs >= n;
             let v = *slot_venue.get_or_insert(l.venue);
             if (l.venue == v) == reference {
                 return Err(err(shape::VENUE));

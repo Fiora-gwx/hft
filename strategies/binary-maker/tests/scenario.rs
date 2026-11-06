@@ -2862,3 +2862,56 @@ fn bmk_048_pressure_block() {
     let got = ofi_run(&on, &[100, 100, 100, 100, 100, 100, 100]);
     assert!(has(&got, SLOTS[2]), "BMK-048.6 {got:?}");
 }
+
+#[test]
+fn bmk_049_second_reference_group() {
+    let p = params(|_| {});
+    let rd = fixture();
+    let check = |specs: &[GroupSpec]| p.validate(&GroupTable::new(specs, CAPACITY), &rd.view());
+    // .1 six slots + two references validate; .2 two references and an odd slot count do not.
+    let all = specs2();
+    assert_eq!(check(&all), Ok(()), "BMK-049.1");
+    assert_eq!(
+        check(&all[1..]),
+        Err(ParamError::GroupShape { gix: 0, code: 1 }),
+        "BMK-049.2 odd slots"
+    );
+    let mut three = all.clone();
+    three.push(spec(gid(8), BTC, &[(R, VR)]));
+    three.remove(0);
+    assert_eq!(
+        check(&three[1..]),
+        Err(ParamError::GroupShape { gix: 0, code: 1 }),
+        "BMK-049.2 three references"
+    );
+    // .3 the first trailing reference is the fair-value reference, the second one feeds the guard.
+    let g = GroupTable::new(&all, CAPACITY);
+    let mut h = StrategyHarness::<BinaryMaker>::new(&p, &g, fixture(), A1).expect("params");
+    assert_eq!(
+        (h.strategy().fast.reference, h.strategy().fast.reference2),
+        (R, R2),
+        "BMK-049.3"
+    );
+    // .4 a native BBO on R2 is one guard sample (mid × 2 in R2's price units).
+    h.views_mut().at_engine_ns(1_000_000_000);
+    h.views_mut()
+        .bbo(R2, (Px(9_999_999), Qty(1_000_000)), (Px(10_000_001), Qty(1_000_000)));
+    let b = h.views_mut().bbo_of(R2);
+    h.feed(&ev::bbo(R2, 7, b).as_ref());
+    let cb = &h.strategy().fast.cb;
+    assert_eq!((cb.n, cb.at(1_000_000_000)), (1, Some(20_000_000)), "BMK-049.4");
+    // .5 with a native reference the sidecar's samples (1e-8 USD) are ignored.
+    let mut payload = vec![1u8, 1, 0, 1];
+    // One kind-1 sample: receive ns, exchange ns, bid, ask (1e-8 USD), unused.
+    for x in [1_000_000_000i64, 0, 10_000_000_000_000, 10_000_100_000_000, 0] {
+        payload.extend_from_slice(&x.to_le_bytes());
+    }
+    h.feed(&ev::warmup(3, 0, true, &payload).as_ref());
+    assert_eq!(h.strategy().fast.cb.n, 1, "BMK-049.5");
+    // .6 the one-reference table keeps reference2 unset and takes the sidecar's samples.
+    let mut h1 = harness(&p);
+    assert_eq!(h1.strategy().fast.reference2, InstId(0), "BMK-049.6");
+    h1.views_mut().at_engine_ns(1_000_000_000);
+    h1.feed(&ev::warmup(3, 0, true, &payload).as_ref());
+    assert_eq!(h1.strategy().fast.cb.n, 1, "BMK-049.6");
+}
