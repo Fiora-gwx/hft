@@ -66,6 +66,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--account N` | 被模拟账户(可重复) | 全部绑定实例的账户 |
 | `--variants <file.toml>` | `[[variant]] name = "…" set = { 字段 = 原始值, … }` | 无 |
 | `--set NAME=RAW[,…]` | 追加一个变体 `set<k>` | 无 |
+| `--param-base journal\|defaults` | 未写 `base` 的变体的起点:`journal` = 日志里该运行的生效参数;`defaults` = 全部字段先置 schema 默认值(`enabled` 与实盘基础参数由变体写明,同一变体在每份日志上参数相同) | `journal` |
 | `--seeds S[,S…]` | 延迟随机种子 | `1` |
 | `--latency ENTRY_US:RESP_US` | `LatencyModel::Fixed` | `40000:0` |
 | `--maker-fill queue\|queue-cap\|through` | 挂单成交模型 | `queue` |
@@ -128,6 +129,8 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 每次交出 Input 前驱动记下它的引擎 UTC,`emit` 时交给 `ResearchVenue::on_utc`:重播种区间与 `phase` 都按决策所在 Input 的引擎 UTC。
 
 ### 参数变体
+
+变体的起点(`Variant.base`,TOML 里 `base = "journal" | "defaults"`,或 `--param-base`):`journal`(缺省)在日志里该实例当前生效的参数上改写 `set` 的字段,未写的字段沿用那次运行的值;`defaults` 先把全部字段置为 schema 默认值再应用 `set`。2026-11-06 发现:只写部分字段的变体(dm10 写 26 个)在 11 月的日志上继承了 B 策略的反转开仓、震荡开关和结算模块,结果不可比;研究变体应写完整参数并用 `defaults`。`run.json` 每个运行记录 `base`。
 
 一个变体对每个被模拟账户上、schema 含其中至少一个字段的策略实例各发一对 Input(在第一个日志 Input 之前,tsc = 启动快照的 tsc):`ConfigBlob`(`variant_blob`:该实例当前参数 blob 按其 schema 版本解码,改值,按当前 schema 版本重编码,`version + 1`,SHA-256 重算)与 `ControlCmd::SetParams`(issuer `pipeline`、`confirmed = 1`)。字段名在所有被模拟实例的 schema 中都不存在、或值超出 `[min, max]` → 该运行失败;`SetParams` 的结果不是 `Applied` → 失败。
 
