@@ -433,8 +433,10 @@ mod lo {
         let t = String::from_utf8(pc.request.clone()).unwrap();
         let lines: Vec<&str> = t.split("\r\n").collect();
         assert_eq!(lines[0], "GET /ws?x=1 HTTP/1.1");
+        // The loopback peer listens on a port other than 443: the Host header carries it.
+        let host = format!("Host: a.test:{}", cfg.endpoints[0].port);
+        assert!(cfg.endpoints[0].port != 443 && lines.contains(&host.as_str()), "missing {host}: {t}");
         for h in [
-            "Host: a.test",
             "Upgrade: websocket",
             "Connection: Upgrade",
             "Sec-WebSocket-Version: 13",

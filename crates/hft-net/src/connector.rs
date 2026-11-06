@@ -703,7 +703,19 @@ impl Connector {
         r.extend_from_slice(ep.host.as_bytes());
         // A non-default port is part of the Host header (RFC 9110 §7.2).
         if ep.port != 443 {
-            r.extend_from_slice(format!(":{}", ep.port).as_bytes());
+            r.push(b':');
+            let mut d = [0u8; 5];
+            let mut k = d.len();
+            let mut p = ep.port;
+            loop {
+                k -= 1;
+                d[k] = b'0' + (p % 10) as u8;
+                p /= 10;
+                if p == 0 {
+                    break;
+                }
+            }
+            r.extend_from_slice(&d[k..]);
         }
         r.extend_from_slice(b"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ");
         r.extend_from_slice(&key);

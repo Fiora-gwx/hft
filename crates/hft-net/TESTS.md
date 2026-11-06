@@ -1462,7 +1462,7 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
 - 步骤:
   1. `submit`;`drive` 至 `Ready`
 - 期望:
-  - 请求行 `GET /ws?x=1 HTTP/1.1`;头含 `Host: a.test`、`Upgrade: websocket`、`Connection: Upgrade`、`Sec-WebSocket-Version: 13`、`X-MBX-APIKEY: k1`
+  - 请求行 `GET /ws?x=1 HTTP/1.1`;头含 `Host: a.test:<端口>`(本地对端端口不是 443,端口写进 Host)、`Upgrade: websocket`、`Connection: Upgrade`、`Sec-WebSocket-Version: 13`、`X-MBX-APIKEY: k1`
   - `Sec-WebSocket-Key` 为 24 字符 base64,解码后 16 B
   - 不含 `Sec-WebSocket-Extensions`
 - 实现:`crates/hft-net/tests/connector.rs::net_192_upgrade_request`
