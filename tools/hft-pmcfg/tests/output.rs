@@ -211,6 +211,7 @@ fn pmc_005_tool_output_equals_library() {
                 "12345".into(),
                 s(&p("k1")),
                 "--no-presign".into(),
+                "--no-cancel-race".into(),
                 "--daily-loss".into(),
                 "20".into(),
                 "--daily-loss-resumes".into(),
