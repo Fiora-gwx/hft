@@ -68,7 +68,7 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--set NAME=RAW[,…]` | 追加一个变体 `set<k>` | 无 |
 | `--seeds S[,S…]` | 延迟随机种子 | `1` |
 | `--latency ENTRY_US:RESP_US` | `LatencyModel::Fixed` | `40000:0` |
-| `--maker-fill queue\|queue-cap\|through` | 挂单成交模型 | `queue` |
+| `--maker-fill queue\|queue-cap\|queue-strict\|through` | 挂单成交模型(研究默认 `queue-strict`,2026-11-06 负责人决定) | `queue` |
 | `--calib <file>` | 校准表([Polymarket 场所行为](#polymarket-场所行为校准表与条件延迟)) | 无 |
 | `--own` | 隐藏日志里被模拟账户自己的挂单 | 关 |
 | `--tombstone` | 撤单先到即墓碑 | 关 |
@@ -77,6 +77,8 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--fee-binary K` | 二元吃单费系数 | 费率行 |
 | `--gtd-ms N` | 挂单有效期 | 0(无) |
 | `--fill-resp-us N` | 挂单成交的回报延迟 | 账户模型 |
+| `--ex-time-max-us N` | 按交易所时间撮合,行情延迟上限(hft-sim `ex_time_max_us`) | 0(关) |
+| `--sim-cash N` | 模拟账户每种计价资产的起始余额(整单位);超出可用余额的挂单以 `InsufficientBalance` 拒绝 | 很大的余额(不约束) |
 | `--reseed-s N` | 重播种间隔(UTC 秒,0 = 不重播种) | `300` |
 | `--log-timers` | 照读日志里的堆定时器,不由引擎状态触发 | 关 |
 | `--jobs N` | 并行运行数 | `1` |
