@@ -1959,3 +1959,80 @@ fn core_445_venue_presign() {
         );
     }
 }
+
+#[test]
+fn core_451_coinbase_spot_registration() {
+    use hft_core::venues::{
+        READ_ONLY_PROTOCOLS, gw_rest_defaults, public_market_endpoint as allowed, registered, shared_egress_ip,
+    };
+    use hft_refdata::EndpointRole as R;
+    use hft_types::VenueId;
+    // .1 protocol ↔ VenueId 16.
+    assert!(registered("coinbase-spot", VenueId::COINBASE_SPOT).is_ok(), "CORE-451.1");
+    assert!(registered("coinbase-spot", VenueId::BINANCE_SPOT).is_err(), "CORE-451.1");
+    assert_eq!(gw_rest_defaults("coinbase-spot"), Some((2, 0)), "CORE-451.1");
+    assert!(!shared_egress_ip("coinbase-spot"), "CORE-451.1");
+    assert!(READ_ONLY_PROTOCOLS.contains(&"coinbase-spot"), "CORE-451.1");
+    // .2 public endpoint allowlist: the Exchange feed and REST hosts only.
+    for (role, url) in [
+        (R::MdPublic, "wss://ws-feed.exchange.coinbase.com"),
+        (R::MdMarket, "wss://ws-feed.exchange.coinbase.com/"),
+        (R::Rest, "https://api.exchange.coinbase.com"),
+    ] {
+        assert!(allowed("coinbase-spot", role, url), "CORE-451.2 {url}");
+        for private in [R::OrderWs, R::UserData] {
+            assert!(!allowed("coinbase-spot", private, url), "CORE-451.2");
+        }
+        assert!(!allowed("coinbase-spot", role, &url.replace(".com", ".com.evil.invalid")), "CORE-451.2");
+    }
+    for bad in [
+        "wss://advanced-trade-ws.coinbase.com",
+        "wss://ws-feed-public.sandbox.exchange.coinbase.com",
+    ] {
+        assert!(!allowed("coinbase-spot", R::MdPublic, bad), "CORE-451.2 {bad}");
+    }
+    assert!(!allowed("binance-spot", R::MdPublic, "wss://ws-feed.exchange.coinbase.com"), "CORE-451.2");
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_452_coinbase_reference_config() {
+    use hft_types::{InstId, VenueId};
+    let codes = |path: &std::path::Path| -> Vec<String> {
+        hft_core::config::load(path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect()
+    };
+    // .1 the maker sim with the Coinbase reference loads; the venue is a live feed.
+    let d = tempfile::tempdir().unwrap();
+    let path =
+        support::write_polymarket_maker_sim(d.path(), &d.path().join("hot"), None, None, "127.0.0.1", "lo");
+    let l = hft_core::config::load(&path, true).unwrap_or_else(|e| panic!("CORE-452.1: {e:?}"));
+    assert_eq!(l.rd.insts_of_venue(VenueId::COINBASE_SPOT), [InstId(8)], "CORE-452.1");
+    let cb = &l.cfg.venues["cb"];
+    assert_eq!((cb.protocol.as_str(), cb.id, cb.live_feed), ("coinbase-spot", 16, true), "CORE-452.1");
+    // .2 the live maker with it loads; accounts on the read-only venue are refused.
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    let d2 = tempfile::tempdir().unwrap();
+    let path = support::write_polymarket_maker_live(d2.path(), &d2.path().join("hot"), None, None, "127.0.0.1", "lo", &live);
+    assert_eq!(codes(&path), Vec::<String>::new(), "CORE-452.2");
+    let mut v: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let accounts = v["venues"]["pm"]["accounts"].clone();
+    v["venues"]["cb"].as_table_mut().unwrap().insert("accounts".into(), accounts);
+    std::fs::write(&path, toml::to_string(&v).unwrap()).unwrap();
+    assert!(codes(&path).contains(&"ReadOnlyVenue".to_string()), "CORE-452.2");
+}

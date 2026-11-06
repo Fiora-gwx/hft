@@ -323,3 +323,24 @@ fn pmc_003_account_entries() {
     assert_eq!(l.extra_accounts.len(), 11, "PMC-003.7");
     assert!(err(&n(12)).contains("at most 12 accounts"), "PMC-003.7");
 }
+
+#[test]
+fn pmc_009_no_coinbase_flag() {
+    // .1 default: Coinbase on, in every mode.
+    let c = parse(&args(POS)).unwrap();
+    assert!(c.coinbase, "PMC-009.1");
+    let c = parse(&args(&format!("--live 12345 k1 {POS}"))).unwrap();
+    let Mode::Live(l) = &c.mode else { panic!("PMC-009.1") };
+    assert!(c.coinbase && l.coinbase, "PMC-009.1");
+    // .2 --no-coinbase with --maker or --live.
+    let c = parse(&args(&format!("--maker --no-coinbase {POS}"))).unwrap();
+    assert!(matches!(c.mode, Mode::Maker) && !c.coinbase, "PMC-009.2");
+    let c = parse(&args(&format!("--no-coinbase --live 12345 k1 {POS}"))).unwrap();
+    let Mode::Live(l) = &c.mode else { panic!("PMC-009.2") };
+    assert!(!c.coinbase && !l.coinbase, "PMC-009.2");
+    // .3 refused: without a maker mode, or twice.
+    let e = parse(&args(&format!("--no-coinbase {POS}"))).unwrap_err();
+    assert!(e.contains("--no-coinbase needs --maker or --live"), "PMC-009.3: {e}");
+    let e = parse(&args(&format!("--maker --no-coinbase --no-coinbase {POS}"))).unwrap_err();
+    assert!(e.contains("given twice"), "PMC-009.3: {e}");
+}

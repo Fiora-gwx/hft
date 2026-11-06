@@ -1483,6 +1483,7 @@ dependencies = [
  "toml 0.8.23",
  "venue-binance",
  "venue-bitget",
+ "venue-coinbase",
  "venue-polymarket",
  "zerocopy",
 ]
@@ -1523,6 +1524,7 @@ dependencies = [
  "toml 0.8.23",
  "venue-binance",
  "venue-bitget",
+ "venue-coinbase",
  "venue-polymarket",
  "zerocopy",
  "zeroize",
@@ -1701,6 +1703,7 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "venue-binance",
+ "venue-coinbase",
  "venue-polymarket",
  "zerocopy",
 ]
@@ -4144,6 +4147,19 @@ dependencies = [
  "sha2 0.10.9",
  "sonic-rs",
  "zerocopy",
+]
+
+[[package]]
+name = "venue-coinbase"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-refdata",
+ "hft-types",
+ "hft-venue-proto",
+ "serde",
+ "serde_json",
+ "sonic-rs",
 ]
 
 [[package]]

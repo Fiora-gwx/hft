@@ -75,7 +75,7 @@ pub const PM_PROBE_RR_MAX_CROSS: i64 = 500_000_000;
 pub enum PmStrategy {
     /// book-observer: one group per slot, never trades (the sim without a mode flag).
     Observer,
-    /// binary-maker: one group per slot plus the reference group.
+    /// binary-maker: one group per slot plus the reference group (and the Coinbase reference).
     Maker,
     /// pm-taker-probe: one group, slot `btc-up-0` (InstId 1).
     TakerProbe,
@@ -169,6 +169,9 @@ pub struct PmLive {
     /// binary-maker instance with `pm-live`'s risk limits; the strategy parameters stay one blob
     /// under `pm-live`.
     pub extra_accounts: Vec<LiveAccount>,
+    /// `[venues.cb]` (Coinbase BTC-USD, InstId 8) is written; false (`--no-coinbase`) = the
+    /// configuration without it.
+    pub coinbase: bool,
 }
 
 impl PmLive {
@@ -263,6 +266,7 @@ pub fn write_polymarket_sim(
         PmStrategy::Observer,
         None,
         &[],
+        false,
     )
 }
 
@@ -293,6 +297,22 @@ pub fn write_polymarket_maker_sim_with(
     bind_device: &str,
     params: &[(String, i64)],
 ) -> Result<PathBuf, String> {
+    write_polymarket_maker_sim_opts(root, hot, user, pipeline, src_ip, bind_device, params, true)
+}
+
+/// `write_polymarket_maker_sim_with`; `coinbase = false` (`--maker --no-coinbase`) omits
+/// `[venues.cb]` and its refdata (the configuration as before Coinbase was added).
+#[allow(clippy::too_many_arguments)]
+pub fn write_polymarket_maker_sim_opts(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    params: &[(String, i64)],
+    coinbase: bool,
+) -> Result<PathBuf, String> {
     write_pm(
         &Target {
             root,
@@ -307,6 +327,7 @@ pub fn write_polymarket_maker_sim_with(
         PmStrategy::Maker,
         None,
         params,
+        coinbase,
     )
 }
 
@@ -395,6 +416,7 @@ pub fn write_polymarket_maker_live_with(
         PmStrategy::Maker,
         Some(live),
         params,
+        live.coinbase,
     )
 }
 
@@ -430,6 +452,7 @@ pub fn write_polymarket_taker_probe_live(
         PmStrategy::TakerProbe,
         Some(live),
         params,
+        live.coinbase,
     )
 }
 
@@ -541,6 +564,7 @@ fn write_pm(
     strategy: PmStrategy,
     live: Option<&PmLive>,
     params: &[(String, i64)],
+    coinbase: bool,
 ) -> Result<PathBuf, String> {
     use hft_venue_proto::VenueProtocol;
     let (root, src_ip, bind_device) = (t.root, t.src_ip, t.bind_device);
@@ -557,6 +581,9 @@ fn write_pm(
     std::fs::create_dir_all(root).map_err(io(root))?;
     let v = VenueId::POLYMARKET_CLOB;
     let bn = VenueId::BINANCE_SPOT;
+    let cb = VenueId::COINBASE_SPOT;
+    // The second reference market (Coinbase BTC-USD) rides with the maker's Binance reference.
+    let coinbase = maker && coinbase;
     let a = AccountId(1);
     let usdc = AssetId(1);
     let desc = Strategies::kinds()
@@ -577,6 +604,9 @@ fn write_pm(
     // Binance spot's fee rule names BNB (fee discount asset).
     let bnb = AssetId(slots.len() as u16 + 4);
     let reference = InstId(slots.len() as u32 + 1);
+    // Coinbase: USD after BNB, BTC-USD after the Binance reference.
+    let usd = AssetId(slots.len() as u16 + 5);
+    let cb_ref = InstId(slots.len() as u32 + 2);
     let token = |i: usize| AssetId(i as u16 + 2);
     let mut b = RdbBuilder::new(1);
     b.asset(AssetSpec {
@@ -616,6 +646,20 @@ fn write_pm(
                 name: name.into(),
                 class,
                 exp: AssetExp { px_exp, qty_exp },
+                px_max: Px(1_000_000_000_000),
+                qty_max: Qty(1_000_000_000_000_000),
+                dust: Qty(1),
+            });
+        }
+        if coinbase {
+            b.asset(AssetSpec {
+                id: usd,
+                name: "USD".into(),
+                class: AssetClass::Stable,
+                exp: AssetExp {
+                    px_exp: -6,
+                    qty_exp: -6,
+                },
                 px_max: Px(1_000_000_000_000),
                 qty_max: Qty(1_000_000_000_000_000),
                 dust: Qty(1),
@@ -741,6 +785,63 @@ fn write_pm(
             },
         );
     }
+    if coinbase {
+        b.venue(VenueSpec {
+            id: cb,
+            exchange: Exchange::Coinbase,
+            product: InstKind::Spot,
+            ws_max_streams_per_conn: 64,
+            ws_max_in_msgs_per_s: 8,
+            ws_max_conn_age_s: 86_400,
+            ws_new_conn_per_5min_ip: 300,
+            app_ping_interval_s: 0,
+            ts_unit: TsUnit::Us,
+            client_id_max_len: 36,
+            client_id_prefix: "".into(),
+            max_batch: 1,
+            max_inflight_amend: 1,
+            crossed_tolerance_default: 0,
+            stale_guard: StaleGuardKind::None,
+        });
+        for (role, url) in [
+            // Coinbase Exchange feed, not Advanced Trade (~60 ms later on the same trades,
+            // eu-west-1 2026-11-06; venue-coinbase README "端点与路由").
+            (EndpointRole::MdPublic, "wss://ws-feed.exchange.coinbase.com"),
+            (EndpointRole::MdMarket, "wss://ws-feed.exchange.coinbase.com"),
+            (EndpointRole::Rest, "https://api.exchange.coinbase.com"),
+        ] {
+            b.endpoint(
+                cb,
+                Endpoint {
+                    env: EndpointEnv::Prod,
+                    role,
+                    url: url.into(),
+                    conn_group: 0,
+                },
+            );
+        }
+        b.caps(venue_coinbase::CoinbaseSpot::default_caps(|s| (s == "USD").then_some(usd)));
+        b.fee(FeeSpec {
+            venue: cb,
+            tier: 0,
+            fee: FeePair {
+                maker: Rate(4_000_000),
+                taker: Rate(6_000_000),
+            },
+        });
+        for r in venue_coinbase::CoinbaseSpot::rate_rules() {
+            b.limit(
+                cb,
+                RateLimit {
+                    scope: r.scope,
+                    bucket: r.bucket,
+                    limit: r.limit,
+                    window_ms: r.window_ms,
+                    default_cost: 1,
+                },
+            );
+        }
+    }
     for (i, s) in slots.iter().enumerate() {
         b.inst(InstSpec {
             id: InstId(i as u32 + 1),
@@ -783,6 +884,27 @@ fn write_pm(
             tick_str: "0.01".into(),
             lot_str: "0.00001".into(),
             min_qty_str: "0.00001".into(),
+            ..InstSpec::default()
+        });
+    }
+    if coinbase {
+        // Market data only: no account; the maker's second reference group (InstId 8).
+        b.inst(InstSpec {
+            id: cb_ref,
+            venue: cb,
+            symbol: "BTC-USD".into(),
+            kind: InstKind::Spot,
+            asset: btc,
+            quote: usd,
+            tick: 100,
+            lot: 1,
+            min_qty: Qty(1),
+            max_qty: Qty(100_000_000_000),
+            min_notional: Notional(1_000_000),
+            book_window: 4096,
+            tick_str: "0.01".into(),
+            lot_str: "0.00000001".into(),
+            min_qty_str: "0.00000001".into(),
             ..InstSpec::default()
         });
     }
@@ -846,11 +968,12 @@ fn write_pm(
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).map_err(|e| format!("refdata: {e:?}"))?;
     let schema = desc.schema;
-    // Groups: one per slot (and the reference); the probe has one, slot InstId 1.
+    // Groups: one per slot (and the reference, then the Coinbase reference); the probe has one,
+    // slot InstId 1.
     let n = if probe {
         1
     } else {
-        slots.len() as u16 + u16::from(maker)
+        slots.len() as u16 + u16::from(maker) + u16::from(coinbase)
     };
     let field =
         |name: &str| (0..schema.n_fields()).position(|i| schema.field(i).is_some_and(|f| f.name == name));
@@ -905,7 +1028,13 @@ fn write_pm(
     };
     let mut params = h.as_bytes().to_vec();
     for i in 0..usize::from(n) {
-        let (asset, venue) = if i < slots.len() { (token(i), v) } else { (btc, bn) };
+        let (asset, venue) = if i < slots.len() {
+            (token(i), v)
+        } else if i == slots.len() {
+            (btc, bn)
+        } else {
+            (btc, cb)
+        };
         let g = GroupSpec {
             id: GroupId::compose(StrategyId(1), i as u32 + 1).ok_or("group id")?,
             asset,
@@ -1013,6 +1142,10 @@ fn write_pm(
     let mut ledger = LedgerConfig::default();
     ledger.stable_par_fallback.clear();
     ledger.par_assets.push(hft_ledger::AssetName::new("USDC"));
+    // Coinbase quotes BTC in USD: valued at par (no position is ever held on it).
+    if coinbase {
+        ledger.par_assets.push(hft_ledger::AssetName::new("USD"));
+    }
     let caps = Capacities {
         max_insts: 16,
         max_cells_total: 32,
@@ -1022,10 +1155,17 @@ fn write_pm(
         max_groups_per_instance: 16,
         max_instances: 4,
     };
-    let mut engine = engine_base(&rd, &caps, ledger, if maker { vec![v, bn] } else { vec![v] });
+    let mut feed_venues = vec![v];
+    if maker {
+        feed_venues.push(bn);
+    }
+    if coinbase {
+        feed_venues.push(cb);
+    }
+    let mut engine = engine_base(&rd, &caps, ledger, feed_venues.clone());
     engine.drain_timeout_ms = 3000;
     engine.gws.venues.clear();
-    engine.feeds = VenueSet((1 << v.0) | if maker { 1 << bn.0 } else { 0 });
+    engine.feeds = VenueSet(feed_venues.iter().fold(0u64, |m, x| m | 1u64 << x.0));
     engine.seq.rings[7] = RingLimit::default();
     engine.seq.allow_missing_standby = 1;
     // Every place is GTD: its lifetime is the expiry window, a NotFound past it + 500 ms ends the
@@ -1099,7 +1239,7 @@ bind_device = '{bind_device}'
 live_feed = true
 [venues.pm.feed]
 depth_conns = 2
-{bn_text}[sim]
+{bn_text}{cb_text}[sim]
 {maker_fill}seed = 123
 entry_us = 100
 resp_us = 100
@@ -1121,6 +1261,15 @@ quote_interval_ms = 1000
         } else {
             String::new()
         },
+        cb_text = if coinbase {
+            format!(
+                "[venues.cb]\nprotocol = 'coinbase-spot'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
+                 src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n",
+                cb.0
+            )
+        } else {
+            String::new()
+        },
         maker_fill = if maker { "maker_fill = 'queue'\n" } else { "" },
     );
     for (name, task, nice) in [
@@ -1137,6 +1286,12 @@ quote_interval_ms = 1000
     }
     if maker {
         for (name, task, nice) in [("feed-bn", "feed:bn", 0), ("build-bn", "conn-builder:bn", 10)] {
+            text +=
+                &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+        }
+    }
+    if coinbase {
+        for (name, task, nice) in [("feed-cb", "feed:cb", 0), ("build-cb", "conn-builder:cb", 10)] {
             text +=
                 &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
         }
@@ -1182,7 +1337,7 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     let instance = table(config.get_mut("instance"))?;
     instance.insert("name".into(), "prod".into());
     instance.insert("order_env".into(), "prod".into());
-    for name in ["pm", "bn"] {
+    for name in ["pm", "bn", "cb"] {
         if let Some(v) = config["venues"].get_mut(name).and_then(toml::Value::as_table_mut) {
             v.remove("live_feed");
         }

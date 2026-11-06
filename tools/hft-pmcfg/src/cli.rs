@@ -10,7 +10,7 @@ pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
          [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
-         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...] \
+         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
 }
@@ -35,6 +35,9 @@ pub struct Cmd {
     /// `--param NAME=RAW`, in order (checked against the binary-maker schema; with
     /// `--taker-probe` against pm-taker-probe's).
     pub params: Vec<(String, i64)>,
+    /// `[venues.cb]` (Coinbase BTC-USD reference) in the maker and live configurations; false =
+    /// `--no-coinbase`.
+    pub coinbase: bool,
     pub root: PathBuf,
     pub hot: PathBuf,
     pub src_ip: String,
@@ -107,6 +110,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut group_cap = None;
     let mut no_presign = false;
     let mut no_cancel_race = false;
+    let mut no_coinbase = false;
     let mut extra = Vec::new();
     let mut params = Vec::new();
     let mut pos: Vec<String> = Vec::new();
@@ -205,6 +209,10 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_cancel_race, "--no-cancel-race")?;
                 no_cancel_race = true;
             }
+            "--no-coinbase" => {
+                once(no_coinbase, "--no-coinbase")?;
+                no_coinbase = true;
+            }
             "--param" => {
                 let p = next("--param", "NAME=RAW")?;
                 params.push(crate::parse_param(&p)?);
@@ -243,6 +251,9 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     if !params.is_empty() && !maker && live.is_none() {
         return Err("--param needs --maker or --live".into());
     }
+    if no_coinbase && !maker && live.is_none() {
+        return Err("--no-coinbase needs --maker or --live".into());
+    }
     if extra.len() > MAX_EXTRA_ACCOUNTS {
         return Err(format!(
             "--live-account/--account: at most {} accounts per venue",
@@ -268,6 +279,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 presign: !no_presign,
                 cancel_race: !no_cancel_race,
                 extra_accounts: extra,
+                coinbase: !no_coinbase,
             };
             l.check()?;
             if probe { Mode::LiveProbe(l) } else { Mode::Live(l) }
@@ -280,6 +292,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     Ok(Cmd {
         mode,
         params,
+        coinbase: !no_coinbase,
         root: PathBuf::from(take()),
         hot: PathBuf::from(take()),
         src_ip: take(),
@@ -301,9 +314,16 @@ pub fn run(cmd: &Cmd) -> Result<PathBuf, String> {
         Mode::LiveProbe(l) => {
             crate::write_polymarket_taker_probe_live(root, hot, user, pipeline, ip, dev, l, &cmd.params)
         }
-        Mode::Maker => {
-            crate::write_polymarket_maker_sim_with(root, hot, user, pipeline, ip, dev, &cmd.params)
-        }
+        Mode::Maker => crate::write_polymarket_maker_sim_opts(
+            root,
+            hot,
+            user,
+            pipeline,
+            ip,
+            dev,
+            &cmd.params,
+            cmd.coinbase,
+        ),
         Mode::Sim => crate::write_polymarket_sim(root, hot, user, pipeline, ip, dev),
     }
 }
