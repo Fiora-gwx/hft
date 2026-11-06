@@ -87,6 +87,7 @@ pub fn apply(
     if let Some(m) = &c.maker_fill {
         *maker_fill = match m.as_str() {
             "queue_cap" => MakerFill::QueueCap,
+            "queue_strict" => MakerFill::QueueStrict,
             "queue" => MakerFill::Queue,
             "through" => MakerFill::TradeThrough,
             _ => return Err(format!("calibration: maker_fill {m}")),

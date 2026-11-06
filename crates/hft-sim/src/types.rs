@@ -43,6 +43,11 @@ pub enum MakerFill {
     /// consumes `ahead` first and fills the rest; a trade through the price, or the opposite side
     /// crossing the price, fills the whole remainder.
     QueueCap,
+    /// `QueueCap` without the cap: the quantity ahead is the level's displayed size when the
+    /// order arrives and only trades at the price consume it (cancels never move the order up).
+    /// Fills: trades at the price beyond the quantity ahead; a trade through the price or the
+    /// opposite side crossing it fills the whole remainder. The research default (2026-11-06).
+    QueueStrict,
 }
 
 /// `[sim]` of the hft-core configuration (README "配置"). `seed` has no default: the only

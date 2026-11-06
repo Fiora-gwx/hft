@@ -570,3 +570,29 @@ fn sim_243_exchange_time_matching() {
     assert!(place_then_print(with_cap(50_000)).is_empty(), "SIM-243.4");
     assert_eq!(place_then_print(race()), vec![(px("0.45"), q("10"))], "SIM-243.4");
 }
+
+#[test]
+fn sim_244_queue_strict() {
+    let d = VenueModel::default;
+    // .1 the level shrinks to 20 (cancels): the 50 ahead stay; a 30-share sell at the price fills
+    // nothing (QueueCap would fill 10, SIM-232.1).
+    let (mut s, o) = resting(MakerFill::QueueStrict, d());
+    s.topn(ms(150), UP_B5, &[("0.47", "50")], &[("0.45", "20")]);
+    s.trade_by(ms(200), UP_B5, "0.45", "30", Side::Sell);
+    s.run_to(ms(210));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-244.1");
+    // .2 trades at the price beyond the 50 ahead fill the rest.
+    s.trade_by(ms(220), UP_B5, "0.45", "30", Side::Sell);
+    s.run_to(ms(230));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("10"))], "SIM-244.2");
+    // .3 one share traded through the price fills the whole remainder.
+    let (mut s, o) = resting(MakerFill::QueueStrict, d());
+    s.trade_by(ms(200), UP_B5, "0.44", "1", Side::Sell);
+    s.run_to(ms(210));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("100"))], "SIM-244.3");
+    // .4 the ask crossing below the price fills the whole remainder.
+    let (mut s, o) = resting(MakerFill::QueueStrict, d());
+    s.topn(ms(200), UP_B5, &[("0.44", "1")], &[("0.43", "5")]);
+    s.run_to(ms(210));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("100"))], "SIM-244.4");
+}

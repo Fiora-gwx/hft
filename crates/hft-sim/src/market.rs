@@ -112,7 +112,16 @@ impl SimExchange {
     pub(crate) fn queue_model(&self) -> bool {
         matches!(
             self.tune.maker_fill,
-            crate::types::MakerFill::Queue | crate::types::MakerFill::QueueCap
+            crate::types::MakerFill::Queue | crate::types::MakerFill::QueueCap | crate::types::MakerFill::QueueStrict
+        )
+    }
+
+    /// `QueueCap` / `QueueStrict`: a trade through the price or a crossing book fills the whole
+    /// remainder (not only the traded or crossing quantity).
+    fn full_remainder(&self) -> bool {
+        matches!(
+            self.tune.maker_fill,
+            crate::types::MakerFill::QueueCap | crate::types::MakerFill::QueueStrict
         )
     }
 
@@ -378,7 +387,7 @@ impl SimExchange {
 
     /// Trade-through of the public trade `(px, qty)` on resting orders of inst `ii`.
     fn trade_through(&mut self, ii: usize, px: i64, qty: i64, t: u64, ex_ts: i64) {
-        let qty = if self.tune.maker_fill == crate::types::MakerFill::QueueCap {
+        let qty = if self.full_remainder() {
             i64::MAX
         } else {
             qty
@@ -445,6 +454,7 @@ impl SimExchange {
             return;
         }
         let cap = self.tune.maker_fill == crate::types::MakerFill::QueueCap;
+        let strict = self.tune.maker_fill == crate::types::MakerFill::QueueStrict;
         for ai in 0..self.accts.len() {
             let n = self
                 .accts
@@ -462,6 +472,10 @@ impl SimExchange {
                 if cap {
                     x.lvl = shown;
                     x.ahead = x.ahead.min(shown);
+                    continue;
+                }
+                if strict {
+                    x.lvl = shown;
                     continue;
                 }
                 if x.unexp > 0 && ex_ts.saturating_sub(x.unexp_ts) > QUEUE_MATCH_NS {
@@ -599,7 +613,7 @@ impl SimExchange {
                         .iter()
                         .filter(|(lp, _)| if side == Side::Buy { *lp < o.px } else { *lp > o.px })
                         .fold(0i64, |s, (_, q)| s.saturating_add(*q));
-                    let q = if self.tune.maker_fill == crate::types::MakerFill::QueueCap {
+                    let q = if self.full_remainder() {
                         o.remaining()
                     } else {
                         o.remaining().min(total.saturating_sub(used))

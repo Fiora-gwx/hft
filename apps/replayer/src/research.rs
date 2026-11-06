@@ -10,7 +10,7 @@ use crate::Failure;
 
 const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [--account N]... \
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
-[--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
+[--maker-fill queue|queue-cap|queue-strict|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
 [--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--features EVERY_MS]";
 
@@ -87,8 +87,9 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                 sim.maker_fill = match value.as_str() {
                     "queue" => hft_sim::MakerFill::Queue,
                     "queue-cap" => hft_sim::MakerFill::QueueCap,
+                    "queue-strict" => hft_sim::MakerFill::QueueStrict,
                     "through" => hft_sim::MakerFill::TradeThrough,
-                    _ => return Err(format!("--maker-fill {value}: queue|queue-cap|through")),
+                    _ => return Err(format!("--maker-fill {value}: queue|queue-cap|queue-strict|through")),
                 }
             }
             "--calib" => {
