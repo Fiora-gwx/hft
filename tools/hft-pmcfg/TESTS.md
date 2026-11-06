@@ -15,9 +15,9 @@ spec: README.md
 | 概要 | PMC-005 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 见子节 |
-| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007 |
+| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009 |
 | 多账户 | PMC-001、PMC-003、PMC-004 |
-| 库 | PMC-004、PMC-005、PMC-006、PMC-007 |
+| 库 | PMC-004、PMC-005、PMC-006、PMC-007、PMC-008 |
 | 实现说明 | PMC-005、PMC-006 |
 | 延迟与资源契约 | 不适用:无门槛 |
 | 测试与验收 | 不适用:非规范 |
@@ -153,6 +153,34 @@ spec: README.md
 | PMC-007.4 | `risk_params.bin` | 价格带含 `rr_max_cross = PM_PROBE_RR_MAX_CROSS`(做市配置不含);账户与 venue 限额行逐项相同 |
 | PMC-007.5 | 参数 `clip_shares=5` | `Err`,含 `not a pm-taker-probe parameter` |
 
+### PMC-008 Coinbase 第二参考行情 `[venues.cb]`
+
+- 规则:[命令行](README.md#命令行)(`--no-coinbase`)、[库](README.md#库)
+- 级别:unit
+- 里程碑:M6
+- 前置:`write_polymarket_maker_sim` 与 `write_polymarket_maker_sim_opts(.., coinbase = false)` 写到两个目录;`write_polymarket_maker_live`(`PmLive` UID `12345`、目录 k1)`coinbase` 为 true 与 false 各一次;工具以 `--live 12345 k1 --no-coinbase` 再写一次
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_008_coinbase_reference`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-008.1 | 缺省的挂单模拟 | `core.toml` 含 `[venues.cb]`(`coinbase-spot`、`id = 16`、`max_sub_insts = 1`)与 `feed:cb`/`conn-builder:cb` 线程;refdata 中 venue 16 只有 InstId 8 `BTC-USD`、`Exchange::Coinbase`、与 InstId 7 同一 BTC 资产,端点依次为两条 `wss://ws-feed.exchange.coinbase.com` 与 `https://api.exchange.coinbase.com` |
+| PMC-008.2 | 两个目录的 `strategy_params.bin` | 相同(Coinbase 不建 group) |
+| PMC-008.3 | `coinbase = false` | `core.toml` 无 `venues.cb`、无 `feed:cb`;refdata 无 venue 16 的 inst |
+| PMC-008.4 | 实盘配置 | `venues.cb` 无 `live_feed`、无 `accounts`;`coinbase = false` 时无 `venues.cb`;工具 `--no-coinbase` 的六个文件与库输出逐字节相同 |
+
+### PMC-009 `--no-coinbase` 的解析
+
+- 规则:[命令行](README.md#命令行)
+- 级别:table
+- 里程碑:M6
+- 实现:`tools/hft-pmcfg/tests/cli.rs::pmc_009_no_coinbase_flag`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| PMC-009.1 | 只有位置参数;`--live 12345 k1` | `coinbase = true`(实盘的 `PmLive.coinbase` 同为 true) |
+| PMC-009.2 | `--maker --no-coinbase`;`--no-coinbase --live 12345 k1` | 模式不变,`coinbase = false`(含 `PmLive.coinbase`) |
+| PMC-009.3 | `--no-coinbase` 无模式选项;`--maker --no-coinbase --no-coinbase` | 拒绝:`--no-coinbase needs --maker or --live`;`given twice` |
+
 ## 验收
 
-PMC-001–PMC-007 全部通过。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。
+PMC-001–PMC-009 全部通过。2026-11-07 一次性对照:加入 Coinbase 之前的 `hft-pmcfg` 与带 `--no-coinbase` 的当前版本对 6 组命令行(无模式选项;`--maker`;`--maker --param clip_shares=7`;`--live`;`--live --live-account … --no-presign`;`--live --taker-probe`)的输出文件 `cmp` 全部相同。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。

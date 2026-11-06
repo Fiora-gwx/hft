@@ -26,6 +26,7 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         group_cap: None,
         presign: true,
         extra_accounts: extra,
+        coinbase: true,
     }
 }
 
@@ -439,4 +440,92 @@ fn pmc_007_taker_probe_live_output() {
     )
     .unwrap_err();
     assert!(e.contains("not a pm-taker-probe parameter"), "PMC-007.5 {e}");
+}
+
+/// `[venues.cb]`: Coinbase BTC-USD (InstId 8) in the maker and live configurations by default;
+/// `--no-coinbase` writes neither the venue nor its refdata.
+#[test]
+fn pmc_008_coinbase_reference() {
+    let d = tempfile::tempdir().unwrap();
+    let p = |s: &str| d.path().join(s);
+    let s = |p: &Path| p.display().to_string();
+    let hot = p("hot");
+    let (with, without) = (p("with"), p("without"));
+    hft_pmcfg::write_polymarket_maker_sim(&with, &hot, None, None, "10.0.0.5", "ens5").unwrap();
+    hft_pmcfg::write_polymarket_maker_sim_opts(&without, &hot, None, None, "10.0.0.5", "ens5", &[], false)
+        .unwrap();
+    let core = |dir: &Path| std::fs::read_to_string(dir.join("core.toml")).unwrap();
+    let rd = |dir: &Path| RefData::load(&std::fs::read(dir.join("refdata.bin")).unwrap(), None).unwrap();
+    // .1 the venue, its threads and its refdata.
+    let t = core(&with);
+    assert!(
+        t.contains("[venues.cb]\nprotocol = 'coinbase-spot'\nid = 16\nmax_sub_insts = 1\n"),
+        "PMC-008.1"
+    );
+    assert!(t.contains("task = 'feed:cb'") && t.contains("task = 'conn-builder:cb'"), "PMC-008.1");
+    let r = rd(&with);
+    let cb = VenueId::COINBASE_SPOT;
+    assert_eq!(r.insts_of_venue(cb), &[hft_types::InstId(8)], "PMC-008.1");
+    assert_eq!(&*r.inst_meta(hft_types::InstId(8)).symbol, "BTC-USD", "PMC-008.1");
+    assert_eq!(r.venue(cb).exchange, hft_refdata::Exchange::Coinbase, "PMC-008.1");
+    assert_eq!(
+        r.inst(hft_types::InstId(8)).asset,
+        r.inst(hft_types::InstId(7)).asset,
+        "PMC-008.1 the same BTC asset as the Binance reference"
+    );
+    let urls: Vec<&str> = r
+        .endpoints(cb, hft_refdata::EndpointEnv::Prod)
+        .iter()
+        .map(|e| &*e.url)
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "wss://ws-feed.exchange.coinbase.com",
+            "wss://ws-feed.exchange.coinbase.com",
+            "https://api.exchange.coinbase.com"
+        ],
+        "PMC-008.1"
+    );
+    // .2 no group and no account on it: strategy parameters are those of the configuration without.
+    assert_eq!(
+        std::fs::read(with.join("strategy_params.bin")).unwrap(),
+        std::fs::read(without.join("strategy_params.bin")).unwrap(),
+        "PMC-008.2"
+    );
+    // .3 --no-coinbase: nothing of it.
+    let t = core(&without);
+    assert!(!t.contains("venues.cb") && !t.contains("feed:cb"), "PMC-008.3");
+    assert!(rd(&without).insts_of_venue(cb).is_empty(), "PMC-008.3");
+    // .4 live: the venue stays, without `live_feed`; `--no-coinbase` on the command line.
+    let (lw, lo) = (p("lw"), p("lo"));
+    let mut l = live(d.path(), vec![]);
+    hft_pmcfg::write_polymarket_maker_live(&lw, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
+    let v: toml::Value = toml::from_str(&core(&lw)).unwrap();
+    let cbv = &v["venues"]["cb"];
+    assert_eq!(cbv["protocol"].as_str(), Some("coinbase-spot"), "PMC-008.4");
+    assert!(cbv.get("live_feed").is_none() && cbv.get("accounts").is_none(), "PMC-008.4");
+    l.coinbase = false;
+    hft_pmcfg::write_polymarket_maker_live(&lo, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
+    let v: toml::Value = toml::from_str(&core(&lo)).unwrap();
+    assert!(v["venues"].get("cb").is_none(), "PMC-008.4");
+    let tl = p("tool-lo");
+    let (code, _, err) = tool(&[
+        "--live",
+        "12345",
+        &s(&p("k1")),
+        "--no-coinbase",
+        &s(&tl),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(0), "PMC-008.4: {err}");
+    for f in FILES {
+        assert_eq!(
+            std::fs::read(tl.join(f)).unwrap(),
+            std::fs::read(lo.join(f)).unwrap(),
+            "PMC-008.4 {f}"
+        );
+    }
 }
