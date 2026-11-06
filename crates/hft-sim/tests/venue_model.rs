@@ -503,3 +503,70 @@ fn sim_242_taker_nofill_reject() {
     s.run_to(ms(200));
     assert_eq!(s.whats(A9, o), vec![Ack, Expired], "SIM-242.4");
 }
+
+/// A Down-taker print on Up @ `p` that happened at the venue at `ex` and was received at `rx`
+/// (record time and `sw_rx_ns`).
+fn late_print(s: &mut Sim, ex: u64, rx: u64, p: &str, x: &str) {
+    let mut h = mhdr(B5, UP_B5, ex as i64);
+    h.sw_rx_ns = rx as i64;
+    let tr = hft_event::Trade {
+        h,
+        px: px(p),
+        qty: q(x),
+        trade_id: 1,
+        taker_side: Side::Sell,
+        _pad: [0; 7],
+    };
+    s.feed(rx, hft_sim::MarketEventRef::Trade(&tr));
+}
+
+#[test]
+fn sim_243_exchange_time_matching() {
+    let with_cap = |cap| VenueModel {
+        ex_time_max_us: cap,
+        ..race()
+    };
+    // The resting 100 @ 0.45 gets a cancel arriving at 120.1 ms; a print through the price
+    // happened at the venue at 120 ms and is received at 140 ms.
+    let run = |vm| {
+        let (mut s, o) = resting(MakerFill::QueueCap, vm);
+        s.op(
+            A9,
+            hft_event::GwOp::Cancel,
+            UP_B5,
+            o,
+            q("100"),
+            px("0.45"),
+            ms(120) - 400_000,
+        );
+        late_print(&mut s, ms(120), ms(140), "0.44", "1");
+        s.run_to(ms(200));
+        (s, o)
+    };
+    // .1 on: the print matches at its venue time, before the cancel: filled, cancel rejected.
+    let (s, o) = run(with_cap(50_000));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("100"))], "SIM-243.1");
+    // (the CancelReject's 1 ms response can be reported before the fill's)
+    let w = s.whats(A9, o);
+    assert!(
+        w.contains(&OrderEventKind::Fill) && w.contains(&OrderEventKind::CancelReject),
+        "SIM-243.1 {w:?}"
+    );
+    // .2 off: matched at the receive time, the cancel is in first.
+    let (s, o) = run(race());
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-243.2");
+    // .3 the lag is capped (5 ms): matched at 135 ms, after the cancel.
+    let (s, o) = run(with_cap(5_000));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-243.3");
+    // .4 an order arriving (123 ms) after the venue-side print (122 ms) is not filled by it; off,
+    // the print received at 140 ms fills it.
+    let place_then_print = |vm| {
+        let mut s = binary(MakerFill::QueueCap, vm);
+        let o = s.place(A9, UP_B5, Buy, "10", "0.45", Tif::Gtc, ms(121));
+        late_print(&mut s, ms(122), ms(140), "0.44", "1");
+        s.run_to(ms(200));
+        s.fills_of(A9, o)
+    };
+    assert!(place_then_print(with_cap(50_000)).is_empty(), "SIM-243.4");
+    assert_eq!(place_then_print(race()), vec![(px("0.45"), q("10"))], "SIM-243.4");
+}

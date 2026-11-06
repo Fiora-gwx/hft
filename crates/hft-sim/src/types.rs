@@ -186,6 +186,10 @@ pub struct VenueModel {
     /// An Ioc/Fok order that matches nothing is rejected (`RejectReason::NoMatch`, no Ack) instead
     /// of Ack + `Expired`: the Polymarket FAK/FOK HTTP 400 answer (venue-polymarket "吃单").
     pub taker_nofill_reject: bool,
+    /// Exchange-time matching (µs cap; 0 = off): a market record received at `t` happened at the
+    /// venue `lag = sw_rx_ns − ex_ts_ns` earlier (clamped to 0..cap), so only commands arriving
+    /// before `t − lag` are executed before it and it matches at `t − lag` (README "场所行为选项").
+    pub ex_time_max_us: u32,
 }
 
 impl Default for VenueModel {
@@ -199,6 +203,7 @@ impl Default for VenueModel {
             fill_resp_us: None,
             pools: None,
             taker_nofill_reject: false,
+            ex_time_max_us: 0,
         }
     }
 }

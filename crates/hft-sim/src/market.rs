@@ -19,6 +19,19 @@ pub(crate) struct ViewInfo {
     pub top_only: bool,
 }
 
+/// The market header of a record.
+pub(crate) fn hdr_of(m: &MarketEventRef<'_>) -> MarketHdr {
+    match m {
+        MarketEventRef::Bbo(b) => b.h,
+        MarketEventRef::L2Snapshot(p) => p.hdr.h,
+        MarketEventRef::L2Batch(b) => b.hdr.h,
+        MarketEventRef::Trade(x) => x.h,
+        MarketEventRef::Funding(x) => x.h,
+        MarketEventRef::Mark(x) => x.h,
+        MarketEventRef::Index(x) => x.h,
+    }
+}
+
 impl SimExchange {
     /// Everything due strictly before `t` (commands) or at/before `t` (transfers, late fees,
     /// periodic reports), in time order.
@@ -132,15 +145,7 @@ impl SimExchange {
     }
 
     pub(crate) fn apply_market(&mut self, t: u64, m: MarketEventRef<'_>) {
-        let h: MarketHdr = match m {
-            MarketEventRef::Bbo(b) => b.h,
-            MarketEventRef::L2Snapshot(p) => p.hdr.h,
-            MarketEventRef::L2Batch(b) => b.hdr.h,
-            MarketEventRef::Trade(x) => x.h,
-            MarketEventRef::Funding(x) => x.h,
-            MarketEventRef::Mark(x) => x.h,
-            MarketEventRef::Index(x) => x.h,
-        };
+        let h = hdr_of(&m);
         // Funding settles before the record that reaches the settlement time is applied.
         self.settle_due(h.venue, h.ex_ts_ns, t);
         let Some(ii) = self.inst_index(h.inst) else {

@@ -38,6 +38,8 @@ struct CalibJson {
     fill_resp_us: Option<u32>,
     /// FAK/FOK with no match → Reject (the venue's HTTP 400) instead of Ack + Expired.
     taker_nofill_reject: Option<bool>,
+    /// Exchange-time matching: cap of the per-record md lag, µs (0 = off).
+    ex_time_max_us: Option<u32>,
     split_us: Option<u32>,
     min_n: Option<u16>,
     /// Venue-load thresholds (minute median of per-second md-lag p90), ms; `load` = number of
@@ -117,6 +119,9 @@ pub fn apply(
     }
     if let Some(f) = c.fill_resp_us {
         vm.fill_resp_us = Some(f);
+    }
+    if let Some(x) = c.ex_time_max_us {
+        vm.ex_time_max_us = x;
     }
     if let Some(r) = c.taker_nofill_reject {
         vm.taker_nofill_reject = r;

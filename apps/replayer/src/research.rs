@@ -12,7 +12,7 @@ const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
 [--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
-[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--features EVERY_MS]";
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--features EVERY_MS]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -117,6 +117,13 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                     slow_ppm: ppm,
                     resp_us: resp,
                 });
+            }
+            "--ex-time-max-us" => {
+                sim.venue.ex_time_max_us =
+                    u32::try_from(num(&value)?).map_err(|_| "--ex-time-max-us too large")?;
+            }
+            "--sim-cash" => {
+                sim.cash = Some(i64::try_from(num(&value)?).map_err(|_| "--sim-cash too large")?);
             }
             "--taker-resp-us" => {
                 let r = u32::try_from(num(&value)?).map_err(|_| "--taker-resp-us too large")?;
