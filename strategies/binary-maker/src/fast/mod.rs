@@ -43,6 +43,72 @@ pub const CL_WARMUP_KIND: u16 = 1;
 pub const CL_FRESH_S: i64 = 3;
 /// `InjectWarmup` local kind of a chop-gate seed (README "规则" 13 后的"震荡开关预热").
 pub const CHOP_WARMUP_KIND: u16 = 2;
+/// `InjectWarmup` local kind of Coinbase samples (cb_feed sidecar; v37 Coinbase guard).
+pub const CB_WARMUP_KIND: u16 = 3;
+/// Coinbase BBO samples kept (cb_feed sends a few per second).
+pub const CB_N: usize = 512;
+/// A Coinbase sample older than this (ns) is not the current price.
+pub const CB_FRESH_NS: i64 = 5_000_000_000;
+
+/// Coinbase BBO mids (v37): engine time of arrival and bid + ask (1e-8 USD) of the latest
+/// `CB_N` samples; not in the snapshot.
+#[derive(Clone, Debug)]
+pub struct CbFeed {
+    pub t: Box<[i64; CB_N]>,
+    pub mid_x2: Box<[i64; CB_N]>,
+    pub pos: usize,
+    pub n: usize,
+}
+
+impl Default for CbFeed {
+    fn default() -> Self {
+        CbFeed {
+            t: Box::new([i64::MIN; CB_N]),
+            mid_x2: Box::new([0; CB_N]),
+            pos: 0,
+            n: 0,
+        }
+    }
+}
+
+impl CbFeed {
+    /// Payload v1 (little endian): version u8 = 1, count u16, then count × 41-byte samples (kind
+    /// u8, local receive ns i64, exchange ns i64, a, b, c i64). Kind 1 is a BBO (a bid, b ask,
+    /// 1e-8 USD); other kinds are ignored. A sample's time is the arrival `ens` less its receive
+    /// age against the command's last sample.
+    pub fn on_payload(&mut self, payload: &[u8], ens: i64) {
+        if payload.first() != Some(&1) || payload.len() < 3 {
+            return;
+        }
+        let n = usize::from(u16::from_le_bytes([payload[1], payload[2]]));
+        let body = payload.get(3..).unwrap_or(&[]);
+        let f = |s: &[u8], o: usize| s.get(o..o + 8).and_then(|b| <[u8; 8]>::try_from(b).ok()).map(i64::from_le_bytes);
+        let last_rx = body.chunks_exact(41).take(n).filter_map(|s| f(s, 1)).max().unwrap_or(0);
+        for s in body.chunks_exact(41).take(n) {
+            let (Some(rx), Some(a), Some(b)) = (f(s, 1), f(s, 17), f(s, 25)) else { continue };
+            if s.first() != Some(&1) || a <= 0 || b < a {
+                continue;
+            }
+            let t = ens.saturating_sub(last_rx.saturating_sub(rx).max(0));
+            if let (Some(x), Some(y)) = (self.t.get_mut(self.pos), self.mid_x2.get_mut(self.pos)) {
+                *x = t;
+                *y = a.saturating_add(b);
+            }
+            self.pos = (self.pos + 1) % CB_N;
+            self.n = self.n.saturating_add(1);
+        }
+    }
+    /// Mid (× 2) of the latest sample at or before `t`, if at most `CB_FRESH_NS` older than `t`.
+    pub fn at(&self, t: i64) -> Option<i64> {
+        let mut best: Option<(i64, i64)> = None;
+        for (x, y) in self.t.iter().zip(self.mid_x2.iter()) {
+            if *x <= t && *x > t.saturating_sub(CB_FRESH_NS) && best.is_none_or(|(bt, _)| *x > bt) {
+                best = Some((*x, *y));
+            }
+        }
+        best.map(|(_, m)| m)
+    }
+}
 
 /// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
 /// second and the latest sample; not in the snapshot.
@@ -518,6 +584,10 @@ pub struct Fast {
     pub ofi: Vec<OfiRing>,
     /// v35 trade-print count per slot leg (quote order); not in the snapshot.
     pub trd: Vec<TrdRing>,
+    /// v37 Coinbase samples and, per slot leg (quote order), the engine time its guard holds until;
+    /// not in the snapshot.
+    pub cb: CbFeed,
+    pub cb_until: Vec<i64>,
 }
 
 impl Fast {
@@ -551,6 +621,8 @@ impl Fast {
             },
             ofi: Vec::with_capacity(cap),
             trd: Vec::with_capacity(cap),
+            cb: CbFeed::default(),
+            cb_until: Vec::with_capacity(cap),
         };
         f.on_params(p, groups);
         f
@@ -606,6 +678,8 @@ impl Fast {
         self.ofi.resize(self.quotes.len(), OfiRing::default());
         self.trd.clear();
         self.trd.resize(self.quotes.len(), TrdRing::default());
+        self.cb_until.clear();
+        self.cb_until.resize(self.quotes.len(), i64::MIN);
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -769,6 +843,12 @@ impl Fast {
             EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
             EventRef::Warmup { local_kind, payload, .. } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
+            EventRef::Warmup { local_kind, payload, .. } if local_kind == CB_WARMUP_KIND => {
+                self.cb.on_payload(payload, v.now().engine_ns);
+                if self.p.defaults().cb_win_ms > 0 {
+                    self.run(v, ctx);
+                }
+            }
             EventRef::Book { inst, .. } => {
                 if self.p.defaults().ofi_win_ms > 0 {
                     let ens = v.now().engine_ns;
@@ -1097,6 +1177,30 @@ impl Fast {
             let root_milli = isqrt(u128::try_from(v_ms).unwrap_or(1) * 1_000) as i128;
             (implied * root_milli / 1_000) as i64
         });
+        // v37 Coinbase guard: the Up fair-value move the Coinbase mid implies over cb_win_ms,
+        // Φ(Φ⁻¹(Up mid) + r / den) − Up mid; at least cb_shock against a leg holds it cb_hold_ms.
+        if d.cb_win_ms > 0 && d.cb_shock.0 > 0 && den > 0 {
+            let ens = now.engine_ns;
+            if let (Some(a), Some(b)) = (self.cb.at(ens), self.cb.at(ens.saturating_sub(i64::from(d.cb_win_ms) * 1_000_000)))
+                && b > 0
+            {
+                let one = i128::from(ONE);
+                let r = (i128::from(a) - i128::from(b)) * one / i128::from(b);
+                let z = (i128::from(inv_cdf(up_mid)) + r * one / i128::from(den)).clamp(-6 * one, 6 * one) as i64;
+                let shock = cdf(z) - up_mid;
+                let until = ens.saturating_add(i64::from(d.cb_hold_ms) * 1_000_000);
+                let leg = if shock <= -d.cb_shock.0 {
+                    Some(up)
+                } else if shock >= d.cb_shock.0 {
+                    Some(up.wrapping_add(1))
+                } else {
+                    None
+                };
+                if let Some(u) = leg.and_then(|k| self.cb_until.get_mut(k)) {
+                    *u = (*u).max(until);
+                }
+            }
+        }
         let lims = if d.fv_limit && quoting {
             self.fair_limits(v, start, up, den, qu.saturating_sub(qd) / i64::from(ab), now.engine_ns)
         } else {
@@ -1506,6 +1610,11 @@ impl Fast {
                 }
             };
             let no_open = no_open || quiet;
+            // v37 Coinbase guard hold (opening bids; with cb_pair every bid of the leg).
+            let cb_hold = d.cb_win_ms > 0
+                && (own_q >= other_q || d.cb_pair)
+                && self.cb_until.get(i).is_some_and(|u| ens < *u);
+            let no_open = no_open || cb_hold;
             let target = match (mine && live && !no_open && !no_pair, bid, ask) {
                 (true, Some(b), Some(a))
                     if b < a

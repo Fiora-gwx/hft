@@ -261,6 +261,28 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 );
                 continue;
             }
+            // Coinbase samples of the cb_feed sidecar (InjectWarmup local_kind 3, payload v1:
+            // version u8 = 1, count u16 LE, then count × (kind u8, local_ns, ex_ns, a, b, c i64 LE);
+            // kind 1 = BBO (a bid, b ask, 1e-8 USD), 2 = trade (a px, b qty, c side)).
+            if let Ok((_, ControlCmd::InjectWarmup { local_kind: 3, payload, .. })) = decoded {
+                if payload.len() >= 3 && payload[0] == 1 {
+                    let n_s = usize::from(u16::from_le_bytes([payload[1], payload[2]]));
+                    for s in payload[3..].chunks_exact(41).take(n_s) {
+                        let g = |o: usize| i64::from_le_bytes(s[o..o + 8].try_into().unwrap_or([0; 8]));
+                        let _ = writeln!(
+                            out,
+                            "{{\"k\":\"cb\",\"u\":{cur_u},\"eu\":{cur_eu},\"sq\":{cur_seq},\"kind\":{},\"t_ns\":{},\"ex_ns\":{},\"a\":{},\"b\":{},\"c\":{}}}",
+                            s[0],
+                            g(1),
+                            g(9),
+                            g(17),
+                            g(25),
+                            g(33)
+                        );
+                    }
+                }
+                continue;
+            }
             let Ok((
                 _,
                 ControlCmd::BindSlot {

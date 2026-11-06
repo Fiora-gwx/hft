@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 36, "BMK-024.1");
+    assert_eq!(schema.version(), 37, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1251,6 +1251,12 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 36), Some(n34 + 3), "BMK-024.32");
     let f = schema.field(n34 + 2).unwrap();
     assert_eq!((f.name, f.since, f.default), ("ab_scale", 36, 0), "BMK-024.32");
+    // .33 v37 appends the Coinbase guard (0 = off).
+    assert_eq!(n_fields_at(schema, 37), Some(n34 + 7), "BMK-024.33");
+    for (k, name) in ["cb_win_ms", "cb_shock", "cb_hold_ms", "cb_pair"].iter().enumerate() {
+        let f = schema.field(n34 + 3 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 37, 0), "BMK-024.33");
+    }
 }
 
 #[test]

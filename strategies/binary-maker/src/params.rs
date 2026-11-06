@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 36, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 37, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -376,6 +376,14 @@ hft_strategy_sdk::define_params! {
         /// clip_shares, inv_max_shares, dip_max_shares and early_cap_shares by ab_scale (the fair-value
         /// skew sees the net scaled back); 0 or 1 = off
         ab_scale: Count [min = 0, max = 4, default = 0, since = 36, relax = None],
+        /// (schema v37) Coinbase guard: the Up fair-value move implied by the Coinbase mid over the
+        /// last cb_win_ms (InjectWarmup local_kind 3 samples through the digital delta of the Up mid)
+        /// against a leg by at least cb_shock (fraction of one) blocks and cancels that leg's opening
+        /// bids for cb_hold_ms (with cb_pair also its pairing bids); 0 = off
+        cb_win_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 37, relax = None],
+        cb_shock: Rate [min = 0, max = 1_000_000_000, default = 0, since = 37, relax = None],
+        cb_hold_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 37, relax = None],
+        cb_pair: Bool [default = 0, since = 37, relax = None],
     }
 }
 
