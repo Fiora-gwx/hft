@@ -170,8 +170,44 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        // Market data only (no accounts: `read_only_error`).
+        "coinbase-spot" => build::<venue_coinbase::CoinbaseSpot>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            utc,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_coinbase::FeedCtx,
+            || (),
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
+}
+
+/// Protocols without order entry or accounts (market data only).
+pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot"];
+
+/// Load-time check: a read-only protocol takes no `accounts` (it has no order, report or account
+/// methods; venue-coinbase README "账户").
+pub fn read_only_error(name: &str, v: &Venue) -> Option<Error> {
+    (READ_ONLY_PROTOCOLS.contains(&v.protocol.as_str()) && !v.accounts.is_empty()).then(|| {
+        Error::config(
+            "ReadOnlyVenue",
+            format!(
+                "venues.{name}: {} is market data only and takes no accounts",
+                v.protocol
+            ),
+        )
+    })
 }
 
 /// Local demo credentials must never be sent to a production host hidden under a testnet tag.
@@ -184,7 +220,9 @@ pub fn local_demo_endpoint(protocol: &str, role: EndpointRole, url: &str) -> boo
     let Some(address) = url.strip_prefix(scheme) else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("binance-usdm", EndpointRole::Rest) => host == "demo-fapi.binance.com",
         ("binance-usdm", EndpointRole::OrderWs) => host == "testnet.binancefuture.com",
@@ -208,7 +246,9 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
     let Some(address) = url.strip_prefix(scheme) else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("binance-usdm", EndpointRole::Rest) => host == "fapi.binance.com",
         ("binance-usdm", _) => host == "fstream.binance.com",
@@ -218,6 +258,8 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("bitget-usdt-futures" | "bitget-spot", _) => host == "ws.bitget.com",
         ("polymarket-clob", EndpointRole::Rest) => host == "clob.polymarket.com",
         ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
+        ("coinbase-spot", EndpointRole::Rest) => host == "api.exchange.coinbase.com",
+        ("coinbase-spot", _) => host == "ws-feed.exchange.coinbase.com",
         _ => false,
     }
 }
@@ -229,7 +271,9 @@ pub fn prod_order_endpoint(protocol: &str, role: EndpointRole, url: &str) -> boo
     let Some(address) = url.strip_prefix("wss://") else {
         return false;
     };
-    let host = address.split('/').next().unwrap_or("");
+    let Some((host, _)) = host_port(address) else {
+        return false;
+    };
     match (protocol, role) {
         ("polymarket-clob", EndpointRole::OrderWs) => host == "ws-subscriptions-clob.polymarket.com",
         _ => false,
@@ -260,17 +304,31 @@ fn endpoint_for(
         .url
         .strip_prefix(scheme)
         .ok_or_else(|| Error::config("Endpoint", "requires verified TLS"))?;
-    let (host, path) = url.split_once('/').unwrap_or((url, ""));
-    if host.is_empty() || host.contains(['@', ':', '?', '#']) {
-        return Err(Error::config("Endpoint", "requires a DNS host on port 443"));
-    }
+    let path = url.split_once('/').map_or("", |(_, p)| p);
+    let (host, port) = host_port(url)
+        .ok_or_else(|| Error::config("Endpoint", "requires a DNS host, optionally with :port"))?;
     Ok(Endpoint {
         host: host.into(),
         sni: host.into(),
-        port: 443,
+        port: port.unwrap_or(443),
         path: format!("/{path}"),
         ..Endpoint::default()
     })
+}
+
+/// DNS host and optional port of a URL's authority (`host[:port]`, the part before the first `/`
+/// once the scheme is stripped). `None` for an empty host, user info, a query or fragment marker,
+/// or a port that is not a non-zero u16 (e.g. `stream.binance.com:9443`).
+pub fn host_port(address: &str) -> Option<(&str, Option<u16>)> {
+    let auth = address.split('/').next().unwrap_or("");
+    if auth.is_empty() || auth.contains(['@', '?', '#']) {
+        return None;
+    }
+    match auth.split_once(':') {
+        None => Some((auth, None)),
+        Some((h, p)) if !h.is_empty() => p.parse::<u16>().ok().filter(|p| *p > 0).map(|p| (h, Some(p))),
+        Some(_) => None,
+    }
 }
 
 pub fn credential(
@@ -437,6 +495,8 @@ where
         env: c.instance.order_env().venue_env(),
         rest_conns,
         rest_cancel_reserve,
+        cancel_race: v.gw.cancel_race.unwrap_or(false),
+        cancel_by_token: v.gw.cancel_mode == Some(crate::config::CancelMode::Market),
         oms_slots: v
             .accounts
             .iter()
@@ -659,6 +719,7 @@ where
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
             depth_conns: v.feed.depth_conns.unwrap_or(1),
+            race_rotate_s: v.feed.race_rotate_s.unwrap_or(0),
             raw_bbo,
             raw_md,
             venue: feed_venue,
@@ -1115,6 +1176,7 @@ pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
         "bitget-spot" => of::<venue_bitget::BitgetSpot>(),
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
+        "coinbase-spot" => of::<venue_coinbase::CoinbaseSpot>(),
         _ => return None,
     })
 }
@@ -1142,6 +1204,7 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
                 "Polymarket requires the polymarket Cargo feature",
             ));
         }
+        "coinbase-spot" => VenueId::COINBASE_SPOT,
         _ => return Err(Error::config("UnknownVenue", protocol)),
     };
     if id != expected {
@@ -1191,6 +1254,7 @@ pub fn shared_egress_ip(protocol: &str) -> bool {
         "bitget-spot" => venue_bitget::BitgetSpot::SHARED_EGRESS_IP,
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
+        "coinbase-spot" => venue_coinbase::CoinbaseSpot::SHARED_EGRESS_IP,
         _ => false,
     }
 }

@@ -807,7 +807,10 @@ pub struct PmLive {
     pub day_loss_carry: Option<(u32, i64)>,
     pub daily_loss_abs: Option<i64>,
     pub daily_loss_max_resumes: Option<u8>,
+    pub account_cap: Option<i64>,
+    pub group_cap: Option<i64>,
     pub presign: bool,
+    pub cancel_race: bool,
     pub extra_accounts: Vec<(String, PathBuf)>,
 }
 
@@ -820,12 +823,16 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
             day_loss_carry: l.day_loss_carry,
             daily_loss_abs: l.daily_loss_abs,
             daily_loss_max_resumes: l.daily_loss_max_resumes,
+            account_cap: l.account_cap,
+            group_cap: l.group_cap,
             presign: l.presign,
+            cancel_race: l.cancel_race,
             extra_accounts: l
                 .extra_accounts
                 .iter()
                 .map(|(uid, dir)| hft_pmcfg::LiveAccount::shorthand(uid.clone(), dir.clone()))
                 .collect(),
+            coinbase: true,
         }
     }
 }

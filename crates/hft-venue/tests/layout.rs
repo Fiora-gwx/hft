@@ -22,7 +22,7 @@ fn ven_001_inst_seq_layout() {
             offset_of!(InstSeq, resync_slot),
             offset_of!(InstSeq, _pad),
             offset_of!(InstSeq, resync_n),
-            offset_of!(InstSeq, _pad2),
+            offset_of!(InstSeq, bbo_fwd_tsc),
         ],
         [48, 49, 50, 52, 56],
         "VEN-001.3"

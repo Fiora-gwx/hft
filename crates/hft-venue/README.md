@@ -245,6 +245,8 @@ pub struct AcctDeps {
 | `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建;hft-net `rest_max_idle_ms` 非 0 时同一次检查另退役一条空闲过久的连接,补建经 build 环交给 conn-builder,下单不在新建中的连接上发出)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
 | `gw.rest_conns` | u8 | 2;hft-core 缺省取 `P::GW_REST_CONNS`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派);Polymarket 8,其余 2) | gw 每个 REST 池(每 (账户, 端点) 一个)的连接数,1..=`GW_REST_CONNS_MAX`;越界 → `InitErr::Cfg("gw.rest_conns")`。hft-core 按它定该 venue `ConnArena` 的 `Rest` 槽数并以 `GwCfg::rest_pool` 建池(hft-net `RestPool::with_lanes`) |
 | `gw.rest_cancel_reserve` | u8 | 0;hft-core 缺省取 `P::GW_REST_CANCEL_RESERVE`(Polymarket 1,其余 0) | 该池中只给撤单用的空闲连接数(hft-net 保留通道,§4 撤单优先):撤单以外的 REST 请求不占最后这几条空闲连接;≥ `gw.rest_conns` → `InitErr::Cfg("gw.rest_cancel_reserve")` |
+| `gw.cancel_race` | bool | false | 撤单赛跑(§4 "撤单赛跑"):每个 REST 撤单写出后,另在一条空闲连接上同时写出协议的伴随请求(`VenueProtocol::encode_rest_companion`);协议没有伴随请求时无效 |
+| `gw.cancel_by_token` | bool | false | 撤单方式(§4 "撤单方式";hft-core 配置键 `gw.cancel_mode = "order" \| "market"`,market = true):协议给出伴随请求时以它**代替**撤单发出(Polymarket:按 token 撤),此时不赛跑;否则照常按单撤 |
 | `gw.rotate_wait_max_ms` | u32 | 60000 | 计划切换等待"无在途"的上限;超时放弃本次,再过同样时长后重新开始等待 |
 | `gw.warm_interval_ns` | u64 | 0(关) | 空闲时"填帧 + 掩码 + scratch 加密"预热;可选,默认关,启用条件:直方图证明冷路径代价显著 |
 | `gw.id_table_cap` | u32 | 16384 | 每账户 exch id 表容量(2 的幂,≥ 2 × (OMS 槽数 + `gw.id_tomb_cap`),负载 ≤ 0.5;不满足 → `InitErr::IdTableCap`) |
@@ -354,7 +356,7 @@ struct InstSeq {
     resync_slot: u8,         // 49 占用的重同步槽,0xFF = 无(增量深度)
     _pad:        [u8; 2],    // 50
     resync_n:    u32,        // 52 连续重试次数(增量深度)
-    _pad2:       [u8; 8],    // 56
+    bbo_fwd_tsc: u64,        // 56 最近一次转发的 BBO 报价的 rx_tsc(§3a 赛跑连接的领先统计)
 }
 const _: () = assert!(core::mem::size_of::<InstSeq>() == 64);
 ```
@@ -416,7 +418,8 @@ struct BboConnLive {
 3. **存活**:每收到一帧探测回帧(Pong 或应用层 pong),若 `该回帧的 rx_tsc − pub_tsc ≥ feed.bbo_ping_ms / 2`(本连接这段时间没有向环发布任何记录),推一条 `ConnState{Alive, role=Md, conn, inst = 0, rx_tsc = 该回帧的 rx_tsc}`;否则不推——转发的 `Bbo` 本身带 `h.conn` 与 `h.rx_tsc`,就是该连接的存活证据。因此每条连接至多每秒一条 `Alive`,繁忙时为零。sequencer 取 inst 的全部成员连接中 up 者的最大存活时刻;健康连接上 `now − conn_live_tsc` ≤ `bbo_ping_ms` + 往返 ≈ 1.05 s(fstream 的 Pong 批处理另加约 50 ms),低于 `conn_liveness_ms`。
 4. **静默**:超过 `feed.bbo_dead_ms`(3 000)没有任何入向帧(从未收到入向帧的连接从 `install` 起算)→ 推 `ConnState{Degraded, reason=BBO_SILENT}`,随后按致命处理(retire、`ConnState{Down, inst = 0}`、补建);赛马池只剩一条 → `RACE_SINGLE`(只在 `feed.bbo_conns ≥ 2` 时),报价照常可用。
 5. **补帧**:某 inst 的全部 BBO 连接都断过(期间可能错过报价变化)→ 新连接订阅回执齐时推 `ConnState{Resync, role=Md, conn, inst, reason=BBO_REFRESH}`;该 inst 下一条被转发的 `Bbo` 即结束补帧(sequencer 规则)。回执齐后满 `feed.bbo_refresh_grace_ms` 交易所仍未推送的 inst(补帧失败的,从失败记录到达时再计一个宽限期),若本所支持 BBO 补帧(`FeedRuntime::new` 以 refdata 中本 venue 第一个 inst 调用一次 `P::bbo_snapshot_request`,返回 `Ok(true)` 即支持,结果缓存;运行中的请求只由 snap-fetch 生成),推 `SnapReq{Bbo, inst}`;原始响应写本任务的 raw journal。补帧中的 inst 的 `Bbo`(流上的或 snap 记录带回的)按 `update_id ≥ last_fwd` 转发,第一条被转发即结束补帧;snap 记录带回的 `update_id = 0`(响应无序号)直接转发且不改 `last_fwd`;该 inst 已结束补帧时 snap 记录带回的 `Bbo` 丢弃并计数。订阅即推首帧的所(返回 `Ok(false)`)等交易所推首帧([hft-venue-proto 契约 24](../hft-venue-proto/README.md#实现方必须遵守的契约))。只要还有一条连接在线,就不进入补帧。
-6. 这些记录都是 Input:回放时 `BboView` 的健康字段逐字节重现。深度、成交与标记价连接的健康不影响 `BboView`;这些连接收到 pong 时按 event-model 的同一规则产出 `Alive`,走 md 环;它只是活性证据,不改簿状态、不入队给策略(处理规则归 [hft-sequencer](../hft-sequencer/README.md))。
+6. **赛跑连接的领先统计**(`feed.race_rotate_s` > 0,缺省 0 = 关;hft-core 键 `venues.<v>.feed.race_rotate_s`):每条 BBO 连接记录自上次评估以来先到并被转发的报价数 `race_won`、晚到的同一报价(序号等于 `last_fwd`)数 `race_lost` 与其落后量之和(该副本 rx_tsc − 被转发那份的 rx_tsc,`InstSeq.bbo_fwd_tsc`)。每满 `race_rotate_s` 评估一次:样本 ≥ `race_min_n`(200)、落后份额 ≥ `race_lost_permille`(900 ‰)且平均落后 ≥ `race_slow_us`(2 000 µs)→ 推 `ConnState{Degraded, reason=RACE_SLOW}` 并标记轮换(先建后断,与计划轮换同一路径;新连接经 hft-net 的多地址轮转通常落到另一个地址);计数 `race_won`/`race_lost`(评估时累加)与 `race_rotated`;之后清零重计。只有一条连接时没有晚到副本,不会触发。依据:2026-11-06 实盘机实测 Coinbase 2 条以上不同节点的连接比单条快约 9 ms,慢节点长期落后。
+7. 这些记录都是 Input:回放时 `BboView` 的健康字段逐字节重现。深度、成交与标记价连接的健康不影响 `BboView`;这些连接收到 pong 时按 event-model 的同一规则产出 `Alive`,走 md 环;它只是活性证据,不改簿状态、不入队给策略(处理规则归 [hft-sequencer](../hft-sequencer/README.md))。
 
 ### 3b. 快照获取(snap-fetch)
 
@@ -500,6 +503,10 @@ struct GwAccount<P: VenueProtocol> {
    5. `frame.seal(Text, len, mask)` → `conn.send_frame(&frame)`;推 `TxTag`(若启用);`inflight[conn] += 1`;New 写槽镜像。
    6. 推 `SendReport{decision_seq, sent_tsc, slot, gen, op, target_slot, target_gen, venue, account, conn, status: Written, os_errno: 0}`(`target_gen` 取自槽镜像;所有状态都带这三项);然后追加 `RawTx`(记录头 `tsc = sent_tsc`;含签名的帧 `rflags = REDACTED`,只记元数据)。
    **撤单优先**(`order_channel = Rest` 的订单类 op):撤单(`Cancel`、`inst ≠ 0` 的 `CancelAll`)以 hft-net `RestPool::submit_urgent` 提交,可以用 `gw.rest_cancel_reserve` 条保留的连接;其余 REST 请求(下单、改单、查单、死手、会话维护、sweep)用 `RestPool::submit`,不占它们,找不到连接仍回 `NoConn`。撤单找不到空闲的 Open 连接(全部在途,或池里没有 Open 连接)时不回 `NoConn`、不编码,进入该账户的撤单队列(FIFO,容量 `GW_REST_CANCEL_QUEUE`);队列不空时新到的撤单排在队尾。每次 `poll_once`、每个 REST 应答交出之后(先于随后的 `drain_out()`)以及每个订单类 REST 请求之前,gw 按序处理队首:等待已超过 `gw.inflight_timeout_ms` → `SendReport{status: NoConn}`(与无连接时同一报告),取下一条;有空闲的 Open 连接 → 以此刻的时钟编码(签名时间戳取发出时刻)并提交,结果按第 4–6 步报告(`Written` 的 `conn` 与 `sent_tsc` 是实际写出的连接与时刻;编码失败、限速同立即发送);没有 → 停。队列满 → 该撤单立即 `SendReport{status: NoConn}`。在队列里的撤单还没有 `SendReport`;`retire_all`(停机)给每条回 `NoConn`。计数 `rest_cancel_queued`(入队)、`rest_cancel_dropped`(队列满、超时、停机)。WS 通道的撤单不经此队列。
+
+   **撤单赛跑**(`gw.cancel_race = true`,缺省关):一个 `Cancel` 的请求以 `Written` 报告之后,gw 立即调用 `encode_rest_companion`;协议给出伴随请求(`Ok(true)`)时以撤单优先提交到另一条空闲连接(同一池;没有空闲连接、限速或编码失败 → 不发,计 `rest_companion_skipped`;发出计 `rest_companion_sent`)。伴随请求没有 `SendReport`,来源是 `RestWhat::OrderCompanion`(与订单请求同一 `ReqRef`),应答照常交协议 `decode_rest`:它确认的撤单照常成事件(协议负责同一订单只报一次 `CancelAck`,且已确认后另一请求的"已撤销/找不到"不报 `CancelReject`);它的失败、无应答或解码失败不产生 `OutcomeUnknown`,也不降级连接。依据:2026-11-06 实盘机实测,Polymarket 对同一账户并发的两个撤单几乎同时完成(完成时间差 p50 1.5–1.9 ms),约 1–2% 的撤单快 20–50 ms;负责人决定实盘打开并持续统计。
+
+   **撤单方式**(`gw.cancel_by_token = true`,缺省关;对照实验用):一个 `Cancel` 照常先经 `encode_rest_ctx` 编码(协议据此记下该单的撤单状态),随后调用 `encode_rest_companion`;给出伴随请求时以它的请求代替撤单写出(来源仍是 `RestWhat::Order`,`SendReport`、`OutcomeUnknown` 与连接降级与普通撤单相同,计 `rest_cancel_by_token`),不再发赛跑伴随;否则照常按单撤。依据:2026-11-07 实测只按 token 撤与赛跑几乎相同(p50 27.5 对 27.0 ms,p90 123.7 对 123.6 ms)。
    `SendErr::NotOpen/TxBacklog` 保证未加密,换 standby 重试一次,仍失败 → `NoConn`;`SendErr::Io` → `SendReport{status: WriteError, os_errno}`:**密文已产生、结果未知**,sequencer 把该槽推入 `Unknown`([defensive-patterns](../../docs/defensive-patterns.md));该 Place 同样写槽镜像(之后的 Query 需要它)。
 2. **回报**:`P::classify_report` → `P::decode_report(rd, ctx, c, payload, rx, sink)`。
    - **`OrderEvent` 的槽解析**:client id 判定为本系统的单(`P::parse_cid` 成功:规范文本合法、ver/校验位正确、venue/account 与连接一致,规则见 [hft-types `ClientOrderId`](../hft-types/README.md#clientorderid-编解码))→ 直接得 `(epoch, slot, gen)`;否则查 `IdTable`(条目存 epoch;终态保留条目同样命中,§6);都不行 → `slot = SlotId::UNRESOLVED`。`OrderEvent.epoch` 一律填解析出的 epoch,OMS 按 `(epoch, slot, gen)` 匹配(迟到成交落到旧代时由 OMS 的墓碑规则处理,见 [hft-oms](../hft-oms/README.md))。

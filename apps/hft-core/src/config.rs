@@ -319,6 +319,18 @@ impl PresignOpts {
 pub struct GwOpts {
     pub rest_conns: Option<u8>,
     pub rest_cancel_reserve: Option<u8>,
+    /// `gw.cancel_race` (hft-venue "撤单赛跑"); absent = off.
+    pub cancel_race: Option<bool>,
+    /// `gw.cancel_mode` (hft-venue "撤单方式"): `"order"` (default) or `"market"` (by token).
+    pub cancel_mode: Option<CancelMode>,
+}
+
+/// `gw.cancel_mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CancelMode {
+    Order,
+    Market,
 }
 impl GwOpts {
     /// `(rest_conns, rest_cancel_reserve)` in effect over the protocol defaults `(conns, reserve)`.
@@ -379,6 +391,9 @@ pub struct FeedOpts {
     /// `venues.<v>.feed.depth_conns` (hft-venue): connections per DepthTopN group; absent = 1, or
     /// 2 for a protocol without a Bbo route (Polymarket, whose depth stream is the whole book).
     pub depth_conns: Option<u8>,
+    /// `venues.<v>.feed.race_rotate_s` (hft-venue §3a "赛跑连接的领先统计"): judge each raced BBO
+    /// connection every N s and rotate one mostly behind; absent = 0 = off.
+    pub race_rotate_s: Option<u32>,
 }
 /// `venues.<v>.feed.raw.{bbo,md}` (hft-venue): absent = the instance default, `on` for network
 /// mode and `off` for `--dry-run` (the sim instance of the memory table).
@@ -738,6 +753,9 @@ pub fn load_timed(
             errors.push(Error::config("SubCapacity", name));
         }
         if let Some(e) = crate::venues::presign_error(name, v) {
+            errors.push(e);
+        }
+        if let Some(e) = crate::venues::read_only_error(name, v) {
             errors.push(e);
         }
         if v.net.rest_timeout_ms == Some(0) {

@@ -18,6 +18,7 @@ status: impl
   - [命令行](#命令行)
   - [多账户](#多账户)
   - [库](#库)
+  - [绑核](#绑核)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -31,8 +32,8 @@ status: impl
 
 ```text
 hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
-          [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...]
-          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...]
+          [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--live-account UID KEYS_DIR ...]
+          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--cpu-plan none|pin|spin] [--param NAME=RAW ...]
           OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]
 ```
 
@@ -42,18 +43,20 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 |---|---|
 | (无模式选项) | book-observer 行情模拟(`--dry-run`,16 个槽位 inst,Sim 账户 `sim-pm`);内容归 [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
 | `--maker` | binary-maker 挂单模拟(三对 BTC 槽位 + Binance BTCUSDT 参考,`maker_fill = "queue"`);内容见 [pm-md-probe 挂单模拟](../pm-md-probe/README.md#挂单模拟) |
-| `--live UID KEYS_DIR` | 实盘做市(`order_env = "prod"`):Live 账户 `pm-live`(账户 1,venue UID `UID`),凭据文件 `KEYS_DIR/{api_key,secret,passphrase}`;参数、限额与 `--day-loss-carry`/`--daily-loss`/`--daily-loss-resumes` 的语义归 [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
+| `--live UID KEYS_DIR` | 实盘做市(`order_env = "prod"`):Live 账户 `pm-live`(账户 1,venue UID `UID`),凭据文件 `KEYS_DIR/{api_key,secret,passphrase}`;参数、限额与 `--day-loss-carry`/`--daily-loss`/`--daily-loss-resumes` 的语义归  [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
 | `--taker-probe` | 只用于 `--live`:实盘吃单探针——与 `--live` 相同的 venue、槽位、账户、凭据、限额、预签名、OMS 与 REST 设置,只是策略实例换成 [pm-taker-probe](../../strategies/pm-taker-probe/README.md)(实例名 `pm-taker-probe`,一个 group = 槽位 `btc-up-0`(InstId 1),可开仓,参数为其 schema 默认值,`enabled = 0`)、价格带的 `rr_max_cross` 为 0.5(`PM_PROBE_RR_MAX_CROSS`:卖回在最优买价,半个价差可达价格的数个百分点;做市为 0.01);`--param` 改按 pm-taker-probe 的 schema 检查 |
 | `--no-presign` | 只用于 `--live`:不写 `venues.pm.presign`(缺省写 (2, 2, `0.01`, 60 000),[hft-core 配置键](../../apps/hft-core/README.md)) |
 | `--live-account UID KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `pm-live-<账户号>`,角色 `any`(见[多账户](#多账户)) |
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
+| `--no-coinbase` | 只用于 `--maker` 或 `--live`:不写第二个参考行情 `[venues.cb]`(缺省写:`coinbase-spot`、`id = 16`、`max_sub_insts = 1`、模拟时 `live_feed = true`,线程 `feed-cb`/`build-cb`,`[venues.cb.feed] race_rotate_s = 600`(赛跑 BBO 连接每 10 分钟评估一次,长期落后的轮换,hft-venue §3a);refdata 加 `USD` 资产(Stable,ledger 按面值计价)、Coinbase venue(端点 `wss://ws-feed.exchange.coinbase.com`、`https://api.exchange.coinbase.com`,caps 与限速取 [venue-coinbase](../../crates/venue-coinbase/README.md) 默认)与 inst `BTC-USD` = InstId 8(与 Binance 参考同一 BTC 资产,tick 0.01、lot 1e-8);ECF1 的 feeds 加该 venue;binary-maker 多一个第 8 个 group(InstId 8、不开仓、不绑账户)作为第二参考——v37 `cb_*` 保护读它的 BBO,`cb_win_ms` = 0(缺省)时不影响决定)。带此选项的输出与加入 Coinbase 之前相同,只多 `[venues.bn.feed] race_rotate_s = 600`(2026-11-07 起 Binance 赛跑连接同样轮换慢连接) |
+| `--cpu-plan none\|pin\|spin` | 线程绑核方案(见[绑核](#绑核)),缺省 `none`;任何模式都可用 |
 | `--param NAME=RAW` | 只用于 `--maker` 或 `--live`,可重复:在默认值(实盘做市另在实盘参数)之后把 binary-maker(`--taker-probe` 时为 pm-taker-probe)字段 `NAME` 设为原始值 `RAW` |
 | `OUTPUT_DIR` | 输出目录(不存在则创建);写 `core.toml`、`principals.toml`、`refdata.bin`、`engine.bin`、`risk_params.bin`、`strategy_params.bin` |
 | `TMPFS_DIR` | `paths.journal_ram` |
-| `SRC_IP`、`BIND_DEVICE` | venue `pm`(及 `--maker`/`--live` 的 venue `bn`)的出口地址与网卡 |
+| `SRC_IP`、`BIND_DEVICE` | venue `pm`(及 `--maker`/`--live` 的 venue `bn`、`cb`)的出口地址与网卡 |
 | `USER`、`PIPELINE_USER` | 可选:Admin 的 cli 主体;pipeline 主体(发现进程的系统用户,发 `BindSlot`) |
 
-成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker(`--taker-probe` 时 pm-taker-probe)schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
+成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 或 `--no-coinbase` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker(`--taker-probe` 时 pm-taker-probe)schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--account-cap`/`--group-cap` 不是 > 0 且至多 6 位小数的十进制(`pm-live` 的账户与场所名义上限、每个 slot 组的名义上限,缺省 55 / 25 USDC);`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
 
 ### 多账户
 
@@ -71,11 +74,12 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 ```rust
 pub struct PmLive { pub uid: String, pub keys_dir: PathBuf, pub day_loss_carry: Option<(u32, i64)>,
     pub daily_loss_abs: Option<i64>, pub daily_loss_max_resumes: Option<u8>, pub presign: bool,
-    pub extra_accounts: Vec<LiveAccount> }
+    pub extra_accounts: Vec<LiveAccount>, pub coinbase: bool }   // coinbase = false:--no-coinbase
 pub struct LiveAccount { pub label: Option<String>, pub uid: String, pub keys_dir: PathBuf, pub role: AccountRole }
 pub enum AccountRole { Any }
 pub fn write_polymarket_sim(root, hot, user, pipeline, src_ip, bind_device) -> Result<PathBuf, String>;
-pub fn write_polymarket_maker_sim_with(.., params: &[(String, i64)]) -> Result<PathBuf, String>;
+pub fn write_polymarket_maker_sim_with(.., params: &[(String, i64)]) -> Result<PathBuf, String>;   // 含 Coinbase
+pub fn write_polymarket_maker_sim_opts(.., params: &[(String, i64)], coinbase: bool) -> Result<PathBuf, String>;
 pub fn write_polymarket_maker_live_with(.., live: &PmLive, params: &[(String, i64)]) -> Result<PathBuf, String>;
 pub fn write_polymarket_taker_probe_live(.., live: &PmLive, params: &[(String, i64)]) -> Result<PathBuf, String>;
 pub enum PmStrategy { Observer, Maker, TakerProbe }   // kind_name(): book-observer | binary-maker | pm-taker-probe
@@ -88,11 +92,23 @@ pub mod cli { pub fn parse(args: &[String]) -> Result<Cmd, String>; pub fn run(c
 
 另有不带 `_with` 的两个写函数(无参数值)与常量 `PM_CROSSED_TOLERANCE`、`PM_COINS`、`PM_LIVE_PRESIGN`、`PM_LIVE_DAILY_LOSS`、`PM_LIVE_PARAMS`、`PM_REST_TIMEOUT_MS`、`PM_REST_MAX_IDLE_MS`、`PM_PROBE_RR_MAX_CROSS`。`LiveAccount.label = None` 即 `pm-live-<账户号>`。
 
+### 绑核
+
+`--cpu-plan`(库函数 `apply_cpu_plan(core.toml, plan)`,写完配置后改写 `[[threads]]`)面向 4 核的 pm-strategy 实盘机(c8g.xlarge,逻辑 CPU 0–3):
+
+| 方案 | `sequencer` | `feed:*`(pm、bn、cb) | `gw:pm` | 其余线程 | 主机要求 |
+|---|---|---|---|---|---|
+| `none`(缺省) | 不绑 | 不绑 | 不绑 | 不绑 | 无;全部线程空闲时休眠 `park_us` 100 µs |
+| `pin` | 核 1 | 核 2 | 核 3 | 核 0 | 无;仍休眠,只减少迁核与缓存失效 |
+| `spin` | 核 1,`idle = "spin"` | 核 2,`park_us = 20` | 核 3,`idle = "spin"` | 核 0 | 内核 `isolcpus=1-3`(GRUB,需重启);未隔离时 hft-core 在线程启动时拒绝(`ThreadPolicy`,退出 3) |
+
+依据(2026-11-07,11-06 实盘 journal):决策 → 写出网关 p50 94–150 µs、p99 180–339 µs;行情到达 → 决策 p50 约 145 µs。`spin` 去掉每跳至多一个 `park_us` 的唤醒等待,并免受同机其他进程抢核;两个空转线程各占满一个核,机器上不能再并行跑第二个引擎。
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
 
-- `src/lib.rs`:`write_pm` 用 hft-refdata `RdbBuilder` 建 refdata(USDC、每个槽位一个代币资产与 inst,挂单模式另有 BTC/USDT/BNB 与 Binance 现货参考 inst)、SDK `encode_body` 建策略参数 blob(schema 来自 registry 的 `kinds()`)、`hft_risk::ParamsBuilder` 建风控 blob、`engine_base` + 逐项修改后 `EngineSetup::encode_blob` 建 ECF1;`core.toml` 先按模拟写出,实盘再经 `toml` 改写(去掉 `[sim]` 与 `live_feed`、加账户与 `account_io`/`net`/`presign`、gw 线程代替 sim-gw/paper-feed)。
+- `src/lib.rs`:`write_pm` 用 hft-refdata `RdbBuilder` 建 refdata(USDC、每个槽位一个代币资产与 inst,挂单模式另有 BTC/USDT/BNB 与 Binance 现货参考 inst,缺省再加 USD 与 Coinbase 参考 inst)、SDK `encode_body` 建策略参数 blob(schema 来自 registry 的 `kinds()`)、`hft_risk::ParamsBuilder` 建风控 blob、`engine_base` + 逐项修改后 `EngineSetup::encode_blob` 建 ECF1;`core.toml` 先按模拟写出,实盘再经 `toml` 改写(去掉 `[sim]` 与 `pm`/`bn`/`cb` 的 `live_feed`、加账户与 `account_io`/`net`/`presign`、gw 线程代替 sim-gw/paper-feed)。
 - `engine_base` 与 hft-testkit `seq_rig::engine_setup` 对同一输入编码相同(PMC-006);生成器的 `[dependencies]` 不含 hft-testkit,生产配置不随测试夹具变化。
 - `src/cli.rs`:顺序扫描参数,选项消耗其值,其余为位置参数;`src/main.rs` 只调 `cli::main("hft-pmcfg")`。
 - 输出只由参数决定(无时间戳、无随机数):同一命令行两次运行逐字节相同。

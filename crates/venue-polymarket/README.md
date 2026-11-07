@@ -212,6 +212,10 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | `not_canceled`,回执已到且为 `live`/`delayed` | — | `CancelReject{EARLY}` |
 | `not_canceled`,其余(回执后发出的撤单、已终态) | — | `CancelReject{GONE}` |
 
+### 撤单赛跑
+
+hft-venue `gw.cancel_race = true` 时,按订单哈希的撤单(`DELETE /order`)另有伴随请求 `DELETE /cancel-market-orders {"asset_id": <该 inst 的 token>}`(`encode_rest_companion`;哈希未知、本来就按 token 撤的撤单没有伴随)。它撤掉账户在该 token 上的**全部**挂单,所以只在该 token 上没有本账户的其他未终结订单时发出:订单行记下 inst(下单编码时,或下单应答、`order` 事件首次见到时),同一 inst 上另有非终结行(`other_open_on`)→ 不发伴随,只按哈希撤。两个应答:先确认的产生 `CancelAck`(每单一次),订单行记 `cancel_acked`;另一个的"already canceled"不再报 `CancelReject`。实测(2026-11-06/07,pm-live-2,不会成交的单,每种 7 249 次):逐单撤单 p50 / p90 / p99 = 30.3 / 138.7 / 1 132 ms,赛跑 27.0 / 123.6 / 1 065 ms,只按 token 撤 27.5 / 123.7 / 982 ms;BTC 2 s 内波动 ≥ 0.5 bp 时超过 200 ms 的比例 14.6% → 12.5%;按 token 的请求赢约 72%。
+
 ### 吃单
 
 `Tif::Ioc`(= `Tif::FAK`)编码为 FAK 单(立即与簿成交,其余撤销),`Tif::Fok` 编码为 FOK 单(全部成交或全部撤销)。2026-10-30 实盘探针(BTC 5 分钟盘,约 1 USDC)核实了请求体、三种应答与用户频道事件;部分成交未遇到(簿不薄),按交易所文档处理。

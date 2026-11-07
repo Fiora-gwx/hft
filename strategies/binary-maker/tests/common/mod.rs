@@ -21,6 +21,9 @@ pub const VB: VenueId = VenueId::POLYMARKET_CLOB;
 pub const VR: VenueId = VenueId::BINANCE_SPOT;
 pub const SLOTS: [InstId; 6] = [InstId(1), InstId(2), InstId(3), InstId(4), InstId(5), InstId(6)];
 pub const R: InstId = InstId(7);
+/// Second reference inst (stand-in for the native Coinbase reference of the v37 guard).
+pub const R2: InstId = InstId(8);
+pub const VR2: VenueId = VenueId::OKX_SPOT;
 pub const USDC: AssetId = AssetId(1);
 pub const USDT: AssetId = AssetId(2);
 pub const BTC: AssetId = AssetId(3);
@@ -150,6 +153,7 @@ pub fn refdata() -> RefData {
     }
     // Venue rows in ascending id order.
     venue(&mut b, VR, Exchange::Binance);
+    venue(&mut b, VR2, Exchange::Okx);
     venue(&mut b, VB, Exchange::Polymarket);
     for (k, i) in SLOTS.iter().enumerate() {
         let side = if k % 2 == 0 { "up" } else { "dn" };
@@ -165,6 +169,16 @@ pub fn refdata() -> RefData {
         );
     }
     inst(&mut b, R, VR, BTC, USDT, "BTCUSDT".into(), "0.01", "0.00000001");
+    inst(
+        &mut b,
+        R2,
+        VR2,
+        BTC,
+        USDT,
+        "BTC-USDT".into(),
+        "0.01",
+        "0.00000001",
+    );
     b.instance(InstanceSpec {
         id: S1,
         kind_id: 7,
@@ -242,6 +256,13 @@ pub fn specs() -> Vec<GroupSpec> {
         .map(|(k, i)| spec(gid(k as u32), AssetId(TOKEN0 + k as u16), &[(*i, VB)]))
         .collect();
     v.push(spec(gid(6), BTC, &[(R, VR)]));
+    v
+}
+
+/// `specs()` plus a second reference group (`R2` on `VR2`).
+pub fn specs2() -> Vec<GroupSpec> {
+    let mut v = specs();
+    v.push(spec(gid(7), BTC, &[(R2, VR2)]));
     v
 }
 

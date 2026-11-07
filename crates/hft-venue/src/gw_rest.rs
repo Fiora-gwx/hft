@@ -282,6 +282,30 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             );
             return Sent::Reported;
         }
+        // README "撤单方式": the companion request (by token) replaces the cancel when the protocol
+        // gives one; the cancel was encoded first so the protocol's per-order cancel state is set.
+        let mut by_token = false;
+        if c.op == GwOp::Cancel && self.cfg.cancel_by_token {
+            let mut alt = RestReqBuf::default();
+            let x = &mut self.accts[a];
+            if matches!(
+                P::encode_rest_companion(
+                    self.rd,
+                    &x.tpl,
+                    &mut x.ctx,
+                    &x.rest_credential,
+                    &c,
+                    &target,
+                    &clk,
+                    &mut alt
+                ),
+                Ok(true)
+            ) {
+                wire = alt;
+                by_token = true;
+                self.n.rest_cancel_by_token += 1;
+            }
+        }
         let origin = RestOrigin {
             what: RestWhat::Order,
             req: Some(ReqRef {
@@ -297,6 +321,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     self.write_mirror(&c);
                 }
                 self.report(&c, tg, conn, SendStatus::Written, 0, sent_tsc);
+                if c.op == GwOp::Cancel && self.cfg.cancel_race && !by_token {
+                    self.send_companion(a, c, target, now);
+                }
             }
             Err(HttpError::Net(RestErr::Send(SendErr::Io(e)))) => {
                 if c.op == GwOp::Place {
@@ -309,6 +336,42 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             Err(_) => self.report(&c, tg, NO_CONN, SendStatus::NoConn, 0, 0),
         }
         Sent::Reported
+    }
+    /// README "撤单赛跑": the protocol's companion of a cancel just written, on another free
+    /// connection, without a `SendReport`; anything that stops it only counts as skipped.
+    fn send_companion(&mut self, a: usize, c: GwCmd, target: TargetRef, now: u64) {
+        let mut wire = RestReqBuf::default();
+        let clk = self.wall(now);
+        let x = &mut self.accts[a];
+        let r = P::encode_rest_companion(
+            self.rd,
+            &x.tpl,
+            &mut x.ctx,
+            &x.rest_credential,
+            &c,
+            &target,
+            &clk,
+            &mut wire,
+        );
+        if !matches!(r, Ok(true)) {
+            if r.is_err() {
+                self.n.rest_companion_skipped += 1;
+            }
+            return;
+        }
+        let origin = RestOrigin {
+            what: RestWhat::OrderCompanion,
+            req: Some(ReqRef {
+                slot: target.id.slot,
+                r#gen: target.id.r#gen,
+                op: c.op,
+            }),
+            inst: c.inst,
+        };
+        match self.submit_http(a, c, origin, &wire, true, now) {
+            Ok(_) => self.n.rest_companion_sent += 1,
+            Err(_) => self.n.rest_companion_skipped += 1,
+        }
     }
     pub(super) fn poll_http(&mut self, now: u64) -> bool {
         let idle_ticks = self.t.ms(u64::from(self.cfg.rest_idle_check_ms));
@@ -375,7 +438,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
                 if let Some((r, conn, ts)) = reply {
                     let failed = r.status == 0 || !(200..300).contains(&r.status);
-                    if failed && r.origin.what != RestWhat::Order {
+                    if failed && !matches!(r.origin.what, RestWhat::Order | RestWhat::OrderCompanion) {
                         self.conn_state(
                             r.account,
                             if r.origin.what == RestWhat::Keepalive {

@@ -84,6 +84,11 @@
       "code": 17,
       "name": "REQUESTED",
       "state": "Resync"
+    },
+    {
+      "code": 18,
+      "name": "RACE_SLOW",
+      "state": "Degraded"
     }
   ]
 }

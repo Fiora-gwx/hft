@@ -114,6 +114,10 @@ deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hf
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
 
+[pkg."crates/venue-coinbase"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
 [pkg."crates/venue-bybit"]
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
@@ -217,12 +221,13 @@ deps = [
 ]
 
 # Research replay (crates/hft-replay/README.md): cold, offline only; the sequencer's replay-io
-# assembly with the simulated exchange and Parquet output.
+# assembly with the simulated exchange and Parquet output. hft-ledger / hft-risk: the research
+# switches (HFT_REPLAY_COMPAT_SNAPSHOT's ledger par assets, HFT_REPLAY_RESEARCH_RISK's limits).
 [pkg."crates/hft-replay"]
 tier = "cold"
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-journal", "crates/hft-rt",
-    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer",
+    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer", "crates/hft-ledger", "crates/hft-risk",
 ]
 
 [pkg."crates/hft-testkit"]
@@ -282,7 +287,7 @@ dev = ["crates/hft-testkit", "crates/hft-ctl-proto", "tools/hft-pmcfg"]
 deps = [
     "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
     "crates/hft-net", "crates/hft-venue", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
-    "crates/venue-polymarket", "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec",
+    "crates/venue-polymarket", "crates/venue-coinbase", "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec",
     "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-sequencer", "crates/hft-sim", "crates/hft-ctl",
     "strategies/registry", "crates/hft-ext-proto",
 ]
@@ -356,7 +361,7 @@ tier = "cold"
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk", "crates/hft-risk",
     "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget", "crates/venue-polymarket",
-    "crates/hft-ctl-proto",
+    "crates/venue-coinbase", "crates/hft-ctl-proto",
 ]
 
 [pkg."tools/hostprobe"]
@@ -398,6 +403,7 @@ deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk",
     "strategies/registry", "crates/hft-risk", "crates/hft-ledger", "crates/hft-oms", "crates/hft-exec",
     "crates/hft-sequencer", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-polymarket",
+    "crates/venue-coinbase",
 ]
 
 [pkg."tools/hft-verify"]

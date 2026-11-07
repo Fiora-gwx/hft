@@ -66,9 +66,10 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--account N` | 被模拟账户(可重复) | 全部绑定实例的账户 |
 | `--variants <file.toml>` | `[[variant]] name = "…" set = { 字段 = 原始值, … }` | 无 |
 | `--set NAME=RAW[,…]` | 追加一个变体 `set<k>` | 无 |
+| `--param-base journal\|defaults\|live` | 未写 `base` 的变体的起点:`journal` = 日志里该运行的生效参数;`defaults` = 全部字段先置 schema 默认值(`enabled` 与实盘基础参数由变体写明,同一变体在每份日志上参数相同);`live` = `defaults` 加 binary-maker 的实盘基础参数 `LIVE_BASE`(与 hft-pmcfg `--live` 同一份),变体自己的 `set` 覆盖其上,run.json 记为 `defaults` 与完整 `set` | `journal` |
 | `--seeds S[,S…]` | 延迟随机种子 | `1` |
 | `--latency ENTRY_US:RESP_US` | `LatencyModel::Fixed` | `40000:0` |
-| `--maker-fill queue\|queue-cap\|through` | 挂单成交模型 | `queue` |
+| `--maker-fill queue\|queue-cap\|queue-strict\|through` | 挂单成交模型(研究默认 `queue-strict`,2026-11-06 负责人决定) | `queue` |
 | `--calib <file>` | 校准表([Polymarket 场所行为](#polymarket-场所行为校准表与条件延迟)) | 无 |
 | `--own` | 隐藏日志里被模拟账户自己的挂单 | 关 |
 | `--tombstone` | 撤单先到即墓碑 | 关 |
@@ -77,6 +78,8 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 | `--fee-binary K` | 二元吃单费系数 | 费率行 |
 | `--gtd-ms N` | 挂单有效期 | 0(无) |
 | `--fill-resp-us N` | 挂单成交的回报延迟 | 账户模型 |
+| `--ex-time-max-us N` | 按交易所时间撮合,行情延迟上限(hft-sim `ex_time_max_us`) | 0(关) |
+| `--sim-cash N` | 模拟账户每种计价资产的起始余额(整单位);超出可用余额的挂单以 `InsufficientBalance` 拒绝 | 很大的余额(不约束) |
 | `--reseed-s N` | 重播种间隔(UTC 秒,0 = 不重播种) | `300` |
 | `--log-timers` | 照读日志里的堆定时器,不由引擎状态触发 | 关 |
 | `--jobs N` | 并行运行数 | `1` |
@@ -123,11 +126,15 @@ pub struct DriverCfg { pub engine_timers: bool, pub per_round: u16 }
 
 #### 校准表的生成(`replayer calib`)
 
-`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+`calib_build::build(&CalibOpts{files, account, reassembly, window_s, phase_s, mv_thr, mv_window_ms, ref_inst})`:读一个实盘运行的 seq journal,对 `account` 的每条未拒 `OrderDecision{New}` 取到其 `Ack` 的记录头 tsc 差、每条 `OrderDecision{Cancel}`(同一目标的第一条)取到其 `CancelAck` 的差(按段头 `tsc_hz_milli` 换成秒),样本在决策时按上节的规则打条件标签(`load` 用上一完整分钟的值;参考行情是不出现 L2 记录的 venue 上第一个 Bbo inst;`phase` 用段校准对折算的 UTC)。`thr` 取全部分钟值的三分位(分钟不足 3 个时为空,`load` 全为 1)。写出的表含 `pools`(每个样本进 `leg|load|move|phase`、`leg|load`、`leg` 三个键,leg `ack`/`cxl`)、`thr`(ms)、`split_us` 5 000、`min_n` 20、`window_s`、`phase_s` 与 `meta`(来源、账户、seq 范围、样本数、分钟数),`--calib` 直接读。吃单延迟、成交回报延迟与费率不从 journal 估计(需要探针或手工填写)。
+
+变动档位(2026-11-06):`mv` 用 hft-sim `move_bucket` 与 `CondCfg` 同一定义——阈值 `mv_thr`(命令行 `--mv-thr-bp 0.25,1,2`,bp)、窗口 `mv_window_ms`(`--mv-window-ms`)、参考品种 `ref_inst`(`--mv-ref-inst`,0 = 第一个);缺省 0.25 / 1 bp、1 s、第一个,与旧表相同。表中写出 `mv_thr_bp`、`mv_window_ms`、`mv_ref_inst`,`calib::apply` 读回到 `CondCfg`,所以回放按生成时的档位抽样。
 
 每次交出 Input 前驱动记下它的引擎 UTC,`emit` 时交给 `ResearchVenue::on_utc`:重播种区间与 `phase` 都按决策所在 Input 的引擎 UTC。
 
 ### 参数变体
+
+变体的起点(`Variant.base`,TOML 里 `base = "journal" | "defaults" | "live"`,或 `--param-base`;`live` 由 `replayer research` 展开为 `defaults` + `LIVE_BASE`):`journal`(缺省)在日志里该实例当前生效的参数上改写 `set` 的字段,未写的字段沿用那次运行的值;`defaults` 先把全部字段置为 schema 默认值再应用 `set`。2026-11-06 发现:只写部分字段的变体(dm10 写 26 个)在 11 月的日志上继承了 B 策略的反转开仓、震荡开关和结算模块,结果不可比;研究变体应写完整参数并用 `defaults`。`run.json` 每个运行记录 `base`。
 
 一个变体对每个被模拟账户上、schema 含其中至少一个字段的策略实例各发一对 Input(在第一个日志 Input 之前,tsc = 启动快照的 tsc):`ConfigBlob`(`variant_blob`:该实例当前参数 blob 按其 schema 版本解码,改值,按当前 schema 版本重编码,`version + 1`,SHA-256 重算)与 `ControlCmd::SetParams`(issuer `pipeline`、`confirmed = 1`)。字段名在所有被模拟实例的 schema 中都不存在、或值超出 `[min, max]` → 该运行失败;`SetParams` 的结果不是 `Applied` → 失败。
 
@@ -245,3 +252,15 @@ pub fn features<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, 
 - 与 `bm_sim.py` 的对账(M1 验收 (b))需要研究机上的实盘 journal 与同参数、同固定延迟的 `bm_sim.py` 输出。
 
 </details>
+
+## 研究开关
+
+环境变量，缺省关；只用于 `replayer research`/`parity` 的规则研究，不影响实盘与 `verify`：
+
+| 变量 | 作用 |
+|---|---|
+| `HFT_REPLAY_COMPAT_SNAPSHOT=1` | 读旧引擎构建的 journal：启动快照能恢复但不能逐字节再生（旧节格式）时照常回放；账本配置缺 USDT 计价来源（2026-10-24 之前）时补 USDT 平价与稳定币备选。2026-10-23 14:58 以后的实盘 journal 与 10-24 以后的模拟 journal 可读；更早的有 `SnapshotUndecodable{5}`/`Config(Params)`，不支持 |
+| `HFT_REPLAY_FORCE_LIVE=1` | 被模拟账户的策略按整份 journal 都在 Live 回放：丢弃日志里非 Live 的 `SetMode` 与 `Kill`（计入 `log_mode_dropped`），每 10 s 日志时间插入一条 `SetMode Live`（trader 角色、group 全部；闸门未放开时被拒，之后为空操作） |
+| `HFT_REPLAY_RESEARCH_RISK=1` | 第一条 Input 之前插入 `SetRisk`（admin）放开日亏、单笔 / 组 / 账户 / 场所名义与持仓上限：变体按自己的规则跑，亏损不被日亏截断、规模不被实盘账户上限限制 |
+
+stderr 打印插入命令的结果计数。对账（2026-10-31，研究机）：同一 245 个窗口上 Rust 与研究侧 `bm_sim.py` 逐窗盈亏相关 0.78–0.85、份数 0.73–0.84；2026-10-30 实盘 7 个 `/one` 窗口 Rust 逐窗与实盘相关 0.74，决策 6577/6577 一致。

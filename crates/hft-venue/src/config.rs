@@ -149,6 +149,13 @@ pub struct FeedCfg {
     pub raw_sample_ms: u32,
     pub ring_full_park_us: u32,
     pub rotate_margin_s: u32,
+    /// README §3a "赛跑连接的领先统计": every `race_rotate_s` seconds each raced BBO connection's
+    /// share of first arrivals is judged; one that lost at least `race_lost_permille` ‰ of at least
+    /// `race_min_n` quotes, `race_slow_us` µs behind on average, is rotated. 0 = off.
+    pub race_rotate_s: u32,
+    pub race_min_n: u32,
+    pub race_lost_permille: u32,
+    pub race_slow_us: u32,
     pub venue: VenueCfg,
     pub endpoints: FeedEndpoints,
 }
@@ -180,6 +187,10 @@ impl Default for FeedCfg {
             raw_sample_ms: 1000,
             ring_full_park_us: 200,
             rotate_margin_s: 3600,
+            race_rotate_s: 0,
+            race_min_n: 200,
+            race_lost_permille: 900,
+            race_slow_us: 2000,
             venue: VenueCfg {
                 env: VenueEnv::Prod,
                 stale_guard_ms: 1500,
@@ -221,6 +232,12 @@ pub struct GwCfg {
     /// Free connections of each gw REST pool only cancels may take (< `rest_conns`); hft-core
     /// default `P::GW_REST_CANCEL_RESERVE`.
     pub rest_cancel_reserve: u8,
+    /// Race every REST cancel with the protocol's companion request on another free connection
+    /// (`VenueProtocol::encode_rest_companion`, README "撤单赛跑"); off by default.
+    pub cancel_race: bool,
+    /// Send every REST cancel as the protocol's companion request alone (Polymarket: by token)
+    /// when it has one, else as usual (README "撤单方式"); no race companion then. Off by default.
+    pub cancel_by_token: bool,
     /// OMS slot count N per (venue, account) table: slot ids 1..=N (0 reserved); the slot mirror
     /// holds N + 1 entries indexed by slot id.
     pub oms_slots: u32,
@@ -258,6 +275,8 @@ impl Default for GwCfg {
             rotate_margin_s: 3600,
             rest_conns: 2,
             rest_cancel_reserve: 0,
+            cancel_race: false,
+            cancel_by_token: false,
             oms_slots: 2048,
             env: VenueEnv::Prod,
             order_endpoint: EndpointId::default(),

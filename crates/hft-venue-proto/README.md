@@ -134,6 +134,9 @@ pub trait VenueProtocol: Sized + 'static {
     fn encode_rest_ctx(rd: &RefData, t: &Self::Templates, ctx: &mut Self::GwCtx, cred: &Credential, c: &GwCmd, tgt: &TargetRef,
                        clk: &WallClock, out: &mut RestReqBuf) -> Result<(), EncodeErr> { Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out) }
     /// 会话维护请求(GwOp::SessionKeepalive,如 Binance USDT-M listenKey PUT 续期);不需要维护的所返回 Ok(false)(默认)。
+    /// 撤单赛跑(hft-venue `gw.cancel_race`):同一命令的第二个请求,`Ok(true)` = `out` 有请求;缺省 `Ok(false)`。
+    fn encode_rest_companion(rd: &RefData, t: &Self::Templates, ctx: &mut Self::GwCtx, cred: &Credential, c: &GwCmd,
+        tgt: &TargetRef, clk: &WallClock, out: &mut RestReqBuf) -> Result<bool, EncodeErr> { Ok(false) }
     fn session_keepalive_request(rd: &RefData, t: &Self::Templates, clk: &WallClock, out: &mut RestReqBuf)
                                  -> Result<bool, EncodeErr> { Ok(false) }
     /// gw 发出的 REST 请求的响应(encode_rest、dead_man_refresh 的 REST 形态、session_keepalive_request、CANCEL_ALL_SWEEP 的挂单列表):
@@ -282,7 +285,8 @@ pub struct DeadManOut { pub frame: ArrayBuf<1024>, pub reqs: Vec<RestReqBuf> }
 pub enum OrderChannel { Ws, Rest }
 /// gw 发出的一个 REST 请求的来源,随响应交给 decode_rest。
 pub struct RestOrigin { pub what: RestWhat, pub req: Option<ReqRef> /* Order 时 = 发起该请求的 GwCmd 的 (slot, gen, op) */, pub inst: InstId /* 0 = 不针对 inst */ }
-pub enum RestWhat { Order, DeadMan, Keepalive, Sweep /* CANCEL_ALL_SWEEP 的挂单列表 */ }
+pub enum RestWhat { Order, DeadMan, Keepalive, Sweep /* CANCEL_ALL_SWEEP 的挂单列表 */,
+    OrderCompanion /* 撤单赛跑的伴随请求(hft-venue gw.cancel_race):按 Order 解码,无 SendReport,失败不判 OutcomeUnknown */ }
 
 /// REST 请求缓冲(快照、BBO 补帧、查单、死手、账户查询共用);定长,gw 与 snap-fetch 复用。
 pub struct RestReqBuf {

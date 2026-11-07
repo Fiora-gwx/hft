@@ -31,7 +31,7 @@ fn cfg(files: &[PathBuf]) -> RunCfg {
         accounts: None,
         variant: Variant {
             name: "base".into(),
-            set: Default::default(),
+            ..Variant::default()
         },
         sim: SimParams::default(),
         driver: DriverCfg::default(),
@@ -173,11 +173,22 @@ fn rpl_302_variant_set_params_applies_or_refuses() {
     c.variant = Variant {
         name: "thr5".into(),
         set: [("thr".to_string(), 5)].into_iter().collect(),
+        ..Variant::default()
     };
     let v = run_one::<TestStrategies>(&c).unwrap();
     // Only the instance whose schema has `thr` gets a SetParams (ConfigBlob + ControlCmd).
     assert_eq!(v.stats.variant_inputs, 2, "RPL-302.1");
     assert_eq!(v.params_sha.len(), base.params_sha.len(), "RPL-302.1");
+    // base = "defaults" with no set still re-issues the parameters (every field at its schema
+    // default), so the variant does not depend on the journal's own values.
+    let mut d = cfg(&files);
+    d.variant = Variant {
+        name: "dflt".into(),
+        base: Some("defaults".into()),
+        ..Variant::default()
+    };
+    let dv = run_one::<TestStrategies>(&d).unwrap();
+    assert!(dv.stats.variant_inputs > 0, "RPL-302.3");
     let changed = v
         .params_sha
         .iter()
@@ -319,6 +330,7 @@ fn rpl_304_parity_matches_the_logged_decisions_and_reports_a_variant() {
     c.variant = Variant {
         name: "thr".into(),
         set: [("thr".to_string(), 1_000_000)].into_iter().collect(),
+        ..Variant::default()
     };
     let v = run_one::<TestStrategies>(&c).unwrap();
     let (t, s2) = v.parity.unwrap();

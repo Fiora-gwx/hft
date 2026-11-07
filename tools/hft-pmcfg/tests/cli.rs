@@ -53,12 +53,17 @@ fn pmc_001_valid_command_lines() {
     // .3 --live with every live option.
     let c = parse(&args(&format!(
         "--live 12345 k1 --no-presign --daily-loss 20.5 --daily-loss-resumes 3 \
-         --day-loss-carry 2026-10-29 -3.5 {POS}"
+         --day-loss-carry 2026-10-29 -3.5 --account-cap 110 --group-cap 40.5 {POS}"
     )))
     .unwrap();
     let Mode::Live(l) = c.mode else {
         panic!("PMC-001.3")
     };
+    assert_eq!(
+        (l.account_cap, l.group_cap),
+        (Some(110_000_000), Some(40_500_000)),
+        "PMC-001.3"
+    );
     assert_eq!(
         (l.uid.as_str(), l.keys_dir),
         ("12345", PathBuf::from("k1")),
@@ -317,4 +322,52 @@ fn pmc_003_account_entries() {
     };
     assert_eq!(l.extra_accounts.len(), 11, "PMC-003.7");
     assert!(err(&n(12)).contains("at most 12 accounts"), "PMC-003.7");
+}
+
+#[test]
+fn pmc_009_no_coinbase_flag() {
+    // .1 default: Coinbase on, in every mode.
+    let c = parse(&args(POS)).unwrap();
+    assert!(c.coinbase, "PMC-009.1");
+    let c = parse(&args(&format!("--live 12345 k1 {POS}"))).unwrap();
+    let Mode::Live(l) = &c.mode else {
+        panic!("PMC-009.1")
+    };
+    assert!(c.coinbase && l.coinbase, "PMC-009.1");
+    // .2 --no-coinbase with --maker or --live.
+    let c = parse(&args(&format!("--maker --no-coinbase {POS}"))).unwrap();
+    assert!(matches!(c.mode, Mode::Maker) && !c.coinbase, "PMC-009.2");
+    let c = parse(&args(&format!("--no-coinbase --live 12345 k1 {POS}"))).unwrap();
+    let Mode::Live(l) = &c.mode else {
+        panic!("PMC-009.2")
+    };
+    assert!(!c.coinbase && !l.coinbase, "PMC-009.2");
+    // .3 refused: without a maker mode, or twice.
+    let e = parse(&args(&format!("--no-coinbase {POS}"))).unwrap_err();
+    assert!(
+        e.contains("--no-coinbase needs --maker or --live"),
+        "PMC-009.3: {e}"
+    );
+    let e = parse(&args(&format!("--maker --no-coinbase --no-coinbase {POS}"))).unwrap_err();
+    assert!(e.contains("given twice"), "PMC-009.3: {e}");
+}
+
+#[test]
+fn pmc_010_cpu_plan_flag() {
+    use hft_pmcfg::CpuPlan;
+    // .1 default none; .2 pin / spin in any mode.
+    assert_eq!(parse(&args(POS)).unwrap().cpu_plan, CpuPlan::None, "PMC-010.1");
+    for (v, want) in [
+        ("none", CpuPlan::None),
+        ("pin", CpuPlan::Pin),
+        ("spin", CpuPlan::Spin),
+    ] {
+        let c = parse(&args(&format!("--live 12345 k1 --cpu-plan {v} {POS}"))).unwrap();
+        assert_eq!(c.cpu_plan, want, "PMC-010.2 {v}");
+    }
+    // .3 refused: an unknown plan, or twice.
+    let e = parse(&args(&format!("--cpu-plan fast {POS}"))).unwrap_err();
+    assert!(e.contains("none|pin|spin"), "PMC-010.3: {e}");
+    let e = parse(&args(&format!("--cpu-plan pin --cpu-plan spin {POS}"))).unwrap_err();
+    assert!(e.contains("given twice"), "PMC-010.3: {e}");
 }

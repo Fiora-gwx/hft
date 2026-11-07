@@ -1461,6 +1461,7 @@
 | 15 | `CONN_LOST` | Resync |
 | 16 | `NEW_SUB` | Resync |
 | 17 | `REQUESTED` | Resync |
+| 18 | `RACE_SLOW` | Degraded |
 
 ## LoadErrCode
 

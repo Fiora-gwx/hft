@@ -19,6 +19,8 @@ impl VenueId {
     pub const HYPERLIQUID_PERP: VenueId = VenueId(14);
     /// Polymarket CLOB outcome tokens (one spot-like instrument per token).
     pub const POLYMARKET_CLOB: VenueId = VenueId(15);
+    /// Coinbase Exchange spot (market data only; venue-coinbase).
+    pub const COINBASE_SPOT: VenueId = VenueId(16);
     pub const CHAIN_BSC: VenueId = VenueId(32);
     pub const CHAIN_SOLANA: VenueId = VenueId(33);
 
@@ -27,7 +29,7 @@ impl VenueId {
     pub const fn market(self) -> Option<MarketKind> {
         match self.0 {
             1 | 3 | 5 | 8 | 10 | 12 | 14 => Some(MarketKind::LinearPerp),
-            2 | 4 | 6 | 9 | 11 | 13 | 15 => Some(MarketKind::Spot),
+            2 | 4 | 6 | 9 | 11 | 13 | 15 | 16 => Some(MarketKind::Spot),
             _ => None,
         }
     }
@@ -50,6 +52,7 @@ impl VenueId {
             13 => "KUCOIN_SPOT",
             14 => "HYPERLIQUID_PERP",
             15 => "POLYMARKET_CLOB",
+            16 => "COINBASE_SPOT",
             32 => "CHAIN_BSC",
             33 => "CHAIN_SOLANA",
             _ => return None,

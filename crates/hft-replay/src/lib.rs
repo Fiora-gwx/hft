@@ -95,6 +95,7 @@ pub fn research<S: StrategySet>(opts: &ResearchOpts) -> Result<serde_json::Value
             "variant": r.variant,
             "seed": r.seed,
             "set": cfg.variant.set,
+            "base": cfg.variant.base.as_deref().unwrap_or("journal"),
             "params_sha": r.params_sha.iter().map(|(a, s)| json!({"account": a.0, "sha256": s})).collect::<Vec<_>>(),
             "accounts": r.mask.iter().map(|a| a.0).collect::<Vec<_>>(),
             "first_seq": r.first_seq,
@@ -175,6 +176,7 @@ pub fn parity<S: StrategySet>(opts: &ParityOpts) -> Result<serde_json::Value, St
         runs.push(json!({
             "variant": r.variant,
             "set": cfg.variant.set,
+            "base": cfg.variant.base.as_deref().unwrap_or("journal"),
             "params_sha": r.params_sha.iter().map(|(a, s)| json!({"account": a.0, "sha256": s})).collect::<Vec<_>>(),
             "start_snapshot": r.start_snapshot,
             "summary": s,

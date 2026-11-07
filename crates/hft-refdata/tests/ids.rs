@@ -81,7 +81,7 @@ fn ref_015_unknown_venue() {
         "REF-015.2"
     );
     assert_eq!(
-        errs(&with(16, Exchange::Gate, InstKind::Perp)),
+        errs(&with(17, Exchange::Gate, InstKind::Perp)),
         vec![e(UnknownVenue, 2, 4)],
         "REF-015.3"
     );

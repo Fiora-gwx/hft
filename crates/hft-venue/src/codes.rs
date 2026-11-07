@@ -31,6 +31,8 @@ pub const ACCT_QUERY: u32 = 14;
 pub const CONN_LOST: u32 = 15;
 pub const NEW_SUB: u32 = 16;
 pub const REQUESTED: u32 = 17;
+/// A raced BBO connection mostly behind the others (README §3a "赛跑连接的领先统计"); rotated.
+pub const RACE_SLOW: u32 = 18;
 
 /// `(code, name, state)` rows, ascending; never reuse a code.
 pub const CONN_REASONS: &[(u32, &str, ConnStateKind)] = &[
@@ -51,6 +53,7 @@ pub const CONN_REASONS: &[(u32, &str, ConnStateKind)] = &[
     (15, "CONN_LOST", ConnStateKind::Resync),
     (16, "NEW_SUB", ConnStateKind::Resync),
     (17, "REQUESTED", ConnStateKind::Resync),
+    (18, "RACE_SLOW", ConnStateKind::Degraded),
 ];
 
 /// Name and state of `code`; 0 and unknown codes → `None`.

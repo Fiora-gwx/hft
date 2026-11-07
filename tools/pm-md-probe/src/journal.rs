@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use hft_event::{
     Bbo, CmdResult, ConnState, ControlCmd, EngineClock, EventKind, ExternalFill, L2BatchHdr, L2SnapHdr,
-    OrderDecision, OrderEvent, Trade, UtcAnchor,
+    OrderDecision, OrderEvent, SendReport, Trade, UtcAnchor,
 };
 use hft_journal::{JournalReader, Next};
 use hft_refdata::RefData;
@@ -261,6 +261,36 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 );
                 continue;
             }
+            // Coinbase samples of the cb_feed sidecar (InjectWarmup local_kind 3, payload v1:
+            // version u8 = 1, count u16 LE, then count × (kind u8, local_ns, ex_ns, a, b, c i64 LE);
+            // kind 1 = BBO (a bid, b ask, 1e-8 USD), 2 = trade (a px, b qty, c side)).
+            if let Ok((
+                _,
+                ControlCmd::InjectWarmup {
+                    local_kind: 3,
+                    payload,
+                    ..
+                },
+            )) = decoded
+            {
+                if payload.len() >= 3 && payload[0] == 1 {
+                    let n_s = usize::from(u16::from_le_bytes([payload[1], payload[2]]));
+                    for s in payload[3..].chunks_exact(41).take(n_s) {
+                        let g = |o: usize| i64::from_le_bytes(s[o..o + 8].try_into().unwrap_or([0; 8]));
+                        let _ = writeln!(
+                            out,
+                            "{{\"k\":\"cb\",\"u\":{cur_u},\"eu\":{cur_eu},\"sq\":{cur_seq},\"kind\":{},\"t_ns\":{},\"ex_ns\":{},\"a\":{},\"b\":{},\"c\":{}}}",
+                            s[0],
+                            g(1),
+                            g(9),
+                            g(17),
+                            g(25),
+                            g(33)
+                        );
+                    }
+                }
+                continue;
+            }
             let Ok((
                 _,
                 ControlCmd::BindSlot {
@@ -404,6 +434,25 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 d.reason,
                 d.intent_no,
                 d.oflags
+            );
+        } else if kind == EventKind::SEND_REPORT {
+            // Gateway write of an order-class command: engine UTC of the write (same clock as `eu`).
+            let Ok((r, _)) = SendReport::try_read_from_prefix(body) else {
+                continue;
+            };
+            let sent_eu = eutc.at(r.sent_tsc.0, calib);
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"send\",\"u\":{cur_u},\"eu\":{cur_eu},\"sq\":{cur_seq},\"sent_eu\":{sent_eu},\"dseq\":{},\"op\":{},\"oslot\":{},\"gen\":{},\"tslot\":{},\"tgen\":{},\"conn\":{},\"status\":{},\"errno\":{}}}",
+                r.decision_seq,
+                r.op as u8,
+                r.slot.0,
+                r.r#gen,
+                r.target_slot.0,
+                r.target_gen,
+                r.conn.0,
+                r.status as u8,
+                r.os_errno
             );
         } else if kind == EventKind::ORDER_EVENT {
             let Ok((e, _)) = OrderEvent::try_read_from_prefix(body) else {

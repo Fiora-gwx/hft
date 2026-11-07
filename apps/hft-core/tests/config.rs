@@ -800,7 +800,10 @@ fn core_430_production_orders_polymarket_only() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
@@ -874,7 +877,10 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
@@ -1062,7 +1068,10 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let hot = d.path().join("hot");
@@ -1156,7 +1165,10 @@ fn core_441_shared_account_ip() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1258,7 +1270,10 @@ bind_device = 'lo'
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: vec![
                 ("0f5e8d2a-4444-5555-6666-".into(), d.path().join("keys2")),
                 ("0f5e8d2a-7777-8888-9999-".into(), d.path().join("keys3")),
@@ -1341,7 +1356,10 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1399,6 +1417,27 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
         Err(e) => panic!("CORE-440.2 {e:?}"),
     };
     assert_eq!(effective(&l.cfg, "public"), (4, 1), "CORE-440.2");
+    // .5 `cancel_race` (hft-venue "撤单赛跑") is a known gw key.
+    std::fs::write(&path, with("cancel_race = true")).unwrap();
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-440.5 {e:?}"),
+    };
+    assert_eq!(l.cfg.venues["public"].gw.cancel_race, Some(true), "CORE-440.5");
+    // .6 `cancel_mode` (hft-venue "撤单方式"): "order" | "market"; anything else is refused.
+    std::fs::write(&path, with("cancel_mode = \"market\"")).unwrap();
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-440.6 {e:?}"),
+    };
+    assert_eq!(
+        l.cfg.venues["public"].gw.cancel_mode,
+        Some(hft_core::config::CancelMode::Market),
+        "CORE-440.6"
+    );
+    std::fs::write(&path, with("cancel_mode = \"token\"")).unwrap();
+    let e = hft_core::config::load(&path, true).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-440.6 {e:?}");
     // .3 out of range or an unknown key is refused.
     for (extra, code) in [
         ("rest_conns = 0", "BadValue"),
@@ -1419,7 +1458,10 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1462,7 +1504,10 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         day_loss_carry: Some((day, -28_510_000)),
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live(
@@ -1583,7 +1628,10 @@ fn core_435_live_polymarket_daily_loss_option() {
             day_loss_carry: carry.map(|p| (day, p)),
             daily_loss_abs: abs,
             daily_loss_max_resumes: resumes,
+            account_cap: None,
+            group_cap: None,
             presign: true,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let path = support::write_polymarket_maker_live(
@@ -1749,7 +1797,10 @@ fn core_439_polymarket_maker_param_values() {
         day_loss_carry: None,
         daily_loss_abs: None,
         daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
         presign: true,
+        cancel_race: true,
         extra_accounts: Vec::new(),
     };
     let path = support::write_polymarket_maker_live_with(
@@ -1852,7 +1903,10 @@ fn core_445_venue_presign() {
             day_loss_carry: None,
             daily_loss_abs: None,
             daily_loss_max_resumes: None,
+            account_cap: None,
+            group_cap: None,
             presign: false,
+            cancel_race: true,
             extra_accounts: Vec::new(),
         };
         let pm = support::write_polymarket_maker_live(
@@ -1895,6 +1949,7 @@ fn core_445_venue_presign() {
         assert!(!base.contains("presign"), "CORE-445.4");
         let on = support::PmLive {
             presign: true,
+            cancel_race: true,
             ..live
         };
         let pm = support::write_polymarket_maker_live(
@@ -1916,5 +1971,172 @@ fn core_445_venue_presign() {
             (2, 2, Some(10_000), 60_000),
             "CORE-445.4"
         );
+    }
+}
+
+#[test]
+fn core_451_coinbase_spot_registration() {
+    use hft_core::venues::{
+        READ_ONLY_PROTOCOLS, gw_rest_defaults, public_market_endpoint as allowed, registered,
+        shared_egress_ip,
+    };
+    use hft_refdata::EndpointRole as R;
+    use hft_types::VenueId;
+    // .1 protocol ↔ VenueId 16.
+    assert!(
+        registered("coinbase-spot", VenueId::COINBASE_SPOT).is_ok(),
+        "CORE-451.1"
+    );
+    assert!(
+        registered("coinbase-spot", VenueId::BINANCE_SPOT).is_err(),
+        "CORE-451.1"
+    );
+    assert_eq!(gw_rest_defaults("coinbase-spot"), Some((2, 0)), "CORE-451.1");
+    assert!(!shared_egress_ip("coinbase-spot"), "CORE-451.1");
+    assert!(READ_ONLY_PROTOCOLS.contains(&"coinbase-spot"), "CORE-451.1");
+    // .2 public endpoint allowlist: the Exchange feed and REST hosts only.
+    for (role, url) in [
+        (R::MdPublic, "wss://ws-feed.exchange.coinbase.com"),
+        (R::MdMarket, "wss://ws-feed.exchange.coinbase.com/"),
+        (R::Rest, "https://api.exchange.coinbase.com"),
+    ] {
+        assert!(allowed("coinbase-spot", role, url), "CORE-451.2 {url}");
+        for private in [R::OrderWs, R::UserData] {
+            assert!(!allowed("coinbase-spot", private, url), "CORE-451.2");
+        }
+        assert!(
+            !allowed("coinbase-spot", role, &url.replace(".com", ".com.evil.invalid")),
+            "CORE-451.2"
+        );
+    }
+    for bad in [
+        "wss://advanced-trade-ws.coinbase.com",
+        "wss://ws-feed-public.sandbox.exchange.coinbase.com",
+    ] {
+        assert!(!allowed("coinbase-spot", R::MdPublic, bad), "CORE-451.2 {bad}");
+    }
+    assert!(
+        !allowed("binance-spot", R::MdPublic, "wss://ws-feed.exchange.coinbase.com"),
+        "CORE-451.2"
+    );
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_452_coinbase_reference_config() {
+    use hft_types::{InstId, VenueId};
+    let codes = |path: &std::path::Path| -> Vec<String> {
+        hft_core::config::load(path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect()
+    };
+    // .1 the maker sim with the Coinbase reference loads; the venue is a live feed.
+    let d = tempfile::tempdir().unwrap();
+    let path =
+        support::write_polymarket_maker_sim(d.path(), &d.path().join("hot"), None, None, "127.0.0.1", "lo");
+    let l = hft_core::config::load(&path, true).unwrap_or_else(|e| panic!("CORE-452.1: {e:?}"));
+    assert_eq!(
+        l.rd.insts_of_venue(VenueId::COINBASE_SPOT),
+        [InstId(8)],
+        "CORE-452.1"
+    );
+    let cb = &l.cfg.venues["cb"];
+    assert_eq!(
+        (cb.protocol.as_str(), cb.id, cb.live_feed),
+        ("coinbase-spot", 16, true),
+        "CORE-452.1"
+    );
+    // .2 the live maker with it loads; accounts on the read-only venue are refused.
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    let d2 = tempfile::tempdir().unwrap();
+    let path = support::write_polymarket_maker_live(
+        d2.path(),
+        &d2.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+    );
+    assert_eq!(codes(&path), Vec::<String>::new(), "CORE-452.2");
+    let mut v: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let accounts = v["venues"]["pm"]["accounts"].clone();
+    v["venues"]["cb"]
+        .as_table_mut()
+        .unwrap()
+        .insert("accounts".into(), accounts);
+    std::fs::write(&path, toml::to_string(&v).unwrap()).unwrap();
+    assert!(codes(&path).contains(&"ReadOnlyVenue".to_string()), "CORE-452.2");
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_453_cpu_plans_load() {
+    use hft_core::config::Idle;
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    for (plan, row) in [
+        (hft_pmcfg::CpuPlan::Pin, "CORE-453.1"),
+        (hft_pmcfg::CpuPlan::Spin, "CORE-453.2"),
+    ] {
+        let d2 = tempfile::tempdir().unwrap();
+        let path = support::write_polymarket_maker_live(
+            d2.path(),
+            &d2.path().join("hot"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        hft_pmcfg::apply_cpu_plan(&path, plan).unwrap();
+        // The plan passes the thread-plan checks (a spinning thread's isolation is checked at start).
+        let errs: Vec<String> = hft_core::config::load(&path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect();
+        assert_eq!(errs, Vec::<String>::new(), "{row}");
+        let c = hft_core::config::parse(&path).unwrap();
+        for t in &c.threads {
+            let want = match t.task.as_str() {
+                "sequencer" => 1,
+                x if x.starts_with("gw:") => 3,
+                x if x.starts_with("feed:") => 2,
+                _ => 0,
+            };
+            assert_eq!(t.core, Some(want), "{row} {}", t.name);
+            let spin = plan == hft_pmcfg::CpuPlan::Spin && (want == 1 || want == 3);
+            assert_eq!(t.idle == Idle::Spin, spin, "{row} {}", t.name);
+            if plan == hft_pmcfg::CpuPlan::Spin && want == 2 {
+                assert_eq!(t.park_us, 20, "{row} {}", t.name);
+            }
+        }
     }
 }

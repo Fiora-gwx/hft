@@ -84,8 +84,36 @@ fn core_222_public_feed_allowlist_is_public_only() {
         assert!(!allowed(p, role, &url.replace("://", "://user@")));
         assert!(!allowed(p, role, &url.replace(".com", ".com.evil.invalid")));
     }
+    // An explicit port keeps the host check (Binance spot md on :9443).
+    assert!(allowed(
+        "binance-spot",
+        R::MdPublic,
+        "wss://stream.binance.com:9443/ws"
+    ));
+    assert!(!allowed(
+        "binance-spot",
+        R::MdPublic,
+        "wss://stream.binance.com.evil.invalid:9443/ws"
+    ));
     let c: Config = toml::from_str(include_str!("../config/binance-testnet.toml")).unwrap();
     assert_eq!(c.instance.feed_env, hft_core::config::FeedEnv::Testnet);
+}
+
+#[test]
+fn core_222b_endpoint_host_and_port() {
+    use hft_core::venues::host_port;
+    assert_eq!(
+        host_port("stream.binance.com/ws"),
+        Some(("stream.binance.com", None))
+    );
+    assert_eq!(
+        host_port("stream.binance.com:9443/ws"),
+        Some(("stream.binance.com", Some(9443)))
+    );
+    assert_eq!(host_port("api.binance.com"), Some(("api.binance.com", None)));
+    for bad in ["", ":9443/ws", "h:0/ws", "h:70000", "h:x", "u@h/ws", "h?x", "h#x"] {
+        assert_eq!(host_port(bad), None, "{bad}");
+    }
 }
 
 fn fixture() -> (tempfile::TempDir, Config, Vec<PathBuf>) {

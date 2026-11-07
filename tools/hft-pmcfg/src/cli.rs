@@ -9,8 +9,8 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--no-presign] [--live-account UID KEYS_DIR ...] \
-         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--param NAME=RAW ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
+         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
 }
@@ -35,6 +35,11 @@ pub struct Cmd {
     /// `--param NAME=RAW`, in order (checked against the binary-maker schema; with
     /// `--taker-probe` against pm-taker-probe's).
     pub params: Vec<(String, i64)>,
+    /// `[venues.cb]` (Coinbase BTC-USD reference) in the maker and live configurations; false =
+    /// `--no-coinbase`.
+    pub coinbase: bool,
+    /// `--cpu-plan none|pin|spin` (README "绑核"); default none.
+    pub cpu_plan: crate::CpuPlan,
     pub root: PathBuf,
     pub hot: PathBuf,
     pub src_ip: String,
@@ -103,7 +108,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut carry = None;
     let mut daily_loss = None;
     let mut resumes = None;
+    let mut account_cap = None;
+    let mut group_cap = None;
     let mut no_presign = false;
+    let mut no_cancel_race = false;
+    let mut no_coinbase = false;
+    let mut cpu_plan: Option<crate::CpuPlan> = None;
     let mut extra = Vec::new();
     let mut params = Vec::new();
     let mut pos: Vec<String> = Vec::new();
@@ -165,6 +175,25 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                         .ok_or("--daily-loss: USDC must be a decimal > 0 (at most 6 places)")?,
                 );
             }
+            "--account-cap" | "--group-cap" => {
+                let flag = if a == "--account-cap" {
+                    "--account-cap"
+                } else {
+                    "--group-cap"
+                };
+                let slot = if a == "--account-cap" {
+                    &mut account_cap
+                } else {
+                    &mut group_cap
+                };
+                once(slot.is_some(), flag)?;
+                let v = next(flag, "USDC")?;
+                *slot = Some(
+                    usdc(&v)
+                        .filter(|p| *p > 0)
+                        .ok_or(format!("{flag}: USDC must be a decimal > 0 (at most 6 places)"))?,
+                );
+            }
             "--daily-loss-resumes" => {
                 once(resumes.is_some(), "--daily-loss-resumes")?;
                 let v = next("--daily-loss-resumes", "N")?;
@@ -178,6 +207,22 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             "--no-presign" => {
                 once(no_presign, "--no-presign")?;
                 no_presign = true;
+            }
+            "--no-cancel-race" => {
+                once(no_cancel_race, "--no-cancel-race")?;
+                no_cancel_race = true;
+            }
+            "--cpu-plan" => {
+                if cpu_plan.is_some() {
+                    return Err("--cpu-plan given twice".into());
+                }
+                let v = next("--cpu-plan", "none|pin|spin")?;
+                cpu_plan =
+                    Some(crate::CpuPlan::parse(&v).ok_or_else(|| format!("--cpu-plan {v}: none|pin|spin"))?);
+            }
+            "--no-coinbase" => {
+                once(no_coinbase, "--no-coinbase")?;
+                no_coinbase = true;
             }
             "--param" => {
                 let p = next("--param", "NAME=RAW")?;
@@ -198,10 +243,13 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let needs_live = [
         (probe, "--taker-probe"),
         (no_presign, "--no-presign"),
+        (no_cancel_race, "--no-cancel-race"),
         (!extra.is_empty(), "--live-account/--account"),
         (carry.is_some(), "--day-loss-carry"),
         (daily_loss.is_some(), "--daily-loss"),
         (resumes.is_some(), "--daily-loss-resumes"),
+        (account_cap.is_some(), "--account-cap"),
+        (group_cap.is_some(), "--group-cap"),
     ];
     if live.is_none()
         && let Some((_, flag)) = needs_live.iter().find(|(set, _)| *set)
@@ -213,6 +261,9 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     }
     if !params.is_empty() && !maker && live.is_none() {
         return Err("--param needs --maker or --live".into());
+    }
+    if no_coinbase && !maker && live.is_none() {
+        return Err("--no-coinbase needs --maker or --live".into());
     }
     if extra.len() > MAX_EXTRA_ACCOUNTS {
         return Err(format!(
@@ -234,8 +285,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 day_loss_carry: carry,
                 daily_loss_abs: daily_loss,
                 daily_loss_max_resumes: resumes,
+                account_cap,
+                group_cap,
                 presign: !no_presign,
+                cancel_race: !no_cancel_race,
                 extra_accounts: extra,
+                coinbase: !no_coinbase,
             };
             l.check()?;
             if probe { Mode::LiveProbe(l) } else { Mode::Live(l) }
@@ -248,6 +303,8 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     Ok(Cmd {
         mode,
         params,
+        coinbase: !no_coinbase,
+        cpu_plan: cpu_plan.unwrap_or_default(),
         root: PathBuf::from(take()),
         hot: PathBuf::from(take()),
         src_ip: take(),
@@ -259,6 +316,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
 
 /// Writes the configuration of `cmd`; returns the path of `core.toml`.
 pub fn run(cmd: &Cmd) -> Result<PathBuf, String> {
+    let path = write(cmd)?;
+    crate::apply_cpu_plan(&path, cmd.cpu_plan)?;
+    Ok(path)
+}
+
+fn write(cmd: &Cmd) -> Result<PathBuf, String> {
     let (root, hot) = (cmd.root.as_path(), cmd.hot.as_path());
     let (user, pipeline) = (cmd.user.as_deref(), cmd.pipeline.as_deref());
     let (ip, dev) = (cmd.src_ip.as_str(), cmd.bind_device.as_str());
@@ -269,9 +332,16 @@ pub fn run(cmd: &Cmd) -> Result<PathBuf, String> {
         Mode::LiveProbe(l) => {
             crate::write_polymarket_taker_probe_live(root, hot, user, pipeline, ip, dev, l, &cmd.params)
         }
-        Mode::Maker => {
-            crate::write_polymarket_maker_sim_with(root, hot, user, pipeline, ip, dev, &cmd.params)
-        }
+        Mode::Maker => crate::write_polymarket_maker_sim_opts(
+            root,
+            hot,
+            user,
+            pipeline,
+            ip,
+            dev,
+            &cmd.params,
+            cmd.coinbase,
+        ),
         Mode::Sim => crate::write_polymarket_sim(root, hot, user, pipeline, ip, dev),
     }
 }

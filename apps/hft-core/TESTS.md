@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-441、CORE-446、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445、CORE-447 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435、CORE-439、CORE-440、CORE-445、CORE-447、CORE-451、CORE-452 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420、CORE-437、CORE-438 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4501,6 +4501,32 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-450.2 | Live 账户 1,`reject = 0` | 假 |
 | CORE-450.3 | Sim 账户 2,`reject = 1`;`SHADOW` 标志 | 假;假 |
 
+### CORE-451 `coinbase-spot` 的登记与公共端点白名单
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.protocol`);协议归 [venue-coinbase](../../crates/venue-coinbase/README.md)
+- 级别:table
+- 里程碑:M3
+- 前置:无配置;直接调用 `hft_core::venues` 的登记函数
+- 实现:`apps/hft-core/tests/config.rs::core_451_coinbase_spot_registration`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-451.1 | `registered("coinbase-spot", 16)`;与 `BINANCE_SPOT` 配对;`gw_rest_defaults`;`shared_egress_ip`;`READ_ONLY_PROTOCOLS` | `Ok`;`Err`;`(2, 0)`;假;含 `coinbase-spot` |
+| CORE-451.2 | `public_market_endpoint`:MdPublic/MdMarket `wss://ws-feed.exchange.coinbase.com`、Rest `https://api.exchange.coinbase.com`;同 URL 的 OrderWs/UserData;主机加 `.evil.invalid`;Advanced Trade、sandbox 主机;`binance-spot` 配 Coinbase 主机 | 允许;其余全部拒绝 |
+
+### CORE-452 Coinbase 参考行情配置可加载,只读 venue 不收账户
+
+- 规则:[配置文件字段](README.md#配置文件字段)、错误码 `ReadOnlyVenue`
+- 级别:table
+- 里程碑:M3
+- 前置:Cargo feature `polymarket`;`write_polymarket_maker_sim` 与 `write_polymarket_maker_live`(缺省含 `[venues.cb]`,hft-pmcfg PMC-008)
+- 实现:`apps/hft-core/tests/config.rs::core_452_coinbase_reference_config`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-452.1 | 挂单模拟配置 `load(…, true)` | 成功;venue 16 只有 InstId 8;`venues.cb` = (`coinbase-spot`, 16, `live_feed`) |
+| CORE-452.2 | 实盘做市配置;再把 `venues.pm.accounts` 复制到 `venues.cb` | 无错误;含 `ReadOnlyVenue` |
+
 ### CORE-447 `[sim] calib` 校准表
 
 - 规则:[配置文件字段](README.md#配置文件字段)(`[sim] calib`)、[hft-sim 条件跟踪与校准表](../../crates/hft-sim/README.md#条件跟踪与校准表)
@@ -4588,6 +4614,21 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-440.2 | `[venues.public.gw] rest_conns = 4`、`rest_cancel_reserve = 1` | 加载成功;生效 (4, 1) |
 | CORE-440.3 | `rest_conns = 0`;`rest_conns = 17`;`rest_conns = 2`、`rest_cancel_reserve = 2`;未知键 `conns` | 前三者含 `BadValue`;最后一个 `ConfigParse` |
 | CORE-440.4 | Polymarket 实盘做市配置(不写 `venues.pm.gw`) | 加载成功;`gw_rest_defaults("polymarket-clob")` = (8, 1);生效 (8, 1) |
+| CORE-440.5 | `cancel_race = true` | 加载成功;`gw.cancel_race` = true |
+| CORE-440.6 | `cancel_mode = "market"`;`cancel_mode = "token"` | 前者加载成功、`CancelMode::Market`;后者 `ConfigParse` |
+
+### CORE-453 hft-pmcfg 的绑核方案通过线程计划校验
+
+- 规则:[线程计划](README.md#线程计划);方案归 [hft-pmcfg 绑核](../../tools/hft-pmcfg/README.md#绑核)
+- 级别:table
+- 里程碑:M6
+- 前置:`write_polymarket_maker_live`(Cargo feature `polymarket`),再 `hft_pmcfg::apply_cpu_plan`
+- 实现:`apps/hft-core/tests/config.rs::core_453_cpu_plans_load`
+
+| 行 | 方案 | 期望 |
+|---|---|---|
+| CORE-453.1 | `pin` | 加载无错误;`sequencer` 核 1、`feed:*` 核 2、`gw:pm` 核 3、其余核 0;没有 `spin` |
+| CORE-453.2 | `spin` | 加载无错误(隔离在线程启动时才检查);`sequencer`、`gw:pm` 为 `spin`;`feed:*` 的 `park_us` = 20 |
 
 ## 验收
 

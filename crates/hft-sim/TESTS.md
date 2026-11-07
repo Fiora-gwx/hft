@@ -1956,3 +1956,48 @@ spec: README.md
 | SIM-242.2 | 开;FOK 买 60 @ 0.47 | 只有 `Reject` |
 | SIM-242.3 | 开;IOC 买 60 @ 0.47 | `Ack`、`PartialFill`、`Expired`(有成交不受影响) |
 | SIM-242.4 | 关;IOC 买 10 @ 0.46 | `Ack`、`Expired` |
+
+### SIM-243 按交易所时间撮合(`ex_time_max_us`)
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-233 的撤单竞速(撤单 0.5 ms 到达);买 100 @ 0.45 已挂;120.1 ms 到达的撤单;一笔 0.44 的穿价成交,交易所时间 120 ms、接收 140 ms
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_243_exchange_time_matching`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-243.1 | 开(上限 50 ms) | 成交 100 @ 0.45;有 `Fill` 与 `CancelReject` |
+| SIM-243.2 | 关 | 无成交(撤单先到) |
+| SIM-243.3 | 上限 5 ms | 无成交(在 135 ms 撮合,撤单已到) |
+| SIM-243.4 | 123 ms 到达的新挂单、交易所时间 122 ms 的穿价成交:开 / 关 | 开:不成交;关:成交 10 |
+
+### SIM-244 `MakerFill::QueueStrict`
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232(买 100 @ 0.45 排在显示的 50 之后)
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_244_queue_strict`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-244.1 | 档位降到 20,同价卖 30 | 无成交(前方 50 不因撤单减少) |
+| SIM-244.2 | 再同价卖 30 | 成交 10 |
+| SIM-244.3 | 穿价成交 1 @ 0.44 | 成交全部 100 |
+| SIM-244.4 | 卖一越到 0.44 | 成交全部 100 |
+
+### SIM-245 变动档位、窗口与参考品种
+
+- 规则:[条件跟踪与校准表](README.md#条件跟踪与校准表)
+- 级别:table
+- 里程碑:M3
+- 前置:`mv_thr` [25, 100, 200]、`mv_window_ms` 500、`ref_inst` 8;inst 9 先出现
+- 实现:`crates/hft-sim/tests/cond.rs::sim_245_move_thresholds_window_and_reference`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-245.1 | inst 8 在 400 ms 内变动 3 bp | `mv` = 3(inst 9 不是参考) |
+| SIM-245.2 | 650 ms 后(窗口内只剩最后一条) | `mv` = 0 |
+| SIM-245.3 | `move_bucket`:0.25 bp、0.26 bp 对 [25, 100] | 0、1 |
+

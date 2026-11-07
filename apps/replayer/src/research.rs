@@ -10,9 +10,9 @@ use crate::Failure;
 
 const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [--account N]... \
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
-[--maker-fill queue|queue-cap|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
+[--maker-fill queue|queue-cap|queue-strict|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
-[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--features EVERY_MS]";
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--param-base journal|defaults|live] [--features EVERY_MS]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -20,8 +20,9 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut accounts = Vec::new();
     let mut variants = vec![Variant {
         name: "base".into(),
-        set: Default::default(),
+        ..Variant::default()
     }];
+    let mut param_base: Option<String> = None;
     let mut seeds = vec![1u64];
     let mut sim = SimParams::default();
     let mut driver = DriverCfg::default();
@@ -64,7 +65,14 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
             "--set" => variants.push(Variant {
                 name: format!("set{}", variants.len()),
                 set: hft_replay::variants::parse_sets(&value)?,
+                ..Variant::default()
             }),
+            "--param-base" => {
+                if !matches!(value.as_str(), "journal" | "defaults" | "live") {
+                    return Err(format!("--param-base {value}: journal|defaults|live"));
+                }
+                param_base = Some(value);
+            }
             "--seeds" => {
                 seeds = value
                     .split(',')
@@ -87,8 +95,13 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                 sim.maker_fill = match value.as_str() {
                     "queue" => hft_sim::MakerFill::Queue,
                     "queue-cap" => hft_sim::MakerFill::QueueCap,
+                    "queue-strict" => hft_sim::MakerFill::QueueStrict,
                     "through" => hft_sim::MakerFill::TradeThrough,
-                    _ => return Err(format!("--maker-fill {value}: queue|queue-cap|through")),
+                    _ => {
+                        return Err(format!(
+                            "--maker-fill {value}: queue|queue-cap|queue-strict|through"
+                        ));
+                    }
                 }
             }
             "--calib" => {
@@ -117,6 +130,13 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                     slow_ppm: ppm,
                     resp_us: resp,
                 });
+            }
+            "--ex-time-max-us" => {
+                sim.venue.ex_time_max_us =
+                    u32::try_from(num(&value)?).map_err(|_| "--ex-time-max-us too large")?;
+            }
+            "--sim-cash" => {
+                sim.cash = Some(i64::try_from(num(&value)?).map_err(|_| "--sim-cash too large")?);
             }
             "--taker-resp-us" => {
                 let r = u32::try_from(num(&value)?).map_err(|_| "--taker-resp-us too large")?;
@@ -171,6 +191,27 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut files = Vec::new();
     crate::discover(&journal, &mut files).map_err(|(_, m)| m)?;
     files.sort();
+    // --param-base: every variant without its own `base` (not the journal's own "base" run).
+    if let Some(b) = param_base {
+        for v in variants.iter_mut().skip(1) {
+            if v.base.is_none() {
+                v.base = Some(b.clone());
+            }
+        }
+    }
+    // base "live" = the schema defaults plus binary-maker's live base parameters, the variant's own
+    // sets on top; written out as a "defaults" variant with the full set (run.json shows it).
+    for v in variants.iter_mut().skip(1) {
+        if v.base.as_deref() == Some("live") {
+            let own = std::mem::take(&mut v.set);
+            v.set = hft_strategy_registry::BINARY_MAKER_LIVE_BASE
+                .iter()
+                .map(|(k, x)| ((*k).to_string(), *x))
+                .collect();
+            v.set.extend(own);
+            v.base = Some("defaults".into());
+        }
+    }
     Ok(ResearchOpts {
         files,
         accounts: (!accounts.is_empty()).then_some(accounts),
@@ -282,8 +323,7 @@ pub(crate) fn execute_features<S: StrategySet>(
     Ok(0)
 }
 
-const CALIB_USAGE: &str =
-    "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N]";
+const CALIB_USAGE: &str = "usage: replayer calib --journal <file|dir> --account N --out calib.json [--window-s N] [--phase-s N] \n[--mv-thr-bp BP[,BP...]] [--mv-window-ms N] [--mv-ref-inst N]";
 
 /// `replayer calib`: the conditional latency pools of one account from a live journal.
 pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
@@ -291,6 +331,8 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
     let mut out = None;
     let mut account = None;
     let (mut window_s, mut phase_s) = (300u32, 5u32);
+    let d = hft_sim::CondCfg::default();
+    let (mut mv_thr, mut mv_window_ms, mut ref_inst) = (d.mv_thr, d.mv_window_ms, d.ref_inst);
     let mut i = 1;
     while i < args.len() {
         let key = args[i].as_str();
@@ -314,6 +356,24 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
             }
             "--window-s" => window_s = n(&value)?,
             "--phase-s" => phase_s = n(&value)?,
+            "--mv-thr-bp" => {
+                let mut v = Vec::new();
+                for x in value.split(',') {
+                    let bp: f64 = x
+                        .trim()
+                        .parse()
+                        .map_err(|_| (2, format!("--mv-thr-bp {value}: comma list of bp")))?;
+                    if !(bp.is_finite() && bp > 0.0) || v.last().is_some_and(|l| f64::from(*l) >= bp * 100.0)
+                    {
+                        return Err((2, format!("--mv-thr-bp {value}: positive and ascending")));
+                    }
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    v.push((bp * 100.0).round() as u32);
+                }
+                mv_thr = v;
+            }
+            "--mv-window-ms" => mv_window_ms = n(&value)?.max(1),
+            "--mv-ref-inst" => ref_inst = n(&value)?,
             _ => return Err((2, format!("unsupported option {key}; {CALIB_USAGE}"))),
         }
     }
@@ -332,10 +392,60 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
         reassembly: 128 << 20,
         window_s,
         phase_s,
+        mv_thr,
+        mv_window_ms,
+        ref_inst,
     })
     .map_err(|e| (3, e))?;
     let text = serde_json::to_string_pretty(&v).map_err(|e| (2, e.to_string()))?;
     std::fs::write(&out, text).map_err(|e| (2, format!("{}: {e}", out.display())))?;
     writeln!(stdout, "{}", v["meta"]).map_err(|e| (2, e.to_string()))?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::disallowed_methods)] // allow-list: test code
+    use super::parse;
+
+    #[test]
+    fn rpl_310_param_base_live_expands_to_the_live_base() {
+        let dir = std::env::temp_dir().join(format!("rpl3024-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let j = dir.to_string_lossy().into_owned();
+        let o = parse(&a(&[
+            "research",
+            "--journal",
+            &j,
+            "--out",
+            "/tmp/x",
+            "--set",
+            "clip_shares=7,pair_margin=1",
+            "--param-base",
+            "live",
+        ]))
+        .unwrap();
+        let v = &o.variants[1];
+        assert_eq!(v.base.as_deref(), Some("defaults"), "RPL-310.1");
+        for (k, x) in hft_strategy_registry::BINARY_MAKER_LIVE_BASE {
+            let want = if k == "clip_shares" { 7 } else { x };
+            assert_eq!(v.set.get(k), Some(&want), "RPL-310.1 {k}");
+        }
+        assert_eq!(v.set.get("pair_margin"), Some(&1), "RPL-310.1");
+        assert_eq!(o.variants[0].base, None, "RPL-310.1 the journal's own run");
+        assert!(
+            parse(&a(&[
+                "research",
+                "--journal",
+                &j,
+                "--out",
+                "/tmp/x",
+                "--param-base",
+                "x"
+            ]))
+            .is_err()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

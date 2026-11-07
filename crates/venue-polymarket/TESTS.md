@@ -32,6 +32,7 @@ spec: README.md
 | 凭证 | PMK-023, PMK-024 |
 | 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032, PMK-034, PMK-035 |
 | 吃单 | PMK-038–PMK-040 |
+| 撤单赛跑 | PMK-041 |
 | 预签名 | PMK-035, PMK-036 |
 | 用户流事件表 | PMK-027, PMK-029, PMK-032, PMK-034, PMK-040 |
 | 累计量与费用来源 | PMK-027, PMK-031, PMK-039 |
@@ -622,3 +623,20 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-040.7 | 买 0.35 × 2.914286 份,应答未到;查单 200 `MATCHED`,`original_size` 2.9142、`size_matched` 2.914286;再 `trade` `MATCHED` | `Ack`、`QueryResult{Filled(3), cum 2 914 286, avg_px 0.35}`(不按形状错误);`trade` 无事件 |
 | PMK-040.8 | 该 FAK 单的 `order` `UPDATE`;`taker_order_id` 不是本进程 FAK 单的 `trade` | 无事件;后者 `skip = Listed` |
 | PMK-040.9 | 2026-10-30 探针:买 0.13 × 7.7 份(签 1.00 USDC、最少 7.6923 份);`trade` 5 @ 0.11、4.09091 @ 0.11(不同 `id`);再应答(9.09091、1) | `PartialFill{cum 5}`、`PartialFill{cum 9 090 910}`(超过订单量仍是 `PartialFill`);`Ack`、`QueryResult{Filled(3), cum 9 090 910, avg 0.11}` |
+
+### PMK-041 撤单赛跑:按 token 的伴随请求与两个应答
+
+- 规则:[撤单赛跑](README.md#撤单赛跑)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-025(H1 已 `Ack`,slot 7 / gen 3)
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_041_cancel_race_companion`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-041.1 | 按哈希撤 H1 的 `encode_rest_companion` | `Ok(true)`;`DELETE /cancel-market-orders`,体 `{"asset_id": T_UP}`,带 `POLY_SIGNATURE` |
+| PMK-041.2 | `Place`、`CancelAll`、哈希未知的 `Cancel` | `Ok(false)` |
+| PMK-041.3 | 伴随应答 `canceled [H1]`(`OrderCompanion`),再主应答 `not_canceled {H1: already canceled}` | 只有一条 `CancelAck` |
+| PMK-041.4 | 未确认撤销时同一 `not_canceled` 应答 | 一条 `CancelReject` |
+| PMK-041.5 | H1、H2 都挂在 UP,撤 H1;H2 挂在 DN;H2 的撤单应答 `canceled [H2]` 之后再撤 H1 | 同 token:`Ok(false)`(H2 会被一并撤掉);另一 token:`Ok(true)`;H2 已终结:`Ok(true)` |
+

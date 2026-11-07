@@ -33,7 +33,7 @@ status: impl
 
 ### group 形态
 
-全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;最后一个是参考市场(另一个 venue,只读,不下单)。group 总数须为奇数且 ≥ 3。`check` 的 `GroupShape` 码:1 = 数目不是 ≥ 3 的奇数;2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
+全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;其后是一到两个参考市场(不在槽位 venue 上,只读,不下单):第一个是公允价参考,可选的第二个是 v37 快参考保护(`cb_*`)读的参考——有它时保护读它的 BBO(中间价 × 2,按该 inst 的价格单位;规则只用相对变化),并忽略 InjectWarmup local_kind 3 的旁路样本;没有时照旧读旁路样本。第二参考还可用于研究参数 `ref_cb_w`(schema v38,缺省 0 = 关):公允价及其锚点读的参考中间价改为第一参考中间价 + `ref_cb_w` × (第二参考中间价折成第一参考单位 − 第一参考中间价),单位比值取两者中间价之比的滑动均值(每个第一参考报价 1/64);第二参考 5 s 未更新或尚无比值时退回第一参考自己的中间价;结算模块、波动率与方向分数仍只读第一参考。参考组数 = 表尾不在槽位 venue 上的连续 group 数(至少按 1 计)。`check` 的 `GroupShape` 码:1 = 参考组多于 2,或槽位数不是 ≥ 2 的偶数(只有一个参考时即 group 总数不是 ≥ 3 的奇数);2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
 
 ### 参数
 
@@ -70,7 +70,7 @@ status: impl
 | `pred_w_imb` | Rate | 1.37249 | 预测里参考市场买一卖一数量失衡的权重;范围 −10 – 10 | None |
 | `pred_w_ret` | Rate | 0.12129 | 预测里最近 5 个 1 秒收益之和 / (σ √5) 的权重;范围 −10 – 10 | None |
 | `pred_w_ser` | Rate | 0.18720 | 预测里最近 15 个 1 秒收益之和 / 其绝对值之和(带方向的效率比)的权重;范围 −10 – 10 | None |
-| `comp_skip` | Rate | 0(关) | 方向分数(规则 10)低于 −`comp_skip`(标准差)的代币不挂单、已挂的撤掉;v7 取 0.5;范围 0 – 10 | None |
+| `comp_skip` | Rate | 0(关) | 方向分数(规则 10)低于 −`comp_skip`(标准差)的代币不挂单、已挂的撤掉;v7 取 0.5;负值:只挂分数高于 −`comp_skip` 的代币(方向 maker,dm10 取 −1);范围 −10 – 10 | None |
 | `comp_dir` | Rate | 0(关) | 方向分数高于 `comp_dir` 的代币的净份数上限改为 `dir_cap_shares`;v7 取 0.5;范围 0 – 10 | None |
 | `dir_cap_shares` | Count | 20 | 方向分数高于 `comp_dir` 时该侧的净份数上限(代替 `inv_max_shares`,规则 4 的"加上一张挂单"照算);范围 1 – 1 000 000 | None |
 | `comp_every_ms` | DurationMs | 250 | 方向分数至多每这么久(UTC 时间)重算一次;0 = 每次判定都算;范围 0 – 60 000 | None |
@@ -86,6 +86,11 @@ status: impl
 | `comp_bdrop1_mu` / `comp_bdrop1_sd` | Rate | 0.001550071 / 3.031530 | 方向分数里 1 秒买一变化(美分)特征的均值 / 标准差(标准差 ≥ 1e-9);默认值为 2026-10-28 研究拟合(`comp_norm.json`) | None |
 | `load_gate_ns` | Count | 0(关) | 上一个 UTC 分钟的行情延迟每秒 90 分位的中位数 ≥ 它(纳秒)时不挂单(规则 11);v7 取 12 688 500(12.6885 ms,研究的繁忙档) | None |
 | `mdslow_gate_ns` | Count | 0(关) | 上一个 UTC 分钟的行情延迟每秒中位数的中位数 > 它(纳秒)时不挂单;v7 取 40 000 000 | None |
+| `dir_pair_free` | Bool | 0(关) | 1:方向分数高于 `comp_dir` 的代币凑对时不受对价上限约束(两模式规则:被看好的一侧把另一侧留下的库存配掉;公允价上限照常);schema v7 | None |
+| `tilt_z` | Rate | 0(关) | 方向分数高于它的代币每单挂 `tilt_clip_shares` 份(倾斜:分数偏向的一侧挂大单);schema v8 | None |
+| `tilt_clip_shares` | Count | 0(关) | 上一行的单笔份数;0 = 关 | None |
+| `late_hedge_ms` | DurationMs | 0(关) | 最后一分钟止损:从 `stop_before_ms` 到窗口结束前 `late_hedge_ms`,只挂凑对的买单,由分数高于 `late_hedge_z` 的腿(信号与净持仓相反)在买一挂、不受对价上限;0 = 关 | None |
+| `late_hedge_z` | Rate | 0 | 止损凑对的腿需要的分数 | None |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 
@@ -93,7 +98,7 @@ v7 的实盘参数 = v6 实盘参数(`clip_shares` 5、`inv_max_shares` 10、`si
 
 ### 订阅
 
-槽位腿订阅 `BOOK` 与 `TRADE`,参考腿订阅 `BBO`,都投递给快速部分(`Part::Fast`)。成交事件不触发判定(只读取上一事件的下单结果,方向分数开启时另记下大单,规则 10);订阅它也是为了让行情流带上成交:模拟撮合的排队成交模型(`[sim] maker_fill = "queue"`)按公开成交消耗挂单前方的数量,没有成交时只有价格穿过挂单才成交。没有 Model。
+槽位腿订阅 `BOOK` 与 `TRADE`,参考腿订阅 `BBO`,都投递给快速部分(`Part::Fast`);`InjectWarmup` 也投递给快速部分(`Part::Both`,只用 local_kind 1 的 Chainlink 样本,见规则 12)。成交事件不触发判定(只读取上一事件的下单结果,方向分数开启时另记下大单,规则 10);订阅它也是为了让行情流带上成交:模拟撮合的排队成交模型(`[sim] maker_fill = "queue"`)按公开成交消耗挂单前方的数量,没有成交时只有价格穿过挂单才成交。没有 Model。
 
 ### 波动率
 
@@ -137,8 +142,13 @@ v7 的实盘参数 = v6 实盘参数(`clip_shares` 5、`inv_max_shares` 10、`si
     - **特征**(代币 X、其互补代币 O,unit = 价格单位 10^|px_exp|,cent = unit / 100,数量单位 10^|qty_exp|):扣除本实例挂单(`comp_excl_own` 且该腿挂单属于当前窗口、`Views::order` 为 `Live`/`PendingCancel`/`PendingAmend`:在其价位扣 委托量 − 已成交,不低于 0)后,X、O 的买盘从买一起最多读 64 档;"买一" = 扣除后数量 > 0 的最高价。① imb1 = ⌊(qX − qO) × 1e9 / (qX + qO)⌋(q = 各自买一的数量,和为 0 时取 0);② imb5 同式,q 换成买一所在美分 ⌊b / cent⌋ × cent 起向下 5 个整美分价位(k = 0..4)的数量之和;③④ mom_h = ⌊(M_X[s] − M_X[s − h]) × 1e9 / (2 × unit)⌋,h = 30、60,任一缺失则该特征缺失;⑤⑥ bret_h = ⌊sgn × L × 10^15 / (隐含 σ × √h_micro)⌋,h = 15、60,L = ln(R[s] / R[s − h]),隐含 σ = ⌊σ × `sigma_scale` / 1e9⌋(σ 同"波动率"),sgn = X 为 Up 时 +1、Down 时 −1,√15_micro = 3 872 983、√60_micro = 7 745 967,R 缺失或没有 σ 时该特征缺失;⑦ flow30 = sign(v) × ln(1 + |v| 份):v = UTC − 30 s 及之后记下的 X 的带号数量之和减去 O 的,ln 的参数为 1e9 + ⌊|v| × 1e9 / 数量单位⌋;⑧ bdrop1 = ⌊(B_X[s] − B_X[s − 1]) × 1e9 / cent⌋(美分),任一缺失时取 0。①②⑦⑧ 总有值,③–⑥ 可缺失。
     - **对数**:atanh2(u) = 2 × Σ_{j=0}^{11} ⌊p_j / (2j + 1)⌋,p_0 = u,p_{j+1} = ⌊p_j × u2 / 1e9⌋,u2 = ⌊u × u / 1e9⌋;ln(a / b) = atanh2(⌊(a − b) × 1e9 / (a + b)⌋);参数 x ≥ 1e9 的 ln(x / 1e9):x 反复 ⌊x / 2⌋ 共 k 次直到 x < 2e9,结果 = k × 693 147 181 + ln(x / 1e9)(上式)。
     - **分数** z = ⌊Σ_i ⌊sign_i × (x_i − mu_i) × 1e9 / sd_i⌋ × 1e9 / 2 828 427 125⌋(即除以 √8;缺失的特征贡献 0),sign = +1,flow30 为 −1(反向);mu、sd 为 `comp_<特征>_mu`、`comp_<特征>_sd`。
-    - **用法**:z < −`comp_skip`(`comp_skip` > 0)的腿不挂单、已挂的撤掉;z > `comp_dir`(`comp_dir` > 0)的腿第 4 步的上限用 `dir_cap_shares`。
+    - **用法**:z < −`comp_skip`(`comp_skip` ≠ 0;负值即 z 不高于 |`comp_skip`| 时)的腿不挂单、已挂的撤掉(分数尚未算出时不跳过);z > `comp_dir`(`comp_dir` > 0)的腿第 4 步的上限用 `dir_cap_shares`;`dir_pair_free` 时这条腿第 3 步没有对价上限。
 11. **行情延迟闸门**(`load_gate_ns` 或 `mdslow_gate_ns` 不为 0 时采样):每个事件读出各槽位 inst 自上次以来的新行情戳(`Views::md_stamp`:L2 批、交易所整簿与成交,每 inst 至多最近 16 条),跳过 ⌊`ex_ts_ns` / 1 ms⌋ = 0 或 `sw_rx_ns` ≤ 0 的,按 `sw_rx_ns` 排序后逐条采样:延迟 = `sw_rx_ns` − ⌊`ex_ts_ns` / 1 ms⌋ × 1 ms(纳秒),按 ⌊`sw_rx_ns` / 1 s⌋ 归入接收秒;早于正在收集的秒的样本丢弃,每秒至多 1 024 个。一秒在出现更晚秒的样本或 UTC(策略时间)进入更晚的秒时结束:排序,算 90 分位与中位数(线性插值:n 个值 v,h = q × (n − 1)(q 以十分之一计),lo = ⌊h / 10⌋,fr = h mod 10,值 × 10 = 10 × v[lo] + fr × (v[lo + 1] − v[lo]))。一分钟(⌊秒 / 60⌋)在出现更晚分钟的秒或 UTC 进入更晚的分钟时结束:对其各秒的 90 分位、中位数(× 10)各取中位数(同一公式,结果 × 100)。判定时若刚结束的分钟恰是 UTC 当前分钟的前一分钟:其 90 分位的中位数 ≥ `load_gate_ns` × 100 或中位数的中位数 > `mdslow_gate_ns` × 100(阈值为 0 的不判)→ 第 2 步不成立;前一分钟没有样本时两个闸门都不关。
+12. **结算窗口流动性**(`settle_ms` > 0,schema v25,研究用,默认关闭;设计见仓库外 `E:\trade\reports\Polymarket_设计_结构性优势_2026-11-02.md` §3):剩余 ≤ `settle_ms`(≤ 60 s)且主规则没有目标(第 2 步不成立、不在 `late_hedge_ms` 止损段、不在 `pair_stop_ms` 凑对优先段)时,本模块接管当前对两条腿的挂单槽位。参考腿每条 `Bbo` 记逐秒 2 × 中间价 R[s](每秒最后一条,512 秒环,精确取秒)。窗口起点 S、当前 UTC 秒 s:行权价 K = mean(R[S−60 .. S−1])(每窗查一次,记录秒数 < 48 则本窗不运行);n_lock = s − (S + `window_s` − 60),锁定部分 = mean(R[S + `window_s` − 60 .. s−1])(缺 > 20% 不算),n_fut = S + `window_s` − s,R_now = 最新参考 2 × 中间价;μ = ((n_lock × 锁定均值 + n_fut × R_now) / 60) / K − 1;sd = σ × `settle_vol_mult` × √(n_fut(n_fut+1)(2n_fut+1) / (6 × 60²)),σ 为第 2 步的实现波动;p_up = Φ(μ / sd)(z 截到 ±6)。热门方 F = Up 若 p_up ≥ 0.5,否则 Down,p_F = max(p_up, 1 − p_up)。F 的簿 `Live`、有买一 b、不锁不交叉时目标价 px = b(`settle_improve` 且卖一 − b ≥ 2c 时 b + 1c);p_F ≥ `settle_p_min`、`settle_bid_lo` ≤ px ≤ `settle_bid_hi`、本窗模块已买 + `settle_clip_shares` ≤ `settle_max_shares`、n_lock ≥ `settle_min_lock_s`、|μ| ≥ `settle_mu_min`、距该腿上次改价 ≥ `settle_requote_ms` 时挂 post-only 买单 `settle_clip_shares` 份,tag = 0x10000 | (gix + 1)。模块的挂单在下列任一成立时撤:簿不 `Live`、p_up 算不出、该腿不再是热门方、p_F < `settle_cancel_p`、买一高于挂单价(簿不锁时;撤后按 `settle_requote_ms` 重挂)、挂单价 > `settle_bid_hi`;买一低于挂单价时留守。成交持有到结算。研究导出在 `COMP_COLUMNS` 之后加 `settle_p_up`、`settle_mu_bp`(μ,1e-9,1 bp = 100 000)、`settle_nlock` 三列(模块运行且算出时有值,否则 `NA`)。状态(`SettleState`、每腿的模块标记 `skind`、参考逐秒环)不进快照、不进 `Quote`。
+    - **Chainlink**(schema v32):PM 按 Chainlink BTC/USD 60 s TWAP 结算(窗口末 60 s 均价 ≥ 起点前 60 s 均价 → Up)。外部进程 `tools/pm-md-probe/scripts/cl_feed.py` 订阅 PolyBolt `price.crypto`(btcusd),每个新样本发一条 `InjectWarmup`(local_kind 1,载荷 v1 共 17 字节小端:版本 u8 = 1、Chainlink 时间戳 ms i64、价格 1e-8 USD i64;其它版本、短载荷、价格 ≤ 0 忽略)。样本按 Chainlink 秒 ⌊ts / 1 s⌋ 记入 512 秒环(同秒后写覆盖;比最新样本早的只补自己的秒),最新样本的秒 ≥ s − 3 时为当前价。`settle_src` 1:K、锁定部分与 R_now 改用 Chainlink 秒与当前价(σ 仍取参考),没有当前价时 p_up 算不出(不挂、已挂的撤)。领先 L = μ × mean(K)(美分;Chainlink 为 1e-8 USD,参考为 2 × 中间价按其价格单位换算),Up 取 L、Down 取 −L:`settle_lead_usd` > 0 时挂单还需 L ≥ `settle_lead_usd` × 100,挂单在 2L < `settle_lead_usd` × 100 时撤;`settle_edge` > 0 时挂单价还需 ≤ p_F − `settle_edge`,挂单价 > p_F 时撤。Chainlink 环与当前价不进快照。
+13. **止损配对**(`rescue_ms` > 0,schema v32,默认关闭):窗口年龄 ≥ `rescue_ms` 且剩余 > `stop_before_ms` 时,一条短腿(本腿份数 < 另一腿)若分数 z > `rescue_z`(规则 10;此段即使第 2 步不成立也计算分数)且另一腿(持仓腿)买一 ≤ `rescue_px`,按最后一分钟止损同样的方式挂单:不受第 2 步、对价上限与公允价上限约束,在买一挂 `clip_shares`(`rescue_cap` > 0 时价格不高于 1 − 持仓腿均价 + `rescue_cap`);挂出后本窗口不再开新仓(第 4 步的开仓腿全部不挂)。记号(窗口起点)不进快照。
+    - **震荡开关预热**(v31 `chop_k` 的记录不进快照,重启后要攒够 `chop_k` / 2 个窗口才判断):`InjectWarmup` local_kind 2,载荷 v1 小端:版本 u8 = 1、条数 u8、条数 × (窗口起点秒 i64, 效率比 1e-9 i64)。只在环为空时接收;效率比不在 [0, 1e9]、窗口不递增、或不早于正在累计的窗口的条目跳过;保留最后 24 条,最新在最后。外部进程 `tools/pm-md-probe/scripts/chop_seed.py` 在新 run 启动后从其它 run 的 seq journal 按本节同一算法(每窗 30..240 s 每秒第一次判定时 Up 中间价,≥ 100 秒)算出最近的窗口并发送。
+14. **压力挡开仓**(`ofi_win_ms` > 0,schema v33,默认关闭;Albers 等 2025 的 Reversal 情景):每条槽位腿在自己簿的每条 `Book` 事件上按 Cont-Kukanov-Stoikov 记买一 / 卖一的订单流增量 e = 1{b ≥ b₋}·q_b − 1{b ≤ b₋}·q_b₋ − 1{a ≤ a₋}·q_a + 1{a ≥ a₋}·q_a₋,按引擎时间 100 ms 分桶累计(256 桶,约 25.6 s;腿的合约换了就重来)。一条不短的腿(本腿份数 ≥ 另一腿)在本簿一档失衡 (买一量 − 卖一量) / (买一量 + 卖一量) < `ofi_obi_max` 且过去 `ofi_win_ms` 的订单流 ≤ 0 时不开仓(第 4 步没有目标,已挂的开仓单按第 6 步撤);历史不够 `ofi_win_ms` 时不挡。Up 与 Down 是同一本簿的两面,每条腿用自己的簿即是按腿定向的失衡与订单流。订单流环不进快照。
 
 依据:2026-08 逐事件回放(1 985–2 221 个市场,`E:\trade\staging\pm5m\mm_event2.py` 的 `final` 变体):原规则 −0.11 c/份;加留守 +0.16、再以公允价撤单代替 1σ 跳动暂停 +0.25、再加对价上限 +0.52 c/份(t 3.6,7/7 天)。v3 三条(不追价 1 s、冷却 1 s、同腿 10 s 内 2 笔成交暂停 10 s,即回放的 `s2`)在同一回放中把净库存的亏损从每净份 −22.7 降到 −5.7 美分;82 美元账户的 `micro_s2_c5_cap10_mc20`(每张 5 份、净上限 10 份、每窗成本 ≤ 20 美元)+1.03 c/份。
 

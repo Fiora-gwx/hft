@@ -79,9 +79,16 @@ struct Row {
     cancel_nf: bool,
     /// The place answer said the order rests (`live` / `delayed`).
     live: bool,
+    /// A cancel of this process was confirmed (`CancelAck` produced): a later "already canceled"
+    /// answer of a raced cancel's other request is no `CancelReject` (README "撤单赛跑").
+    cancel_acked: bool,
     /// A FAK / FOK order this process signed: fills come from `trade` events and the place
     /// answer, never from `order` events (README "吃单").
     taker: Option<Taker>,
+    /// The order's inst (token), once known (`Place` encode, place answer or an `order` event);
+    /// 0 before (`InstId.0`). A raced cancel skips its by-token companion while another open order
+    /// of the account rests on the same inst (README "撤单赛跑").
+    inst: u32,
 }
 
 /// gw state of one account: token ids bound by `BindWire`, the hashes of this process's orders
@@ -178,11 +185,28 @@ impl GwCtx {
         key
     }
     /// Remembers the hash of an order signed for client id `owner` (README "下单").
-    pub(crate) fn placed(&mut self, hash: &[u8; 32], owner: ClientOrderId) {
+    pub(crate) fn placed(&mut self, hash: &[u8; 32], owner: ClientOrderId, inst: InstId) {
         let key = self.remember(hash);
         if let Some(r) = self.row_mut(key) {
             r.owner = Some(owner);
+            r.inst = inst.0;
         }
+    }
+    /// Records the inst of a remembered order when it was not known yet.
+    fn note_inst(&mut self, key: u64, inst: InstId) {
+        if let Some(r) = self.row_mut(key)
+            && r.inst == 0
+        {
+            r.inst = inst.0;
+        }
+    }
+    /// Another non-terminal order of the account than `hash` on `inst` (README "撤单赛跑": the
+    /// by-token companion of a cancel would end it too).
+    pub(crate) fn other_open_on(&self, inst: InstId, hash: &[u8; 32]) -> bool {
+        let key = key_of(hash);
+        self.rows
+            .iter()
+            .any(|r| r.key != 0 && r.key != key && !r.terminal && r.inst == inst.0)
     }
     /// Marks the order signed as `hash` a FAK / FOK order (README "吃单").
     pub(crate) fn taker_placed(&mut self, hash: &[u8; 32], spec: TakerSpec) {
@@ -463,7 +487,7 @@ pub(crate) fn decode_rest(
     out: &mut impl ReportSink,
 ) -> Result<ReportOutcome, DecodeErr> {
     let r = match (req.what, req.req) {
-        (RestWhat::Order, Some(r)) => r,
+        (RestWhat::Order | RestWhat::OrderCompanion, Some(r)) => r,
         _ => return Err(DecodeErr::UnknownClass),
     };
     let mut o = ReportOutcome {
@@ -487,6 +511,7 @@ pub(crate) fn decode_rest(
                     && let Some(h) = parse_hash(p.order_id)
                 {
                     let key = ctx.remember(&h);
+                    ctx.note_inst(key, req.inst);
                     let live = matches!(p.status, "live" | "delayed");
                     // A FAK / FOK order ends with this answer (README "吃单"); its numbers are
                     // read before any event is written.
@@ -572,6 +597,8 @@ pub(crate) fn decode_rest(
                 o.raw_code = raw_code_str(why.as_bytes());
                 let row = parse_hash(id).and_then(|h| ctx.row_mut(key_of(&h)));
                 let detail = match row {
+                    // The other request of a raced cancel already confirmed it.
+                    Some(w) if w.cancel_acked => None,
                     // Sent before the place answer and the order is not known yet: the cancel may
                     // have overtaken it. The place answer decides (README "下单"): refused as
                     // already cancelled → CancelAck; resting → `EARLY`.
@@ -754,6 +781,7 @@ fn cancelled(
     };
     if let Some(r) = ctx.row_mut(key) {
         r.terminal = true;
+        r.cancel_acked = true;
     }
     let mut e = blank(rx.account, rx);
     e.what = OrderEventKind::CancelAck;
@@ -906,6 +934,7 @@ fn order_event(
     let ms: i64 = ev.timestamp.parse().map_err(|_| DecodeErr::Number)?;
     let ex_ts_ns = ms.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
     let key = ctx.remember(&h);
+    ctx.note_inst(key, inst);
     let (prev, terminal, owner) = ctx
         .row(key)
         .map_or((0, false, None), |r| (r.cum, r.terminal, r.owner));

@@ -93,7 +93,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 |---|---|---|
 | VEN-001.1 | `size_of::<InstSeq>()`;`align_of` | 64;64 |
 | VEN-001.2 | `last_fwd` 偏移与长度 | 0;6 × 8 B |
-| VEN-001.3 | `l2_state`/`resync_slot`/`_pad`/`resync_n`/`_pad2` 偏移 | 48 / 49 / 50 / 52 / 56 |
+| VEN-001.3 | `l2_state`/`resync_slot`/`_pad`/`resync_n`/`bbo_fwd_tsc` 偏移 | 48 / 49 / 50 / 52 / 56 |
 
 ### VEN-002 `SnapReq` 为 16 B,字段偏移固定
 
@@ -152,8 +152,8 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | VEN-005.1 | 1–4 | `GAP`/Resync、`DECODE`/Resync、`SNAPSHOT_FAIL`/Degraded、`SUB_REJECTED`/Degraded |
 | VEN-005.2 | 5–8 | `RACE_SINGLE`/Degraded、`BBO_REFRESH`/Resync、`BBO_SILENT`/Degraded、`DEADMAN`/Degraded |
 | VEN-005.3 | 9–12 | `CLOCK_SKEW`/Degraded、`INFLIGHT_TIMEOUT`/Degraded、`RATE_LIMIT`/Degraded、`REPORT_DECODE`/Degraded |
-| VEN-005.4 | 13–17 | `MIRROR`/Degraded、`ACCT_QUERY`/Degraded、`CONN_LOST`/Resync、`NEW_SUB`/Resync、`REQUESTED`/Resync |
-| VEN-005.5 | 0、18 | 码表中不存在;导出 JSON 恰好 17 项,名与码逐项等于 VEN-005.1–4 |
+| VEN-005.4 | 13–18 | `MIRROR`/Degraded、`ACCT_QUERY`/Degraded、`CONN_LOST`/Resync、`NEW_SUB`/Resync、`REQUESTED`/Resync、`RACE_SLOW`/Degraded |
+| VEN-005.5 | 0、19 | 码表中不存在;导出 JSON 恰好 18 项,名与码逐项等于 VEN-005.1–4 |
 
 ### VEN-006 ECF1 段 6 的 `conn` 行为 8 B,编码往返
 
@@ -3946,3 +3946,31 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 |---|---|---|
 | VEN-409.1 | `Place{slot 7}`,轮询于 4 000 | 恰一条 `SendReport{Written}`,`sent_tsc` = 4 777(写出返回时刻,不是本圈开始的 4 000) |
 | VEN-409.2 | 同上 | 该请求的 `RawTx` 记录头 `tsc` = 4 777 |
+
+### VEN-414 撤单赛跑：伴随请求一同写出、只有一条报告、失败不判未知
+
+- 规则:[§4 撤单赛跑](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`(`V_REST_ORDERS`,`companion = true`),A1 的 REST 池 2 条连接(114、115);先下单并以 200 应答
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_414_cancel_race_companion`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-414.1 | `gw.cancel_race = true`,对该单 `Cancel` | 一条 `SendReport{Written}`;`encode_rest_companion` 调用 1 次;`rest_companion_sent` = 1 |
+| VEN-414.2 | 伴随请求所在连接 115 应答 503 | 无 `OutcomeUnknown` |
+| VEN-414.3 | `gw.cancel_race = false`,同样的撤单 | 不调用 `encode_rest_companion`;`rest_companion_sent` = 0 |
+
+### VEN-415 撤单方式 by token:伴随请求代替撤单
+
+- 规则:[§4 撤单方式](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:同 VEN-414;`gw.cancel_by_token = true`、`gw.cancel_race = true`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_415_cancel_by_token`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-415.1 | `companion = true`,对该单 `Cancel` | 一条 `SendReport{Written}`;`rest_cancel_by_token` = 1;`rest_companion_sent` = 0(不再赛跑);`encode_rest_companion` 调用 1 次 |
+| VEN-415.2 | `companion = false`(协议没有伴随请求) | 照常按单撤:一条 `Written`;`rest_cancel_by_token` = 0 |
+

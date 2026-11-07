@@ -30,6 +30,7 @@ hft-sequencer.workspace = true
 hft-venue-proto.workspace = true
 venue-binance.workspace = true
 venue-polymarket.workspace = true
+venue-coinbase.workspace = true
 toml.workspace = true
 zerocopy.workspace = true
 # Blob SHA-256 in core.toml (not `workspace = true`: that entry enables `asm`).
