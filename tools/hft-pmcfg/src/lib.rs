@@ -1257,7 +1257,8 @@ quote_interval_ms = 1000
         cb_text = if coinbase {
             format!(
                 "[venues.cb]\nprotocol = 'coinbase-spot'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
-                 src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n",
+                 src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n\
+                 [venues.cb.feed]\nrace_rotate_s = 600\n",
                 cb.0
             )
         } else {
