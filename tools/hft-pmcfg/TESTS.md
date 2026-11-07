@@ -166,7 +166,7 @@ spec: README.md
 | PMC-008.1 | 缺省的挂单模拟 | `core.toml` 含 `[venues.cb]`(`coinbase-spot`、`id = 16`、`max_sub_insts = 1`)与 `feed:cb`/`conn-builder:cb` 线程;refdata 中 venue 16 只有 InstId 8 `BTC-USD`、`Exchange::Coinbase`、与 InstId 7 同一 BTC 资产,端点依次为两条 `wss://ws-feed.exchange.coinbase.com` 与 `https://api.exchange.coinbase.com` |
 | PMC-008.2 | 两个目录的 `strategy_params.bin` | 有 Coinbase 的多一个 group(第 8 个:InstId 8、venue 16、不开仓,binary-maker 的第二参考),前 7 个与没有的相同 |
 | PMC-008.3 | `coinbase = false` | `core.toml` 无 `venues.cb`、无 `feed:cb`;refdata 无 venue 16 的 inst |
-| PMC-008.4 | 实盘配置 | `venues.cb` 无 `live_feed`、无 `accounts`,`feed.race_rotate_s = 600`;`coinbase = false` 时无 `venues.cb`;工具 `--no-coinbase` 的六个文件与库输出逐字节相同 |
+| PMC-008.4 | 实盘配置 | `venues.cb` 无 `live_feed`、无 `accounts`,`feed.race_rotate_s = 600`(`venues.bn` 同样);`coinbase = false` 时无 `venues.cb`;工具 `--no-coinbase` 的六个文件与库输出逐字节相同 |
 
 ### PMC-009 `--no-coinbase` 的解析
 
