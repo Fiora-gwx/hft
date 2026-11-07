@@ -1068,6 +1068,8 @@ impl Fast {
         let vol = self.vol_state(left_ms);
         let vol_low = vol == 1;
         let quoting = ok && left_ms > i64::from(d.stop_before_ms) && vol > 0 && !load && !slow;
+        // v38 pair_ignore_lag: the venue-load gates close openings only; pairing bids keep quoting.
+        let lag_pair = d.pair_ignore_lag && ok && left_ms > i64::from(d.stop_before_ms) && vol > 0 && (load || slow);
         // Last-minute stop-loss (late_hedge_ms): only pairing bids by the leg the score favours.
         // Pairing priority (pair_stop_ms): a short leg pairs until pair_stop_ms before the end.
         let pair_window = ok && d.pair_stop_ms > 0 && left_ms > i64::from(d.pair_stop_ms);
@@ -1209,7 +1211,7 @@ impl Fast {
                 }
             }
         }
-        let lims = if d.fv_limit && quoting {
+        let lims = if d.fv_limit && (quoting || lag_pair) {
             self.fair_limits(v, start, up, den, qu.saturating_sub(qd) / i64::from(ab), now.engine_ns)
         } else {
             None
@@ -1468,7 +1470,7 @@ impl Fast {
             let pairing = pair_window
                 && other_q > own_q
                 && (d.pair_prio_age_ms == 0 || age_ms < i64::from(d.pair_prio_age_ms));
-            let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
+            let mine = (quoting || hedge || pairing || (lag_pair && other_q > own_q)) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
             let lim = (other_q > own_q && !hedge && (!free_fav || d.fav_pair_cap.0 > 0 || swept)).then(|| {

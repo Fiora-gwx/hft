@@ -401,6 +401,9 @@ hft_strategy_sdk::define_params! {
         /// cancelled by fair-value moves (fv_cancel, fair value + fv_hyst); placement still obeys
         /// the fair-value cap; 0 = off
         pair_sticky: Bool [default = 0, since = 38, relax = None],
+        /// (schema v38) pairing through the venue-load gates: while load_gate_ns / mdslow_gate_ns
+        /// close quoting, a short leg still quotes its pairing bid (openings stay closed); 0 = off
+        pair_ignore_lag: Bool [default = 0, since = 38, relax = None],
     }
 }
 
