@@ -407,6 +407,12 @@ hft_strategy_sdk::define_params! {
         /// (schema v38) pair margin inside the low band [sigma_lo, sigma_min) instead of pair_margin
         /// (fraction of one, 1e-9); 0 = pair_margin
         lo_pair_margin: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        /// (schema v38) inside the low band: lo_no_pair = no pairing bids (hold to settlement);
+        /// lo_max_shares = at most this many opening shares per leg and window (0 = inv cap);
+        /// lo_chop_min = opens only while the chop mean (last chop_k windows) is at least this (0 = off)
+        lo_no_pair: Bool [default = 0, since = 38, relax = None],
+        lo_max_shares: Count [min = 0, max = 1_000_000, default = 0, since = 38, relax = None],
+        lo_chop_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
     }
 }
 

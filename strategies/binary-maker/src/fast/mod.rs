@@ -1430,6 +1430,8 @@ impl Fast {
                 };
                 !in_window && !risky
             };
+            // v38 lo_no_pair: inside the low band a short leg does not quote its pairing bid.
+            let no_pair = no_pair || (vol_low && d.lo_no_pair && other_q > own_q);
             if let Some(x) = self.mic.get_mut(i) {
                 *x = m;
             }
@@ -1531,7 +1533,13 @@ impl Fast {
             // dip_mode: a leg that is not short and not favoured opens only while its dip bid is on.
             // v38 calm favourite (low band): the opening conditions; lo_plain quotes the plain best bid.
             let lo_fav_on = vol_low
-                && (d.lo_fav_min_px.0 > 0 || d.lo_fav_max_px.0 > 0 || d.lo_win_er_min.0 > 0 || d.lo_trend || d.lo_plain);
+                && (d.lo_fav_min_px.0 > 0
+                    || d.lo_fav_max_px.0 > 0
+                    || d.lo_win_er_min.0 > 0
+                    || d.lo_trend
+                    || d.lo_plain
+                    || d.lo_max_shares > 0
+                    || d.lo_chop_min.0 > 0);
             let lo_plain = lo_fav_on && d.lo_plain;
             let dip_leg = d.dip_mode && own_q >= other_q && !favoured && !lo_plain;
             let thick = d.mm_max_bq > 0
@@ -1628,6 +1636,9 @@ impl Fast {
                     || (d.lo_to_ms > 0 && age_ms >= i64::from(d.lo_to_ms))
                     || (d.lo_win_er_min.0 > 0 && win_er < d.lo_win_er_min.0)
                     || (d.lo_trend && win_dir != leg_dir)
+                    || (d.lo_max_shares > 0
+                        && own_q.saturating_add(clip) > i64::from(d.lo_max_shares).saturating_mul(unit_qty))
+                    || (d.lo_chop_min.0 > 0 && !chop_mean.is_some_and(|e| e >= d.lo_chop_min.0))
             };
             let no_open = no_open || chop_block || lo_block || lo_fav_block;
             // v35 trade-activity gate: both legs' prints over trd_win_ms (history too short: no block).

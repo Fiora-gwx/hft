@@ -1258,7 +1258,7 @@ fn bmk_024_schema_v6() {
         assert_eq!((f.name, f.since, f.default), (*name, 37, 0), "BMK-024.33");
     }
     // .34 v38 appends the calm-favourite opening conditions of the low band (0 = off).
-    let v38 = ["lo_fav_min_px", "lo_fav_max_px", "lo_from_ms", "lo_to_ms", "lo_win_er_min", "lo_trend", "lo_plain", "pair_sticky", "pair_ignore_lag", "lo_pair_margin"];
+    let v38 = ["lo_fav_min_px", "lo_fav_max_px", "lo_from_ms", "lo_to_ms", "lo_win_er_min", "lo_trend", "lo_plain", "pair_sticky", "pair_ignore_lag", "lo_pair_margin", "lo_no_pair", "lo_max_shares", "lo_chop_min"];
     assert_eq!(n_fields_at(schema, 38), Some(n34 + 7 + v38.len() as u16), "BMK-024.34");
     for (k, name) in v38.iter().enumerate() {
         let f = schema.field(n34 + 7 + k as u16).unwrap();
