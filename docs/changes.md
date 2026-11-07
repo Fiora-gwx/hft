@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-11-07 | hft-venue 赛跑 BBO 连接的领先统计与慢连接轮换(`feed.race_rotate_s`,缺省 0 = 关;hft-core `venues.<v>.feed.race_rotate_s`):每条连接计先到 / 晚到与平均落后,长期落后的连接推 `ConnState{Degraded, RACE_SLOW = 18}`(只追加码值)并先建后断轮换;`InstSeq._pad2` 改为 `bbo_fwd_tsc`(布局不变) | 重构计划 §4.2;VEN-416(新增)、VEN-001.3(字段名) | crates/hft-venue、apps/hft-core、schemas/conn-reason.json | 待评审(新增用例待批准) |
 | 2026-11-07 | hft-venue `gw.cancel_by_token`(hft-core `venues.<v>.gw.cancel_mode = "order" \| "market"`,缺省 order):market 时撤单以协议的伴随请求(Polymarket 按 token 撤)代替按单撤,不再赛跑;计数 `rest_cancel_by_token` | 重构计划 §3.2;VEN-415(新增)、CORE-440.2b/2c(补表) | crates/hft-venue、apps/hft-core | 待评审(新增用例待批准) |
 | 2026-11-07 | venue-polymarket 撤单赛跑的伴随请求(`DELETE /cancel-market-orders`)只在该 token 上没有本账户其他未终结订单时发出(订单行记 inst,`other_open_on`);此前总是发出,同一 token 上的第二张单(例如反转单)会被一并撤掉 | 重构计划 §3.1("后者仅在该代币上只有这一张单时使用");PMK-041.5(新增) | crates/venue-polymarket(src/orders.rs、src/reports.rs、tests、README.md、TESTS.md) | 待评审(新增用例待批准) |
 | 2026-11-07 | binary-maker group 形态:槽位之后可有一到两个参考组(第二个 = Coinbase 快参考);有第二参考时 v37 `cb_*` 保护读其原生 BBO、忽略 InjectWarmup local_kind 3 旁路样本;只有一个参考组时行为与之前逐位相同 | 重构计划 2026-11-06 §5(Coinbase 并入引擎);BMK-049(新增)、`GroupShape` 码 1 的措辞改写 | strategies/binary-maker(src/params.rs、src/fast/mod.rs、tests、README.md、TESTS.md) | 待评审(新增用例待批准) |

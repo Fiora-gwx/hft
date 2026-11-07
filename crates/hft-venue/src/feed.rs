@@ -65,6 +65,11 @@ pub struct FeedCounters {
     pub unknown_class: u64,
     /// Duplicates dropped by the dedup rule.
     pub dup: u64,
+    /// README §3a "赛跑连接的领先统计" (with `race_rotate_s` > 0): raced BBO quotes delivered first /
+    /// as a later copy, summed at each judgement, and connections rotated as slow.
+    pub race_won: u64,
+    pub race_lost: u64,
+    pub race_rotated: u64,
     pub gap: u64,
     /// Decode failures by route kind: Bbo, DepthTopN, Md.
     pub decode_err: [u64; 3],
@@ -163,6 +168,12 @@ struct Meta {
     left: u16,
     done: bool,
     buffered: bool,
+    /// README §3a "赛跑连接的领先统计" since `race_since`: BBO quotes this connection delivered
+    /// first, copies it delivered later, and their summed lag (TSC ticks).
+    race_won: u32,
+    race_lost: u32,
+    race_lag: u64,
+    race_since: u64,
 }
 
 #[derive(Debug)]
@@ -499,6 +510,13 @@ impl<P: VenueProtocol> St<P> {
         match judge(P::seq_rule(c), last, &pk.ids, refreshing) {
             Verdict::Duplicate => {
                 self.n.dup += 1;
+                if pk.stream == StreamKind::Bbo
+                    && pk.ids.last_id == last
+                    && let Some(q) = self.seqs.get(ix)
+                {
+                    m.race_lost = m.race_lost.saturating_add(1);
+                    m.race_lag = m.race_lag.saturating_add(ts.rx_tsc.saturating_sub(q.bbo_fwd_tsc));
+                }
                 self.raw_data(m.kind, m.id, f.opcode, sub_id, Some(ix), &ts, payload, true);
                 return;
             }
@@ -535,6 +553,10 @@ impl<P: VenueProtocol> St<P> {
                     && let Some(v) = q.last_fwd.get_mut(sl)
                 {
                     *v = pk.ids.last_id;
+                    if pk.stream == StreamKind::Bbo {
+                        q.bbo_fwd_tsc = ts.rx_tsc;
+                        m.race_won = m.race_won.saturating_add(1);
+                    }
                 }
                 m.got_data = true;
                 m.pub_tsc = ts.rx_tsc;
@@ -1379,6 +1401,10 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     left: 0,
                     done: false,
                     buffered: false,
+                    race_won: 0,
+                    race_lost: 0,
+                    race_lag: 0,
+                    race_since: now,
                 };
                 // The group's subscriptions.
                 for (ix, s) in self.st.insts.iter().enumerate() {
@@ -1598,6 +1624,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         let mut did = false;
         let ping = self.st.t.ms(u64::from(self.st.cfg.bbo_ping_ms));
         let dead = self.st.t.ms(u64::from(self.st.cfg.bbo_dead_ms));
+        let race_every = self.st.t.ms(u64::from(self.st.cfg.race_rotate_s) * 1000);
         for i in 0..self.conns.len() {
             let Some(fc) = self.conns.get_mut(i).and_then(Option::as_mut) else {
                 continue;
@@ -1645,6 +1672,23 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             conn.clear_err();
             if pool.rotate_due(now).is_some() {
                 m.rotate = true;
+            }
+            if m.kind == RouteKind::Bbo && race_every > 0 && now.saturating_sub(m.race_since) >= race_every {
+                let n = u64::from(m.race_won) + u64::from(m.race_lost);
+                let lag = m.race_lag.checked_div(u64::from(m.race_lost)).unwrap_or(0);
+                if n >= u64::from(self.st.cfg.race_min_n)
+                    && u64::from(m.race_lost) * 1000 >= n * u64::from(self.st.cfg.race_lost_permille)
+                    && lag >= self.st.t.us(u64::from(self.st.cfg.race_slow_us))
+                    && !m.rotate
+                {
+                    m.rotate = true;
+                    self.st.n.race_rotated += 1;
+                    self.st
+                        .cs(true, id, ConnStateKind::Degraded, InstId(0), codes::RACE_SLOW, now);
+                }
+                self.st.n.race_won += u64::from(m.race_won);
+                self.st.n.race_lost += u64::from(m.race_lost);
+                (m.race_won, m.race_lost, m.race_lag, m.race_since) = (0, 0, 0, now);
             }
             let Some(conn) = pool.primary() else { continue };
             // BBO probe.

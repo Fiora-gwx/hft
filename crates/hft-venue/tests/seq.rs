@@ -9,6 +9,7 @@ use crate::support;
 
 use hft_event::ConnStateKind;
 use hft_net::ConnId;
+use hft_types::InstId;
 use hft_venue::codes;
 use hft_venue_proto::StreamKind;
 use proptest::prelude::*;
@@ -138,4 +139,40 @@ fn ven_104_race_single_continues() {
         .filter(|s| s.state == ConnStateKind::Degraded && s.reason == codes::RACE_SINGLE)
         .count();
     assert_eq!(n, 1);
+}
+
+/// VEN-416: the raced BBO connections' lead counts; a connection mostly behind is rotated.
+#[test]
+fn ven_416_race_lead_and_slow_rotation() {
+    let run = |lag_ns: u64| {
+        let (mut h, mut now) = bbo_up(
+            |c| {
+                c.race_rotate_s = 1;
+                c.race_min_n = 10;
+                c.race_slow_us = 1000;
+            },
+            &[S1],
+        );
+        h.drain_bbo();
+        for u in 1..=40u64 {
+            h.net.push(ConnId(0), &b("S1", u));
+            now += 1000;
+            h.poll(now);
+            h.net.push(ConnId(1), &b("S1", u));
+            now += lag_ns;
+            h.poll(now);
+        }
+        let mut v = h.drain_bbo();
+        now += 1_000_000_000;
+        h.poll(now);
+        v.extend(h.drain_bbo());
+        let n = h.rt.counters();
+        let slow = has_state(&v, 1, ConnStateKind::Degraded, InstId(0), codes::RACE_SLOW);
+        let fast = has_state(&v, 0, ConnStateKind::Degraded, InstId(0), codes::RACE_SLOW);
+        (n.race_won, n.race_lost, n.race_rotated, slow, fast)
+    };
+    // .1 connection 1 delivers every quote 2 ms after connection 0: 40 won, 40 lost, rotated.
+    assert_eq!(run(2_000_000), (40, 40, 1, true, false), "VEN-416.1");
+    // .2 0.1 ms behind (below race_slow_us): counted, not rotated.
+    assert_eq!(run(100_000), (40, 40, 0, false, false), "VEN-416.2");
 }

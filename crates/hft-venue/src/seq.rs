@@ -15,7 +15,9 @@ pub struct InstSeq {
     pub resync_slot: u8,
     pub _pad: [u8; 2],
     pub resync_n: u32,
-    pub _pad2: [u8; 8],
+    /// Receive TSC of the BBO quote last forwarded (README §3a "赛跑连接的领先统计": a copy of it
+    /// on another connection is that connection's lag).
+    pub bbo_fwd_tsc: u64,
 }
 const _: () = assert!(core::mem::size_of::<InstSeq>() == 64);
 const _: () = assert!(core::mem::align_of::<InstSeq>() == 64);

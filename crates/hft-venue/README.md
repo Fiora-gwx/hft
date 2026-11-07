@@ -356,7 +356,7 @@ struct InstSeq {
     resync_slot: u8,         // 49 占用的重同步槽,0xFF = 无(增量深度)
     _pad:        [u8; 2],    // 50
     resync_n:    u32,        // 52 连续重试次数(增量深度)
-    _pad2:       [u8; 8],    // 56
+    bbo_fwd_tsc: u64,        // 56 最近一次转发的 BBO 报价的 rx_tsc(§3a 赛跑连接的领先统计)
 }
 const _: () = assert!(core::mem::size_of::<InstSeq>() == 64);
 ```
@@ -418,7 +418,8 @@ struct BboConnLive {
 3. **存活**:每收到一帧探测回帧(Pong 或应用层 pong),若 `该回帧的 rx_tsc − pub_tsc ≥ feed.bbo_ping_ms / 2`(本连接这段时间没有向环发布任何记录),推一条 `ConnState{Alive, role=Md, conn, inst = 0, rx_tsc = 该回帧的 rx_tsc}`;否则不推——转发的 `Bbo` 本身带 `h.conn` 与 `h.rx_tsc`,就是该连接的存活证据。因此每条连接至多每秒一条 `Alive`,繁忙时为零。sequencer 取 inst 的全部成员连接中 up 者的最大存活时刻;健康连接上 `now − conn_live_tsc` ≤ `bbo_ping_ms` + 往返 ≈ 1.05 s(fstream 的 Pong 批处理另加约 50 ms),低于 `conn_liveness_ms`。
 4. **静默**:超过 `feed.bbo_dead_ms`(3 000)没有任何入向帧(从未收到入向帧的连接从 `install` 起算)→ 推 `ConnState{Degraded, reason=BBO_SILENT}`,随后按致命处理(retire、`ConnState{Down, inst = 0}`、补建);赛马池只剩一条 → `RACE_SINGLE`(只在 `feed.bbo_conns ≥ 2` 时),报价照常可用。
 5. **补帧**:某 inst 的全部 BBO 连接都断过(期间可能错过报价变化)→ 新连接订阅回执齐时推 `ConnState{Resync, role=Md, conn, inst, reason=BBO_REFRESH}`;该 inst 下一条被转发的 `Bbo` 即结束补帧(sequencer 规则)。回执齐后满 `feed.bbo_refresh_grace_ms` 交易所仍未推送的 inst(补帧失败的,从失败记录到达时再计一个宽限期),若本所支持 BBO 补帧(`FeedRuntime::new` 以 refdata 中本 venue 第一个 inst 调用一次 `P::bbo_snapshot_request`,返回 `Ok(true)` 即支持,结果缓存;运行中的请求只由 snap-fetch 生成),推 `SnapReq{Bbo, inst}`;原始响应写本任务的 raw journal。补帧中的 inst 的 `Bbo`(流上的或 snap 记录带回的)按 `update_id ≥ last_fwd` 转发,第一条被转发即结束补帧;snap 记录带回的 `update_id = 0`(响应无序号)直接转发且不改 `last_fwd`;该 inst 已结束补帧时 snap 记录带回的 `Bbo` 丢弃并计数。订阅即推首帧的所(返回 `Ok(false)`)等交易所推首帧([hft-venue-proto 契约 24](../hft-venue-proto/README.md#实现方必须遵守的契约))。只要还有一条连接在线,就不进入补帧。
-6. 这些记录都是 Input:回放时 `BboView` 的健康字段逐字节重现。深度、成交与标记价连接的健康不影响 `BboView`;这些连接收到 pong 时按 event-model 的同一规则产出 `Alive`,走 md 环;它只是活性证据,不改簿状态、不入队给策略(处理规则归 [hft-sequencer](../hft-sequencer/README.md))。
+6. **赛跑连接的领先统计**(`feed.race_rotate_s` > 0,缺省 0 = 关;hft-core 键 `venues.<v>.feed.race_rotate_s`):每条 BBO 连接记录自上次评估以来先到并被转发的报价数 `race_won`、晚到的同一报价(序号等于 `last_fwd`)数 `race_lost` 与其落后量之和(该副本 rx_tsc − 被转发那份的 rx_tsc,`InstSeq.bbo_fwd_tsc`)。每满 `race_rotate_s` 评估一次:样本 ≥ `race_min_n`(200)、落后份额 ≥ `race_lost_permille`(900 ‰)且平均落后 ≥ `race_slow_us`(2 000 µs)→ 推 `ConnState{Degraded, reason=RACE_SLOW}` 并标记轮换(先建后断,与计划轮换同一路径;新连接经 hft-net 的多地址轮转通常落到另一个地址);计数 `race_won`/`race_lost`(评估时累加)与 `race_rotated`;之后清零重计。只有一条连接时没有晚到副本,不会触发。依据:2026-11-06 实盘机实测 Coinbase 2 条以上不同节点的连接比单条快约 9 ms,慢节点长期落后。
+7. 这些记录都是 Input:回放时 `BboView` 的健康字段逐字节重现。深度、成交与标记价连接的健康不影响 `BboView`;这些连接收到 pong 时按 event-model 的同一规则产出 `Alive`,走 md 环;它只是活性证据,不改簿状态、不入队给策略(处理规则归 [hft-sequencer](../hft-sequencer/README.md))。
 
 ### 3b. 快照获取(snap-fetch)
 

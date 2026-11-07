@@ -391,6 +391,9 @@ pub struct FeedOpts {
     /// `venues.<v>.feed.depth_conns` (hft-venue): connections per DepthTopN group; absent = 1, or
     /// 2 for a protocol without a Bbo route (Polymarket, whose depth stream is the whole book).
     pub depth_conns: Option<u8>,
+    /// `venues.<v>.feed.race_rotate_s` (hft-venue §3a "赛跑连接的领先统计"): judge each raced BBO
+    /// connection every N s and rotate one mostly behind; absent = 0 = off.
+    pub race_rotate_s: Option<u32>,
 }
 /// `venues.<v>.feed.raw.{bbo,md}` (hft-venue): absent = the instance default, `on` for network
 /// mode and `off` for `--dry-run` (the sim instance of the memory table).

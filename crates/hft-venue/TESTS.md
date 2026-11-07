@@ -93,7 +93,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 |---|---|---|
 | VEN-001.1 | `size_of::<InstSeq>()`;`align_of` | 64;64 |
 | VEN-001.2 | `last_fwd` 偏移与长度 | 0;6 × 8 B |
-| VEN-001.3 | `l2_state`/`resync_slot`/`_pad`/`resync_n`/`_pad2` 偏移 | 48 / 49 / 50 / 52 / 56 |
+| VEN-001.3 | `l2_state`/`resync_slot`/`_pad`/`resync_n`/`bbo_fwd_tsc` 偏移 | 48 / 49 / 50 / 52 / 56 |
 
 ### VEN-002 `SnapReq` 为 16 B,字段偏移固定
 
@@ -152,8 +152,8 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | VEN-005.1 | 1–4 | `GAP`/Resync、`DECODE`/Resync、`SNAPSHOT_FAIL`/Degraded、`SUB_REJECTED`/Degraded |
 | VEN-005.2 | 5–8 | `RACE_SINGLE`/Degraded、`BBO_REFRESH`/Resync、`BBO_SILENT`/Degraded、`DEADMAN`/Degraded |
 | VEN-005.3 | 9–12 | `CLOCK_SKEW`/Degraded、`INFLIGHT_TIMEOUT`/Degraded、`RATE_LIMIT`/Degraded、`REPORT_DECODE`/Degraded |
-| VEN-005.4 | 13–17 | `MIRROR`/Degraded、`ACCT_QUERY`/Degraded、`CONN_LOST`/Resync、`NEW_SUB`/Resync、`REQUESTED`/Resync |
-| VEN-005.5 | 0、18 | 码表中不存在;导出 JSON 恰好 17 项,名与码逐项等于 VEN-005.1–4 |
+| VEN-005.4 | 13–18 | `MIRROR`/Degraded、`ACCT_QUERY`/Degraded、`CONN_LOST`/Resync、`NEW_SUB`/Resync、`REQUESTED`/Resync、`RACE_SLOW`/Degraded |
+| VEN-005.5 | 0、19 | 码表中不存在;导出 JSON 恰好 18 项,名与码逐项等于 VEN-005.1–4 |
 
 ### VEN-006 ECF1 段 6 的 `conn` 行为 8 B,编码往返
 

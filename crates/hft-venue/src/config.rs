@@ -149,6 +149,13 @@ pub struct FeedCfg {
     pub raw_sample_ms: u32,
     pub ring_full_park_us: u32,
     pub rotate_margin_s: u32,
+    /// README §3a "赛跑连接的领先统计": every `race_rotate_s` seconds each raced BBO connection's
+    /// share of first arrivals is judged; one that lost at least `race_lost_permille` ‰ of at least
+    /// `race_min_n` quotes, `race_slow_us` µs behind on average, is rotated. 0 = off.
+    pub race_rotate_s: u32,
+    pub race_min_n: u32,
+    pub race_lost_permille: u32,
+    pub race_slow_us: u32,
     pub venue: VenueCfg,
     pub endpoints: FeedEndpoints,
 }
@@ -180,6 +187,10 @@ impl Default for FeedCfg {
             raw_sample_ms: 1000,
             ring_full_park_us: 200,
             rotate_margin_s: 3600,
+            race_rotate_s: 0,
+            race_min_n: 200,
+            race_lost_permille: 900,
+            race_slow_us: 2000,
             venue: VenueCfg {
                 env: VenueEnv::Prod,
                 stale_guard_ms: 1500,

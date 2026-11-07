@@ -719,6 +719,7 @@ where
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
             depth_conns: v.feed.depth_conns.unwrap_or(1),
+            race_rotate_s: v.feed.race_rotate_s.unwrap_or(0),
             raw_bbo,
             raw_md,
             venue: feed_venue,

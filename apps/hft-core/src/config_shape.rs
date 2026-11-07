@@ -54,7 +54,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "gw",
             ],
         ),
-        "venue_feed" => (&[], &["raw", "depth_conns"]),
+        "venue_feed" => (&[], &["raw", "depth_conns", "race_rotate_s"]),
         "venue_net" => (&[], &["rest_timeout_ms", "rest_max_idle_ms"]),
         "venue_presign" => (&["below", "above", "step", "max_age_ms"], &[]),
         "venue_gw" => (&[], &["rest_conns", "rest_cancel_reserve", "cancel_race", "cancel_mode"]),
