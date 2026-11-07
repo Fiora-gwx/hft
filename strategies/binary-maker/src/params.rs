@@ -413,6 +413,10 @@ hft_strategy_sdk::define_params! {
         lo_no_pair: Bool [default = 0, since = 38, relax = None],
         lo_max_shares: Count [min = 0, max = 1_000_000, default = 0, since = 38, relax = None],
         lo_chop_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        /// (schema v38) lo_chop_k = windows of the lo_chop_min trend mean (0 = chop_k, at most 24);
+        /// lo_sigma_max = the low band's openings need implied sigma below this (1e-9; 0 = off)
+        lo_chop_k: Count [min = 0, max = 24, default = 0, since = 38, relax = None],
+        lo_sigma_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
     }
 }
 

@@ -1172,6 +1172,14 @@ impl Fast {
             self.chop.last_sec = sec_c;
         }
         let chop_mean = if d.chop_k > 0 { self.chop.mean(d.chop_k as usize) } else { None };
+        // v38 calm trend mean over lo_chop_k windows (0 = chop_k) and the implied sigma for lo_sigma_max.
+        let lo_k = if d.lo_chop_k > 0 { d.lo_chop_k } else { d.chop_k };
+        let lo_trend_mean = if lo_k > 0 { self.chop.mean(lo_k as usize) } else { None };
+        let implied_now = self
+            .feat
+            .vol
+            .sigma(d.vol_min_samples as usize)
+            .map(|s| (i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE)) as i64);
         let chop_ok = d.chop_k == 0 || chop_mean.is_some_and(|e| e <= d.chop_er_max.0);
         // v38 calm favourite: this window's running efficiency ratio of the Up mid (30 s .. now) and
         // the direction it moved (+1 Up, -1 Down, 0 flat or too few seconds).
@@ -1539,7 +1547,8 @@ impl Fast {
                     || d.lo_trend
                     || d.lo_plain
                     || d.lo_max_shares > 0
-                    || d.lo_chop_min.0 > 0);
+                    || d.lo_chop_min.0 > 0
+                    || d.lo_sigma_max.0 > 0);
             let lo_plain = lo_fav_on && d.lo_plain;
             let dip_leg = d.dip_mode && own_q >= other_q && !favoured && !lo_plain;
             let thick = d.mm_max_bq > 0
@@ -1638,7 +1647,8 @@ impl Fast {
                     || (d.lo_trend && win_dir != leg_dir)
                     || (d.lo_max_shares > 0
                         && own_q.saturating_add(clip) > i64::from(d.lo_max_shares).saturating_mul(unit_qty))
-                    || (d.lo_chop_min.0 > 0 && !chop_mean.is_some_and(|e| e >= d.lo_chop_min.0))
+                    || (d.lo_chop_min.0 > 0 && !lo_trend_mean.is_some_and(|e| e >= d.lo_chop_min.0))
+                    || (d.lo_sigma_max.0 > 0 && !implied_now.is_some_and(|x| x < d.lo_sigma_max.0))
             };
             let no_open = no_open || chop_block || lo_block || lo_fav_block;
             // v35 trade-activity gate: both legs' prints over trd_win_ms (history too short: no block).
