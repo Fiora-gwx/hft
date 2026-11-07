@@ -10,3 +10,4 @@ __pycache__/
 /tmp/
 /docs/report/
 *.egg-info/
+tools/az-probe/build/

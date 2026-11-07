@@ -33,7 +33,7 @@ status: impl
 
 ### group 形态
 
-全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;其后是一到两个参考市场(不在槽位 venue 上,只读,不下单):第一个是公允价参考(Binance),可选的第二个是 v37 Coinbase 保护(`cb_*`)的快参考——有它时保护读它的 BBO(中间价 × 2,按该 inst 的价格单位;规则只用相对变化),并忽略 InjectWarmup local_kind 3 的旁路样本;没有时照旧读旁路样本。参考组数 = 表尾不在槽位 venue 上的连续 group 数(至少按 1 计)。`check` 的 `GroupShape` 码:1 = 参考组多于 2,或槽位数不是 ≥ 2 的偶数(只有一个参考时即 group 总数不是 ≥ 3 的奇数);2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
+全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;其后是一到两个参考市场(不在槽位 venue 上,只读,不下单):第一个是公允价参考,可选的第二个是 v37 快参考保护(`cb_*`)读的参考——有它时保护读它的 BBO(中间价 × 2,按该 inst 的价格单位;规则只用相对变化),并忽略 InjectWarmup local_kind 3 的旁路样本;没有时照旧读旁路样本。参考组数 = 表尾不在槽位 venue 上的连续 group 数(至少按 1 计)。`check` 的 `GroupShape` 码:1 = 参考组多于 2,或槽位数不是 ≥ 2 的偶数(只有一个参考时即 group 总数不是 ≥ 3 的奇数);2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
 
 ### 参数
 

@@ -669,6 +669,7 @@ spec: README.md
 
 - 规则:[group 形态](README.md#group-形态)
 - 级别:table
+- 里程碑:M3
 - 前置:默认参数
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_049_second_reference_group`
 

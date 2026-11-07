@@ -221,12 +221,13 @@ deps = [
 ]
 
 # Research replay (crates/hft-replay/README.md): cold, offline only; the sequencer's replay-io
-# assembly with the simulated exchange and Parquet output.
+# assembly with the simulated exchange and Parquet output. hft-ledger / hft-risk: the research
+# switches (HFT_REPLAY_COMPAT_SNAPSHOT's ledger par assets, HFT_REPLAY_RESEARCH_RISK's limits).
 [pkg."crates/hft-replay"]
 tier = "cold"
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-journal", "crates/hft-rt",
-    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer",
+    "crates/hft-sim", "crates/hft-strategy-sdk", "crates/hft-sequencer", "crates/hft-ledger", "crates/hft-risk",
 ]
 
 [pkg."crates/hft-testkit"]
