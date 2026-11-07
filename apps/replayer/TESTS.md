@@ -2434,14 +2434,13 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 - 级别:table
 - 里程碑:M3
 - 前置:同 RPL-300;两个实例分属两种测试策略,只有一种的 schema 含 `thr`
-- 实现:`apps/replayer/tests/research.rs::rpl_302_variant_set_params_applies_or_refuses`;.4 `apps/replayer/src/research.rs::tests::rpl_302_4_param_base_live_expands_to_the_live_base`
+- 实现:`apps/replayer/tests/research.rs::rpl_302_variant_set_params_applies_or_refuses`
 
 | 行 | 操作 | 期望 |
 |---|---|---|
 | RPL-302.1 | 变体 `thr = 5` | 运行成功;变体 Input 2 条(一对 ConfigBlob + SetParams);两个实例中恰一个的当前参数 SHA-256 与基线不同 |
 | RPL-302.2 | 变体 `no_such_field = 1`;`thr = −1` | 运行失败,错误信息含该字段名 |
 | RPL-302.3 | 变体 `base = "defaults"`、不写 `set` | 仍发出 SetParams(变体 Input > 0):全部字段为 schema 默认值,与日志里的参数无关 |
-| RPL-302.4 | `--set clip_shares=7,pair_margin=1 --param-base live`;`--param-base x` | 该变体 `base` = `defaults`,`set` = binary-maker `LIVE_BASE` 全部字段(`clip_shares` 为 7)加 `pair_margin = 1`;日志自身的 `base` 运行不变;`x` 被拒 |
 
 ### RPL-303 `replayer research` 写出四张表与 run.json
 
@@ -2526,3 +2525,15 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 | RPL-308.4 | 每个策略按行序读 `g0_opens` | 非空且不减 |
 | RPL-308.5 | `features --journal <段目录> --out <dir> --every-ms 500` 跑两次 | 退出 0;`features.json` 的列为 `g0_opens`、`g0_closes`(两个 kind 的同名列合并),`runs[0].rows` > 0;两次的 `features.parquet` 逐字节相同 |
 | RPL-308.6 | `--every-ms 0 --no-decisions`;`--seeds 1` | 都退出 2 |
+
+### RPL-310 `--param-base live` 展开为实盘基础参数
+
+- 规则:[hft-replay 参数变体](../../crates/hft-replay/README.md#参数变体)
+- 级别:table
+- 里程碑:M3
+- 前置:空的日志目录(只解析命令行)
+- 实现:`apps/replayer/src/research.rs::tests::rpl_310_param_base_live_expands_to_the_live_base`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| RPL-310.1 | `--set clip_shares=7,pair_margin=1 --param-base live`;`--param-base x` | 该变体 `base` = `defaults`,`set` = binary-maker `LIVE_BASE` 全部字段(`clip_shares` 为 7)加 `pair_margin = 1`;日志自身的 `base` 运行不变;`x` 被拒 |

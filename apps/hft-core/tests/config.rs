@@ -1417,27 +1417,27 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
         Err(e) => panic!("CORE-440.2 {e:?}"),
     };
     assert_eq!(effective(&l.cfg, "public"), (4, 1), "CORE-440.2");
-    // .2b `cancel_race` (hft-venue "撤单赛跑") is a known gw key.
+    // .5 `cancel_race` (hft-venue "撤单赛跑") is a known gw key.
     std::fs::write(&path, with("cancel_race = true")).unwrap();
     let l = match hft_core::config::load(&path, true) {
         Ok(l) => l,
-        Err(e) => panic!("CORE-440.2b {e:?}"),
+        Err(e) => panic!("CORE-440.5 {e:?}"),
     };
-    assert_eq!(l.cfg.venues["public"].gw.cancel_race, Some(true), "CORE-440.2b");
-    // .2c `cancel_mode` (hft-venue "撤单方式"): "order" | "market"; anything else is refused.
+    assert_eq!(l.cfg.venues["public"].gw.cancel_race, Some(true), "CORE-440.5");
+    // .6 `cancel_mode` (hft-venue "撤单方式"): "order" | "market"; anything else is refused.
     std::fs::write(&path, with("cancel_mode = \"market\"")).unwrap();
     let l = match hft_core::config::load(&path, true) {
         Ok(l) => l,
-        Err(e) => panic!("CORE-440.2c {e:?}"),
+        Err(e) => panic!("CORE-440.6 {e:?}"),
     };
     assert_eq!(
         l.cfg.venues["public"].gw.cancel_mode,
         Some(hft_core::config::CancelMode::Market),
-        "CORE-440.2c"
+        "CORE-440.6"
     );
     std::fs::write(&path, with("cancel_mode = \"token\"")).unwrap();
     let e = hft_core::config::load(&path, true).unwrap_err();
-    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-440.2c {e:?}");
+    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-440.6 {e:?}");
     // .3 out of range or an unknown key is refused.
     for (extra, code) in [
         ("rest_conns = 0", "BadValue"),

@@ -409,7 +409,7 @@ mod tests {
     use super::parse;
 
     #[test]
-    fn rpl_302_4_param_base_live_expands_to_the_live_base() {
+    fn rpl_310_param_base_live_expands_to_the_live_base() {
         let dir = std::env::temp_dir().join(format!("rpl3024-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
@@ -427,13 +427,13 @@ mod tests {
         ]))
         .unwrap();
         let v = &o.variants[1];
-        assert_eq!(v.base.as_deref(), Some("defaults"), "RPL-302.4");
+        assert_eq!(v.base.as_deref(), Some("defaults"), "RPL-310.1");
         for (k, x) in hft_strategy_registry::BINARY_MAKER_LIVE_BASE {
             let want = if k == "clip_shares" { 7 } else { x };
-            assert_eq!(v.set.get(k), Some(&want), "RPL-302.4 {k}");
+            assert_eq!(v.set.get(k), Some(&want), "RPL-310.1 {k}");
         }
-        assert_eq!(v.set.get("pair_margin"), Some(&1), "RPL-302.4");
-        assert_eq!(o.variants[0].base, None, "RPL-302.4 the journal's own run");
+        assert_eq!(v.set.get("pair_margin"), Some(&1), "RPL-310.1");
+        assert_eq!(o.variants[0].base, None, "RPL-310.1 the journal's own run");
         assert!(
             parse(&a(&[
                 "research",
