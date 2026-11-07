@@ -321,6 +321,16 @@ pub struct GwOpts {
     pub rest_cancel_reserve: Option<u8>,
     /// `gw.cancel_race` (hft-venue "撤单赛跑"); absent = off.
     pub cancel_race: Option<bool>,
+    /// `gw.cancel_mode` (hft-venue "撤单方式"): `"order"` (default) or `"market"` (by token).
+    pub cancel_mode: Option<CancelMode>,
+}
+
+/// `gw.cancel_mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CancelMode {
+    Order,
+    Market,
 }
 impl GwOpts {
     /// `(rest_conns, rest_cancel_reserve)` in effect over the protocol defaults `(conns, reserve)`.

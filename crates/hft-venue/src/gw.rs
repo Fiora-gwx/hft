@@ -152,6 +152,8 @@ pub struct GwCounters {
     /// limit, encode refusal).
     pub rest_companion_sent: u64,
     pub rest_companion_skipped: u64,
+    /// Cancels sent by token instead of by order (`gw.cancel_by_token`).
+    pub rest_cancel_by_token: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);

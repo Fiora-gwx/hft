@@ -3961,3 +3961,16 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-414.2 | 伴随请求所在连接 115 应答 503 | 无 `OutcomeUnknown` |
 | VEN-414.3 | `gw.cancel_race = false`,同样的撤单 | 不调用 `encode_rest_companion`;`rest_companion_sent` = 0 |
 
+### VEN-415 撤单方式 by token:伴随请求代替撤单
+
+- 规则:[§4 撤单方式](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:同 VEN-414;`gw.cancel_by_token = true`、`gw.cancel_race = true`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_415_cancel_by_token`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-415.1 | `companion = true`,对该单 `Cancel` | 一条 `SendReport{Written}`;`rest_cancel_by_token` = 1;`rest_companion_sent` = 0(不再赛跑);`encode_rest_companion` 调用 1 次 |
+| VEN-415.2 | `companion = false`(协议没有伴随请求) | 照常按单撤:一条 `Written`;`rest_cancel_by_token` = 0 |
+

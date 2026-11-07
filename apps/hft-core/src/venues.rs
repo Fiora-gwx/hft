@@ -496,6 +496,7 @@ where
         rest_conns,
         rest_cancel_reserve,
         cancel_race: v.gw.cancel_race.unwrap_or(false),
+        cancel_by_token: v.gw.cancel_mode == Some(crate::config::CancelMode::Market),
         oms_slots: v
             .accounts
             .iter()

@@ -224,6 +224,9 @@ pub struct GwCfg {
     /// Race every REST cancel with the protocol's companion request on another free connection
     /// (`VenueProtocol::encode_rest_companion`, README "撤单赛跑"); off by default.
     pub cancel_race: bool,
+    /// Send every REST cancel as the protocol's companion request alone (Polymarket: by token)
+    /// when it has one, else as usual (README "撤单方式"); no race companion then. Off by default.
+    pub cancel_by_token: bool,
     /// OMS slot count N per (venue, account) table: slot ids 1..=N (0 reserved); the slot mirror
     /// holds N + 1 entries indexed by slot id.
     pub oms_slots: u32,
@@ -262,6 +265,7 @@ impl Default for GwCfg {
             rest_conns: 2,
             rest_cancel_reserve: 0,
             cancel_race: false,
+            cancel_by_token: false,
             oms_slots: 2048,
             env: VenueEnv::Prod,
             order_endpoint: EndpointId::default(),

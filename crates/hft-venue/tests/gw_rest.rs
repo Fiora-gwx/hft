@@ -1025,3 +1025,33 @@ fn ven_414_cancel_race_companion() {
     assert!(stub::calls("encode_rest_companion").is_empty(), "VEN-414.3");
     assert_eq!(h.rt.counters().rest_companion_sent, 0, "VEN-414.3");
 }
+
+#[test]
+fn ven_415_cancel_by_token() {
+    let run = |companion: bool| {
+        let by_token = hft_venue::GwCfg {
+            cancel_by_token: true,
+            cancel_race: true,
+            ..g0()
+        };
+        let mut h = setup_lanes::<V_REST_ORDERS>(by_token, net::net_cfg(), 2, 0);
+        stub::set_cfg(|c| c.companion = companion);
+        let p = h.place(A1, 7, 3, S1, false);
+        h.cmd(p);
+        h.poll(4000);
+        h.reps();
+        response(&mut h, 200, 4500);
+        h.reps();
+        stub::take_log();
+        let c = h.targeted(GwOp::Cancel, A1, 7);
+        h.cmd(c);
+        h.poll(5000);
+        let st = statuses(&h.reps());
+        let n = h.rt.counters();
+        (st, n.rest_cancel_by_token, n.rest_companion_sent, stub::calls("encode_rest_companion").len())
+    };
+    // .1 the companion request replaces the cancel: one Written report, no race companion.
+    assert_eq!(run(true), (vec![SendStatus::Written], 1, 0, 1), "VEN-415.1");
+    // .2 no companion from the protocol: the cancel goes as usual.
+    assert_eq!(run(false), (vec![SendStatus::Written], 0, 0, 0), "VEN-415.2");
+}

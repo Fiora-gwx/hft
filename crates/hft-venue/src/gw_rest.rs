@@ -282,6 +282,21 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             );
             return Sent::Reported;
         }
+        // README "撤单方式": the companion request (by token) replaces the cancel when the protocol
+        // gives one; the cancel was encoded first so the protocol's per-order cancel state is set.
+        let mut by_token = false;
+        if c.op == GwOp::Cancel && self.cfg.cancel_by_token {
+            let mut alt = RestReqBuf::default();
+            let x = &mut self.accts[a];
+            if matches!(
+                P::encode_rest_companion(self.rd, &x.tpl, &mut x.ctx, &x.rest_credential, &c, &target, &clk, &mut alt),
+                Ok(true)
+            ) {
+                wire = alt;
+                by_token = true;
+                self.n.rest_cancel_by_token += 1;
+            }
+        }
         let origin = RestOrigin {
             what: RestWhat::Order,
             req: Some(ReqRef {
@@ -297,7 +312,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     self.write_mirror(&c);
                 }
                 self.report(&c, tg, conn, SendStatus::Written, 0, sent_tsc);
-                if c.op == GwOp::Cancel && self.cfg.cancel_race {
+                if c.op == GwOp::Cancel && self.cfg.cancel_race && !by_token {
                     self.send_companion(a, c, target, now);
                 }
             }

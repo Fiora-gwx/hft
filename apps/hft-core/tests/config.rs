@@ -1424,6 +1424,20 @@ fn core_440_gw_rest_conns_and_cancel_reserve() {
         Err(e) => panic!("CORE-440.2b {e:?}"),
     };
     assert_eq!(l.cfg.venues["public"].gw.cancel_race, Some(true), "CORE-440.2b");
+    // .2c `cancel_mode` (hft-venue "撤单方式"): "order" | "market"; anything else is refused.
+    std::fs::write(&path, with("cancel_mode = \"market\"")).unwrap();
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-440.2c {e:?}"),
+    };
+    assert_eq!(
+        l.cfg.venues["public"].gw.cancel_mode,
+        Some(hft_core::config::CancelMode::Market),
+        "CORE-440.2c"
+    );
+    std::fs::write(&path, with("cancel_mode = \"token\"")).unwrap();
+    let e = hft_core::config::load(&path, true).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-440.2c {e:?}");
     // .3 out of range or an unknown key is refused.
     for (extra, code) in [
         ("rest_conns = 0", "BadValue"),

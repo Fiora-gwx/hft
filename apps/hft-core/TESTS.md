@@ -4612,6 +4612,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 |---|---|---|
 | CORE-440.1 | 未配置 | `gw_rest_defaults("binance-spot")` = (2, 0);生效 (2, 0) |
 | CORE-440.2 | `[venues.public.gw] rest_conns = 4`、`rest_cancel_reserve = 1` | 加载成功;生效 (4, 1) |
+| CORE-440.2b | `cancel_race = true` | 加载成功;`gw.cancel_race` = true |
+| CORE-440.2c | `cancel_mode = "market"`;`cancel_mode = "token"` | 前者加载成功、`CancelMode::Market`;后者 `ConfigParse` |
 | CORE-440.3 | `rest_conns = 0`;`rest_conns = 17`;`rest_conns = 2`、`rest_cancel_reserve = 2`;未知键 `conns` | 前三者含 `BadValue`;最后一个 `ConfigParse` |
 | CORE-440.4 | Polymarket 实盘做市配置(不写 `venues.pm.gw`) | 加载成功;`gw_rest_defaults("polymarket-clob")` = (8, 1);生效 (8, 1) |
 
