@@ -638,4 +638,5 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-041.2 | `Place`、`CancelAll`、哈希未知的 `Cancel` | `Ok(false)` |
 | PMK-041.3 | 伴随应答 `canceled [H1]`(`OrderCompanion`),再主应答 `not_canceled {H1: already canceled}` | 只有一条 `CancelAck` |
 | PMK-041.4 | 未确认撤销时同一 `not_canceled` 应答 | 一条 `CancelReject` |
+| PMK-041.5 | H1、H2 都挂在 UP,撤 H1;H2 挂在 DN;H2 的撤单应答 `canceled [H2]` 之后再撤 H1 | 同 token:`Ok(false)`(H2 会被一并撤掉);另一 token:`Ok(true)`;H2 已终结:`Ok(true)` |
 

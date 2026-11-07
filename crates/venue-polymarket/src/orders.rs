@@ -207,7 +207,7 @@ pub(crate) fn encode(
     match c.op {
         GwOp::Place => {
             let (hash, taker) = place(rd, t, ctx, &k, cred, c, clk, out)?;
-            ctx.placed(&hash, tgt.id);
+            ctx.placed(&hash, tgt.id, c.inst);
             if let Some(tk) = taker {
                 ctx.taker_placed(&hash, tk);
             }
@@ -254,8 +254,9 @@ pub(crate) fn encode(
 
 /// README "撤单赛跑": the companion of a `Cancel` sent by the order hash — every order of the
 /// account on the token (`DELETE /cancel-market-orders`), so it ends the same order when that is
-/// the account's only order on the token (one quote per leg). `Ok(false)` for other operations
-/// and for a cancel that already goes by token.
+/// the account's only order on the token. `Ok(false)` for other operations, for a cancel that
+/// already goes by token, and while another non-terminal order of the account rests on the same
+/// inst (that order would be cancelled too).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn encode_companion(
     t: &Templates,
@@ -266,12 +267,17 @@ pub(crate) fn encode_companion(
     clk: &WallClock,
     out: &mut RestReqBuf,
 ) -> Result<bool, EncodeErr> {
-    if c.op != GwOp::Cancel
-        || ctx
-            .order_hash(tgt.exch_order_id)
-            .or_else(|| ctx.placed_hash(&tgt.id))
-            .is_none()
-    {
+    if c.op != GwOp::Cancel {
+        return Ok(false);
+    }
+    let Some(hash) = ctx
+        .order_hash(tgt.exch_order_id)
+        .or_else(|| ctx.placed_hash(&tgt.id))
+    else {
+        return Ok(false);
+    };
+    // Another open order of the account on the token would be cancelled too: no companion.
+    if ctx.other_open_on(c.inst, &hash) {
         return Ok(false);
     }
     *out = RestReqBuf::default();
