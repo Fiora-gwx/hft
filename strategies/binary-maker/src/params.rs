@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 37, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 38, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -384,6 +384,19 @@ hft_strategy_sdk::define_params! {
         cb_shock: Rate [min = 0, max = 1_000_000_000, default = 0, since = 37, relax = None],
         cb_hold_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 37, relax = None],
         cb_pair: Bool [default = 0, since = 37, relax = None],
+        /// (schema v38) calm favourite, inside the v34 low band [sigma_lo, sigma_min): a leg that is not
+        /// short opens only when its best bid is in [lo_fav_min_px, lo_fav_max_px) (0 = no bound),
+        /// the window age is in [lo_from_ms, lo_to_ms) (0 = no bound), the running efficiency ratio of
+        /// this window's Up mid (30 s .. now, at least 20 seconds) is at least lo_win_er_min (0 = off)
+        /// and, with lo_trend, the leg is the side the Up mid moved to since 30 s. With lo_plain such a
+        /// leg quotes the plain best bid: no dip bid needed and the mm_min_path quiet gate is skipped.
+        lo_fav_min_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        lo_fav_max_px: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        lo_from_ms: DurationMs [min = 0, max = 3_600_000, default = 0, since = 38, relax = None],
+        lo_to_ms: DurationMs [min = 0, max = 3_600_000, default = 0, since = 38, relax = None],
+        lo_win_er_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        lo_trend: Bool [default = 0, since = 38, relax = None],
+        lo_plain: Bool [default = 0, since = 38, relax = None],
     }
 }
 
