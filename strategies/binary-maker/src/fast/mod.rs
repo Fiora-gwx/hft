@@ -1692,7 +1692,9 @@ impl Fast {
                 QState::Live => {
                     let mut cancel = !(mine && live) || (skip && !hedge) || no_open || no_pair;
                     let mut cooled = false;
-                    if !cancel && d.fv_cancel.0 > 0 && !pairing {
+                    // v38 sticky pairing: a short leg's bid at the pair-cost limit ignores fair-value moves.
+                    let sticky = d.pair_sticky && other_q > own_q && lim.is_some_and(|l| q.px == l);
+                    if !cancel && d.fv_cancel.0 > 0 && !pairing && !sticky {
                         let x = self.dfv(&q);
                         if (is_up && x <= -d.fv_cancel.0) || (!is_up && x >= d.fv_cancel.0) {
                             cancel = true;
@@ -1721,7 +1723,7 @@ impl Fast {
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
-                    cancel |= !hedge && !pairing && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
+                    cancel |= !hedge && !pairing && !sticky && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()

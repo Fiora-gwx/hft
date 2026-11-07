@@ -397,6 +397,10 @@ hft_strategy_sdk::define_params! {
         lo_win_er_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
         lo_trend: Bool [default = 0, since = 38, relax = None],
         lo_plain: Bool [default = 0, since = 38, relax = None],
+        /// (schema v38) sticky pairing: a short leg's bid resting at the pair-cost limit is not
+        /// cancelled by fair-value moves (fv_cancel, fair value + fv_hyst); placement still obeys
+        /// the fair-value cap; 0 = off
+        pair_sticky: Bool [default = 0, since = 38, relax = None],
     }
 }
 
