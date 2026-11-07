@@ -12,7 +12,7 @@ const USAGE: &str = "usage: replayer research --journal <file|dir> --out <dir> [
 [--variants file.toml] [--set NAME=RAW[,NAME=RAW...]] [--seeds S[,S...]] [--latency ENTRY_US:RESP_US] \
 [--maker-fill queue|queue-cap|queue-strict|through] [--reseed-s N] [--log-timers] [--jobs N] [--reassembly-bytes N] \
 [--calib calib.json] [--own] [--tombstone] [--cancel-latency ENTRY_US:RESP_US] \
-[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--param-base journal|defaults] [--features EVERY_MS]";
+[--taker-delay BASE_US[:SLOW_US:SLOW_PPM]] [--taker-resp-us N] [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] \n[--ex-time-max-us N] [--sim-cash N] [--param-base journal|defaults|live] [--features EVERY_MS]";
 
 pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
     let mut journal = None;
@@ -68,8 +68,8 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
                 ..Variant::default()
             }),
             "--param-base" => {
-                if !matches!(value.as_str(), "journal" | "defaults") {
-                    return Err(format!("--param-base {value}: journal|defaults"));
+                if !matches!(value.as_str(), "journal" | "defaults" | "live") {
+                    return Err(format!("--param-base {value}: journal|defaults|live"));
                 }
                 param_base = Some(value);
             }
@@ -197,6 +197,19 @@ pub(crate) fn parse(args: &[String]) -> Result<ResearchOpts, String> {
             if v.base.is_none() {
                 v.base = Some(b.clone());
             }
+        }
+    }
+    // base "live" = the schema defaults plus binary-maker's live base parameters, the variant's own
+    // sets on top; written out as a "defaults" variant with the full set (run.json shows it).
+    for v in variants.iter_mut().skip(1) {
+        if v.base.as_deref() == Some("live") {
+            let own = std::mem::take(&mut v.set);
+            v.set = hft_strategy_registry::BINARY_MAKER_LIVE_BASE
+                .iter()
+                .map(|(k, x)| ((*k).to_string(), *x))
+                .collect();
+            v.set.extend(own);
+            v.base = Some("defaults".into());
         }
     }
     Ok(ResearchOpts {
@@ -388,4 +401,33 @@ pub(crate) fn execute_calib(args: &[String], stdout: &mut impl Write) -> Result<
     std::fs::write(&out, text).map_err(|e| (2, format!("{}: {e}", out.display())))?;
     writeln!(stdout, "{}", v["meta"]).map_err(|e| (2, e.to_string()))?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::disallowed_methods)] // allow-list: test code
+    use super::parse;
+
+    #[test]
+    fn rpl_302_4_param_base_live_expands_to_the_live_base() {
+        let dir = std::env::temp_dir().join(format!("rpl3024-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let j = dir.to_string_lossy().into_owned();
+        let o = parse(&a(&[
+            "research", "--journal", &j, "--out", "/tmp/x", "--set", "clip_shares=7,pair_margin=1",
+            "--param-base", "live",
+        ]))
+        .unwrap();
+        let v = &o.variants[1];
+        assert_eq!(v.base.as_deref(), Some("defaults"), "RPL-302.4");
+        for (k, x) in hft_strategy_registry::BINARY_MAKER_LIVE_BASE {
+            let want = if k == "clip_shares" { 7 } else { x };
+            assert_eq!(v.set.get(k), Some(&want), "RPL-302.4 {k}");
+        }
+        assert_eq!(v.set.get("pair_margin"), Some(&1), "RPL-302.4");
+        assert_eq!(o.variants[0].base, None, "RPL-302.4 the journal's own run");
+        assert!(parse(&a(&["research", "--journal", &j, "--out", "/tmp/x", "--param-base", "x"])).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

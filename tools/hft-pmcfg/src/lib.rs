@@ -45,17 +45,8 @@ pub const PM_LIVE_DAILY_LOSS: i64 = 15_000_000;
 /// Binary-maker parameters of the first live run (`micro_s2_c5_cap10_mc20`, research reply
 /// 2026-10-22): 5 shares per quote, net 10, no-chase 1 s, fair-value cooldown 1 s, streak pause
 /// (2 fills within 10 s → 10 s), at most 20 USDC bought per window.
-pub const PM_LIVE_PARAMS: [(&str, i64); 9] = [
-    ("enabled", 1),
-    ("clip_shares", 5),
-    ("inv_max_shares", 10),
-    ("fv_cool_ms", 1_000),
-    ("nochase_ms", 1_000),
-    ("streak_k", 2),
-    ("streak_window_ms", 10_000),
-    ("streak_pause_ms", 10_000),
-    ("max_window_cost", 20_000_000),
-];
+/// (Defined by binary-maker as `LIVE_BASE`; the replayer's `--param-base live` uses the same list.)
+pub const PM_LIVE_PARAMS: [(&str, i64); 9] = hft_strategy_registry::BINARY_MAKER_LIVE_BASE;
 
 /// Live Polymarket: OMS `ack_timeout_ms` and the REST request timeout (equal: the answer is read
 /// as long as the OMS waits for it), and the REST connections' maximum idle age.

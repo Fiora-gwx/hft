@@ -43,7 +43,7 @@ replayer verify  --journal <dir|s3://…> [--from-seq N] [--to-seq M] [--instanc
 replayer sim     --journal … [--from-seq N] [--to-seq M] [--accounts <a,b>] [--as-sim <account>=<sim-account.toml>] [--seed S] [--check-fills]
                  [--advice recompute|journal] [--model-checkpoint <dir>] [--stress <case>[,<case>…]|gate|all] [--stress-spec <spec.toml>]
                  [--ab <paramsA> <paramsB>] [--emit-journal] --out <dir>
-replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]] [--param-base journal|defaults]
+replayer research --journal <file|dir> --out <dir> [--account N]... [--variants <file.toml>] [--set NAME=RAW[,…]] [--param-base journal|defaults|live]
                  [--seeds S[,S…]] [--latency ENTRY_US:RESP_US] [--maker-fill queue|queue-cap|queue-strict|through] [--reseed-s N] [--log-timers] [--jobs N]
                  [--calib calib.json] [--own] [--tombstone] [--cancel-latency E:R] [--taker-delay B[:S:P]] [--taker-resp-us N]
                  [--fee-binary K] [--gtd-ms N] [--fill-resp-us N] [--ex-time-max-us N] [--sim-cash N]

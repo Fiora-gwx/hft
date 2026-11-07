@@ -188,7 +188,7 @@ fn rpl_302_variant_set_params_applies_or_refuses() {
         ..Variant::default()
     };
     let dv = run_one::<TestStrategies>(&d).unwrap();
-    assert!(dv.stats.variant_inputs > 0, "RPL-302.6");
+    assert!(dv.stats.variant_inputs > 0, "RPL-302.3");
     let changed = v
         .params_sha
         .iter()

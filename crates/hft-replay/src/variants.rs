@@ -12,7 +12,8 @@ use zerocopy::{IntoBytes, TryFromBytes};
 /// `base`: `None` / `"journal"` — the sets apply on the journal's active parameters (fields the
 /// variant does not set keep that run's values); `"defaults"` — every field starts at its schema
 /// default first, so a variant means the same parameters on every journal (give `enabled` and the
-/// live base parameters explicitly).
+/// live base parameters explicitly); `"live"` — `replayer research` expands it to `"defaults"` with
+/// binary-maker's live base parameters (`LIVE_BASE`) before the variant's own sets.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct Variant {
     pub name: String,
@@ -58,9 +59,9 @@ pub fn parse_file(text: &str) -> Result<Vec<Variant>, String> {
         if v.name.is_empty() || !seen.insert(v.name.clone()) {
             return Err(format!("variants: empty or duplicate name {:?}", v.name));
         }
-        if !matches!(v.base.as_deref(), None | Some("journal" | "defaults")) {
+        if !matches!(v.base.as_deref(), None | Some("journal" | "defaults" | "live")) {
             return Err(format!(
-                "variants: {}: base must be \"journal\" or \"defaults\"",
+                "variants: {}: base must be \"journal\", \"defaults\" or \"live\"",
                 v.name
             ));
         }

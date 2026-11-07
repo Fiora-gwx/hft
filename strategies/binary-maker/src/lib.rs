@@ -25,6 +25,22 @@ use hft_strategy_sdk::{
 
 pub use params::{BinaryMakerFields, BinaryMakerParams};
 
+/// The live base parameters (`micro_s2_c5_cap10_mc20`, research reply 2026-10-22): enabled, 5
+/// shares per quote, net 10, no-chase 1 s, fair-value cooldown 1 s, streak pause (2 fills within
+/// 10 s → 10 s), at most 20 USDC bought per window. hft-pmcfg's live configuration and the
+/// replayer's `--param-base live` both start from it.
+pub const LIVE_BASE: [(&str, i64); 9] = [
+    ("enabled", 1),
+    ("clip_shares", 5),
+    ("inv_max_shares", 10),
+    ("fv_cool_ms", 1_000),
+    ("nochase_ms", 1_000),
+    ("streak_k", 2),
+    ("streak_window_ms", 10_000),
+    ("streak_pause_ms", 10_000),
+    ("max_window_cost", 20_000_000),
+];
+
 /// `StrategyDesc.version` (fast-part snapshot layout and decision semantics).
 pub const DESC_VERSION: u16 = 7;
 

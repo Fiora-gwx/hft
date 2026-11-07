@@ -27,6 +27,9 @@ hft_strategy_sdk::strategy_set! {
     }
 }
 
+/// binary-maker's live base parameters (hft-pmcfg `--live`, replayer `--param-base live`).
+pub use binary_maker::LIVE_BASE as BINARY_MAKER_LIVE_BASE;
+
 /// Test-strategy range of kind_ids (never in the committed list or the release `index.json`).
 pub const TEST_KIND_IDS: core::ops::RangeInclusive<u16> = 0xFF00..=0xFFFF;
 
