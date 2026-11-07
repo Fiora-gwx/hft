@@ -404,6 +404,9 @@ hft_strategy_sdk::define_params! {
         /// (schema v38) pairing through the venue-load gates: while load_gate_ns / mdslow_gate_ns
         /// close quoting, a short leg still quotes its pairing bid (openings stay closed); 0 = off
         pair_ignore_lag: Bool [default = 0, since = 38, relax = None],
+        /// (schema v38) pair margin inside the low band [sigma_lo, sigma_min) instead of pair_margin
+        /// (fraction of one, 1e-9); 0 = pair_margin
+        lo_pair_margin: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
     }
 }
 

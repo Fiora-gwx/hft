@@ -1480,6 +1480,8 @@ impl Fast {
                     -d.fav_pair_cap.0
                 } else if late_pair {
                     d.pair_late_margin.0
+                } else if vol_low && d.lo_pair_margin.0 > 0 {
+                    d.lo_pair_margin.0
                 } else {
                     d.pair_margin.0
                 };
