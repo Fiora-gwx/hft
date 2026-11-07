@@ -382,8 +382,9 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 8;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 38;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
+| BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -681,3 +682,20 @@ spec: README.md
 | BMK-049.4 | 1 s 时 `R2` 的 BBO 99 999.99 / 100 000.01 | Coinbase 样本 1 个,1 s 时中间价 × 2 = 20 000 000 |
 | BMK-049.5 | 再来一条 local_kind 3 的旁路样本 | 被忽略(样本仍 1 个) |
 | BMK-049.6 | 夹具七个 group 的表,同一旁路样本 | `reference2` 未设,样本 1 个 |
+
+### BMK-050 公允价参考融合(schema v38 `ref_cb_w`)
+
+- 规则:[group 形态](README.md#group-形态)
+- 级别:table
+- 里程碑:M3
+- 前置:默认参数;.5 用 `specs2`(第二参考 `R2`)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_050_reference_fusion`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-050.1 | 没有第二参考报价时的第一参考报价;`w` = 0 | 未就绪(0):公允价读第一参考自己的中间价 |
+| BMK-050.2 | 第二参考 99 900.00 后第一参考 100 000.00,`w` = 0.5 | 比值取 1.001,融合中间价 = 第一参考的中间价(±1) |
+| BMK-050.3 | 第二参考上涨 10 bp | 融合中间价上涨 5 bp(第一参考未动) |
+| BMK-050.4 | 第二参考超过 5 s 未更新 | 未就绪(0) |
+| BMK-050.5 | 策略内:`ref_cb_w` 0.5 / 0,第二参考报价在第一参考之后上涨 | 0.5:`ref_mid_x2` 偏离 Binance 中间价;0:等于 Binance 中间价 |
+

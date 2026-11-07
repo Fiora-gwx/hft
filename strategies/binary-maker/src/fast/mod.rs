@@ -133,6 +133,52 @@ impl CbFeed {
     }
 }
 
+/// v38 fair-value reference fusion (`ref_cb_w`, README "group 形态"): see `Fast::fuse`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RefFuse {
+    pub cb_mid_x2: i64,
+    pub cb_ens: i64,
+    /// First / second reference mid ratio × 1e9 (running mean, 1/64 per first-reference quote).
+    pub ratio_e9: i64,
+    pub mid_x2: i64,
+}
+
+impl RefFuse {
+    /// A first-reference quote (2 × mid `bn`) at engine time `ens` with weight `w` (1e9): updates
+    /// the ratio while the second reference is fresh and returns the fused mid (0 = not ready).
+    pub fn on_first(&mut self, bn: i64, ens: i64, w: i64) -> i64 {
+        let fresh = self.cb_mid_x2 > 0 && ens.saturating_sub(self.cb_ens) <= CB_FRESH_NS;
+        if w <= 0 || bn <= 0 || !fresh {
+            self.mid_x2 = 0;
+            return 0;
+        }
+        let r = (i128::from(bn) * i128::from(ONE) / i128::from(self.cb_mid_x2)) as i64;
+        self.ratio_e9 = if self.ratio_e9 <= 0 {
+            r
+        } else {
+            self.ratio_e9 + (r - self.ratio_e9) / 64
+        };
+        self.mid_x2 = self.fused(bn, w);
+        self.mid_x2
+    }
+    /// A second-reference quote: the fused mid moves with it (the first reference's mid `bn`).
+    pub fn on_second(&mut self, cb: i64, ens: i64, bn: i64, w: i64) {
+        if cb <= 0 {
+            return;
+        }
+        self.cb_mid_x2 = cb;
+        self.cb_ens = ens;
+        if w > 0 && self.ratio_e9 > 0 && bn > 0 {
+            self.mid_x2 = self.fused(bn, w);
+        }
+    }
+    fn fused(&self, bn: i64, w: i64) -> i64 {
+        let one = i128::from(ONE);
+        let cb_in_bn = i128::from(self.cb_mid_x2) * i128::from(self.ratio_e9) / one;
+        (i128::from(bn) + i128::from(w) * (cb_in_bn - i128::from(bn)) / one) as i64
+    }
+}
+
 /// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
 /// second and the latest sample; not in the snapshot.
 #[derive(Clone, Debug, Default)]
@@ -618,6 +664,10 @@ pub struct Fast {
     /// The second reference group's inst (native Coinbase BBO for the v37 guard); `INST_NONE`
     /// without one (then the guard reads the sidecar's InjectWarmup samples).
     pub reference2: InstId,
+    /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
+    /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
+    /// the fair value reads (0 = off or not ready: the first reference's own mid).
+    pub fuse: RefFuse,
     /// Features the rules read (`crate::features`; not in the snapshot).
     pub feat: MakerFeatures,
     /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
@@ -669,6 +719,7 @@ impl Fast {
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
             reference2: INST_NONE,
+            fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
                 win: i64::MIN,
@@ -921,7 +972,13 @@ impl Fast {
         let cfg = self.plan_cfg();
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
-            EventRef::Bbo { inst, .. } if inst == self.reference => self.run(v, ctx),
+            EventRef::Bbo { inst, .. } if inst == self.reference => {
+                let w = self.p.defaults().ref_cb_w.0;
+                if w > 0 {
+                    self.fuse.on_first(self.feat.top.mid_x2, v.now().engine_ns, w);
+                }
+                self.run(v, ctx)
+            }
             EventRef::Warmup {
                 local_kind, payload, ..
             } if local_kind == CL_WARMUP_KIND => self.cl.on_payload(payload),
@@ -929,9 +986,13 @@ impl Fast {
                 local_kind, payload, ..
             } if local_kind == CHOP_WARMUP_KIND => self.chop.seed(payload),
             EventRef::Bbo { inst, b, .. } if inst == self.reference2 && inst != INST_NONE => {
-                self.cb
-                    .on_bbo(v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
-                if self.p.defaults().cb_win_ms > 0 {
+                let (ens, mid_x2) = (v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
+                self.cb.on_bbo(ens, mid_x2);
+                let w = self.p.defaults().ref_cb_w.0;
+                if w > 0 {
+                    self.fuse.on_second(mid_x2, ens, self.feat.top.mid_x2, w);
+                }
+                if self.p.defaults().cb_win_ms > 0 || w > 0 {
                     self.run(v, ctx);
                 }
             }
@@ -1034,7 +1095,7 @@ impl Fast {
     /// then through the digital delta, Φ(d0 + move / den) − Φ(d0) (README "规则" 5); 0 without
     /// an anchor.
     pub fn dfv(&self, q: &Quote) -> i64 {
-        let ref_mid_x2 = self.feat.top.mid_x2;
+        let ref_mid_x2 = self.ref_mid_x2();
         if q.den <= 0 || q.b0 <= 0 || ref_mid_x2 <= 0 {
             return 0;
         }
@@ -1043,6 +1104,16 @@ impl Fast {
         let shift = moved * one / i128::from(q.den);
         let z = (i128::from(q.d0) + shift).clamp(-6 * one, 6 * one) as i64;
         cdf(z) - cdf(q.d0)
+    }
+
+    /// The reference mid × 2 the fair value reads: the v38 fused mid when `ref_cb_w` > 0 and
+    /// ready, else the first reference's own.
+    pub fn ref_mid_x2(&self) -> i64 {
+        if self.fuse.mid_x2 > 0 {
+            self.fuse.mid_x2
+        } else {
+            self.feat.top.mid_x2
+        }
     }
 
     /// Direction forecast (README "规则" 9) with this instance's `pred_w_*` weights.
@@ -1072,7 +1143,7 @@ impl Fast {
                 ..FvAnchor::default()
             };
         }
-        let ref_mid_x2 = self.feat.top.mid_x2;
+        let ref_mid_x2 = self.ref_mid_x2();
         if self.fv.b_open <= 0 {
             self.fv.b_open = ref_mid_x2;
         }
@@ -1883,6 +1954,7 @@ impl Fast {
                         tag: tag_of(i as u16),
                         max_rest_ms: d.max_rest_ms,
                     };
+                    let b0 = self.ref_mid_x2();
                     if let Ok(h) = ctx.place(it)
                         && let Some(m) = self.quotes.get_mut(i)
                     {
@@ -1891,7 +1963,7 @@ impl Fast {
                         m.px = px;
                         m.last_ens = now.engine_ns;
                         m.win = start;
-                        m.b0 = self.feat.top.mid_x2;
+                        m.b0 = b0;
                         m.d0 = inv_cdf(up_mid);
                         m.den = den;
                         if let Some(x) = self.skind.get_mut(i) {

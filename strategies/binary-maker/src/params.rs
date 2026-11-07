@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 37, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 38, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -384,12 +384,17 @@ hft_strategy_sdk::define_params! {
         cb_shock: Rate [min = 0, max = 1_000_000_000, default = 0, since = 37, relax = None],
         cb_hold_ms: DurationMs [min = 0, max = 60_000, default = 0, since = 37, relax = None],
         cb_pair: Bool [default = 0, since = 37, relax = None],
+        /// (schema v38, research) fair-value reference fusion: the reference mid the fair value and
+        /// its anchors read is the first reference's mid + ref_cb_w × (the second reference's mid in
+        /// the first's units − the first's mid), the unit ratio a running mean (1/64 per quote) of the
+        /// two mids; needs the second (Coinbase) reference group; 0 = off (the first reference alone)
+        ref_cb_w: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
     }
 }
 
 /// `ParamError::GroupShape` codes.
 pub mod shape {
-    /// Not an odd number of groups, at least three (pairs of slots plus the reference).
+    /// More than two reference groups, or not an even number (≥ 2) of slot groups before them.
     pub const COUNT: u16 = 1;
     /// A group does not have exactly one leg.
     pub const LEGS: u16 = 2;

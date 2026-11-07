@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 37, "BMK-024.1");
+    assert_eq!(schema.version(), 38, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1303,6 +1303,10 @@ fn bmk_024_schema_v6() {
         let f = schema.field(n34 + 3 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 37, 0), "BMK-024.33");
     }
+    // .34 v38 appends the reference fusion weight (0 = off).
+    assert_eq!(n_fields_at(schema, 38), Some(n34 + 8), "BMK-024.34");
+    let f = schema.field(n34 + 7).unwrap();
+    assert_eq!((f.name, f.since, f.default), ("ref_cb_w", 38, 0), "BMK-024.34");
 }
 
 #[test]
@@ -3060,4 +3064,47 @@ fn bmk_049_second_reference_group() {
     h1.views_mut().at_engine_ns(1_000_000_000);
     h1.feed(&ev::warmup(3, 0, true, &payload).as_ref());
     assert_eq!(h1.strategy().fast.cb.n, 1, "BMK-049.6");
+}
+
+#[test]
+fn bmk_050_reference_fusion() {
+    use binary_maker::fast::RefFuse;
+    // .1 off (w = 0) or no fresh second reference: not ready (0), the first reference alone.
+    let mut f = RefFuse::default();
+    assert_eq!(f.on_first(20_000_000, 1_000_000_000, 500_000_000), 0, "BMK-050.1");
+    f.on_second(19_980_000, 1_000_000_000, 20_000_000, 0);
+    assert_eq!(f.on_first(20_000_000, 1_100_000_000, 0), 0, "BMK-050.1 w = 0");
+    // .2 w = 0.5: the first quote sets the ratio (1.001…), the fused mid equals the first's.
+    let fused = f.on_first(20_000_000, 1_200_000_000, 500_000_000);
+    assert!((fused - 20_000_000).abs() <= 1, "BMK-050.2 {fused}");
+    // .3 the second reference moves +10 bp: the fused mid moves +5 bp before the first moves.
+    f.on_second(19_999_980, 1_300_000_000, 20_000_000, 500_000_000);
+    assert!((f.mid_x2 - 20_010_000).abs() <= 2, "BMK-050.3 {}", f.mid_x2);
+    // .4 the second reference stale (> 5 s): not ready again.
+    assert_eq!(f.on_first(20_000_000, 7_000_000_000, 500_000_000), 0, "BMK-050.4");
+    // .5 in the strategy: ref_cb_w on the two-reference table, the Coinbase BBO moves the reference
+    // mid the fair value reads; off, it stays the Binance mid.
+    let ix = |name: &str| {
+        let s = BinaryMaker::DESC.schema;
+        (0..s.n_fields()).position(|i| s.field(i).is_some_and(|x| x.name == name)).unwrap()
+    };
+    for (w, want_moved) in [(500_000_000i64, true), (0, false)] {
+        let p = params(|d| d[ix("ref_cb_w")] = w);
+        let g = GroupTable::new(&specs2(), CAPACITY);
+        let mut h = StrategyHarness::<BinaryMaker>::new(&p, &g, fixture(), A1).expect("params");
+        let cb = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+            h.views_mut().at_engine_ns(t);
+            h.views_mut().bbo(R2, (Px(mid - 1), Qty(1_000_000)), (Px(mid + 1), Qty(1_000_000)));
+            let b = h.views_mut().bbo_of(R2);
+            h.feed(&ev::bbo(R2, 7, b).as_ref());
+        };
+        cb(&mut h, 1_000_000_000, 9_990_000);
+        h.views_mut().at_engine_ns(1_100_000_000);
+        ref_quote(h.views_mut(), 10_000_000);
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+        cb(&mut h, 1_200_000_000, 9_999_990);
+        let m = h.strategy().fast.ref_mid_x2();
+        assert_eq!(m != 20_000_000, want_moved, "BMK-050.5 w {w}: {m}");
+    }
 }
