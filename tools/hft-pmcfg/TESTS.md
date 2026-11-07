@@ -15,8 +15,9 @@ spec: README.md
 | 概要 | PMC-005 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 见子节 |
-| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009 |
+| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009、PMC-010 |
 | 多账户 | PMC-001、PMC-003、PMC-004 |
+| 绑核 | PMC-010 |
 | 库 | PMC-004、PMC-005、PMC-006、PMC-007、PMC-008 |
 | 实现说明 | PMC-005、PMC-006 |
 | 延迟与资源契约 | 不适用:无门槛 |
@@ -184,3 +185,18 @@ spec: README.md
 ## 验收
 
 PMC-001–PMC-009 全部通过。2026-11-07 一次性对照:加入 Coinbase 之前的 `hft-pmcfg` 与带 `--no-coinbase` 的当前版本对 6 组命令行(无模式选项;`--maker`;`--maker --param clip_shares=7`;`--live`;`--live --live-account … --no-presign`;`--live --taker-probe`)的输出文件 `cmp` 全部相同。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。
+
+### PMC-010 `--cpu-plan` 的解析
+
+- 规则:[命令行](README.md#命令行)(`--cpu-plan`)、[绑核](README.md#绑核)
+- 级别:table
+- 里程碑:M6
+- 前置:位置参数 `OUT HOT 10.0.0.5 ens5`
+- 实现:`tools/hft-pmcfg/tests/cli.rs::pmc_010_cpu_plan_flag`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| PMC-010.1 | 无 `--cpu-plan` | `CpuPlan::None` |
+| PMC-010.2 | `--live 12345 k1 --cpu-plan none` / `pin` / `spin` | 对应的 `CpuPlan` |
+| PMC-010.3 | `--cpu-plan fast`;`--cpu-plan pin --cpu-plan spin` | 拒绝:含 `none\|pin\|spin`;含 `given twice` |
+

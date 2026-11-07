@@ -10,7 +10,7 @@ pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
          [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
-         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--param NAME=RAW ...] \
+         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
 }
@@ -38,6 +38,8 @@ pub struct Cmd {
     /// `[venues.cb]` (Coinbase BTC-USD reference) in the maker and live configurations; false =
     /// `--no-coinbase`.
     pub coinbase: bool,
+    /// `--cpu-plan none|pin|spin` (README "绑核"); default none.
+    pub cpu_plan: crate::CpuPlan,
     pub root: PathBuf,
     pub hot: PathBuf,
     pub src_ip: String,
@@ -111,6 +113,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut no_presign = false;
     let mut no_cancel_race = false;
     let mut no_coinbase = false;
+    let mut cpu_plan: Option<crate::CpuPlan> = None;
     let mut extra = Vec::new();
     let mut params = Vec::new();
     let mut pos: Vec<String> = Vec::new();
@@ -209,6 +212,14 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_cancel_race, "--no-cancel-race")?;
                 no_cancel_race = true;
             }
+            "--cpu-plan" => {
+                if cpu_plan.is_some() {
+                    return Err("--cpu-plan given twice".into());
+                }
+                let v = next("--cpu-plan", "none|pin|spin")?;
+                cpu_plan =
+                    Some(crate::CpuPlan::parse(&v).ok_or_else(|| format!("--cpu-plan {v}: none|pin|spin"))?);
+            }
             "--no-coinbase" => {
                 once(no_coinbase, "--no-coinbase")?;
                 no_coinbase = true;
@@ -293,6 +304,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         mode,
         params,
         coinbase: !no_coinbase,
+        cpu_plan: cpu_plan.unwrap_or_default(),
         root: PathBuf::from(take()),
         hot: PathBuf::from(take()),
         src_ip: take(),
@@ -304,6 +316,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
 
 /// Writes the configuration of `cmd`; returns the path of `core.toml`.
 pub fn run(cmd: &Cmd) -> Result<PathBuf, String> {
+    let path = write(cmd)?;
+    crate::apply_cpu_plan(&path, cmd.cpu_plan)?;
+    Ok(path)
+}
+
+fn write(cmd: &Cmd) -> Result<PathBuf, String> {
     let (root, hot) = (cmd.root.as_path(), cmd.hot.as_path());
     let (user, pipeline) = (cmd.user.as_deref(), cmd.pipeline.as_deref());
     let (ip, dev) = (cmd.src_ip.as_str(), cmd.bind_device.as_str());

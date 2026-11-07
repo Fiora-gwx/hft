@@ -2082,3 +2082,61 @@ fn core_452_coinbase_reference_config() {
     std::fs::write(&path, toml::to_string(&v).unwrap()).unwrap();
     assert!(codes(&path).contains(&"ReadOnlyVenue".to_string()), "CORE-452.2");
 }
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_453_cpu_plans_load() {
+    use hft_core::config::Idle;
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    for (plan, row) in [
+        (hft_pmcfg::CpuPlan::Pin, "CORE-453.1"),
+        (hft_pmcfg::CpuPlan::Spin, "CORE-453.2"),
+    ] {
+        let d2 = tempfile::tempdir().unwrap();
+        let path = support::write_polymarket_maker_live(
+            d2.path(),
+            &d2.path().join("hot"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        hft_pmcfg::apply_cpu_plan(&path, plan).unwrap();
+        // The plan passes the thread-plan checks (a spinning thread's isolation is checked at start).
+        let errs: Vec<String> = hft_core::config::load(&path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect();
+        assert_eq!(errs, Vec::<String>::new(), "{row}");
+        let c = hft_core::config::parse(&path).unwrap();
+        for t in &c.threads {
+            let want = match t.task.as_str() {
+                "sequencer" => 1,
+                x if x.starts_with("gw:") => 3,
+                x if x.starts_with("feed:") => 2,
+                _ => 0,
+            };
+            assert_eq!(t.core, Some(want), "{row} {}", t.name);
+            let spin = plan == hft_pmcfg::CpuPlan::Spin && (want == 1 || want == 3);
+            assert_eq!(t.idle == Idle::Spin, spin, "{row} {}", t.name);
+            if plan == hft_pmcfg::CpuPlan::Spin && want == 2 {
+                assert_eq!(t.park_us, 20, "{row} {}", t.name);
+            }
+        }
+    }
+}

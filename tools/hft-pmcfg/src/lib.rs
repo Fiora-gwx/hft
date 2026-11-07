@@ -1381,3 +1381,71 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     threads.push(parse("name='gw-pm'\ntask='gw:pm'\npark_us=100\nnice=0")?);
     toml::to_string(&config).map_err(|e| format!("core.toml: {e}"))
 }
+
+/// `--cpu-plan` (README "绑核"): thread placement of a generated `core.toml` on the 4-core
+/// pm-strategy box (c8g.xlarge).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CpuPlan {
+    /// No thread is pinned (every thread parks `park_us` 100 µs when idle).
+    #[default]
+    None,
+    /// `sequencer` on core 1, every `feed:` thread on core 2, the `gw:` thread on core 3, all other
+    /// threads on core 0; idle threads still park. Needs nothing from the host.
+    Pin,
+    /// As `Pin`, and `sequencer` and the `gw:` thread spin (`idle = "spin"`); the feed threads on
+    /// core 2 park 20 µs. hft-core refuses to start unless cores 1–3 are isolated
+    /// (`/sys/devices/system/cpu/isolated`, kernel `isolcpus=1-3`).
+    Spin,
+}
+
+impl CpuPlan {
+    pub fn parse(s: &str) -> Option<CpuPlan> {
+        match s {
+            "none" => Some(CpuPlan::None),
+            "pin" => Some(CpuPlan::Pin),
+            "spin" => Some(CpuPlan::Spin),
+            _ => None,
+        }
+    }
+}
+
+/// Applies `plan` to the `[[threads]]` of the `core.toml` at `path` (rewritten in place); `None`
+/// leaves the file untouched.
+pub fn apply_cpu_plan(path: &Path, plan: CpuPlan) -> Result<(), String> {
+    if plan == CpuPlan::None {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut config: toml::Value = toml::from_str(&text).map_err(|e| format!("core.toml: {e}"))?;
+    let threads = config
+        .get_mut("threads")
+        .and_then(toml::Value::as_array_mut)
+        .ok_or("core.toml: missing threads")?;
+    for t in threads.iter_mut() {
+        let t = t.as_table_mut().ok_or("core.toml: thread is not a table")?;
+        let task = t
+            .get("task")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let (core, hot) = if task == "sequencer" {
+            (1, true)
+        } else if task.starts_with("gw:") {
+            (3, true)
+        } else if task.starts_with("feed:") {
+            (2, false)
+        } else {
+            (0, false)
+        };
+        t.insert("core".into(), toml::Value::Integer(core));
+        if plan == CpuPlan::Spin {
+            if hot {
+                t.insert("idle".into(), "spin".into());
+            } else if core == 2 {
+                t.insert("park_us".into(), toml::Value::Integer(20));
+            }
+        }
+    }
+    let out = toml::to_string(&config).map_err(|e| format!("core.toml: {e}"))?;
+    std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
+}

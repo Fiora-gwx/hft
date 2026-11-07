@@ -351,3 +351,23 @@ fn pmc_009_no_coinbase_flag() {
     let e = parse(&args(&format!("--maker --no-coinbase --no-coinbase {POS}"))).unwrap_err();
     assert!(e.contains("given twice"), "PMC-009.3: {e}");
 }
+
+#[test]
+fn pmc_010_cpu_plan_flag() {
+    use hft_pmcfg::CpuPlan;
+    // .1 default none; .2 pin / spin in any mode.
+    assert_eq!(parse(&args(POS)).unwrap().cpu_plan, CpuPlan::None, "PMC-010.1");
+    for (v, want) in [
+        ("none", CpuPlan::None),
+        ("pin", CpuPlan::Pin),
+        ("spin", CpuPlan::Spin),
+    ] {
+        let c = parse(&args(&format!("--live 12345 k1 --cpu-plan {v} {POS}"))).unwrap();
+        assert_eq!(c.cpu_plan, want, "PMC-010.2 {v}");
+    }
+    // .3 refused: an unknown plan, or twice.
+    let e = parse(&args(&format!("--cpu-plan fast {POS}"))).unwrap_err();
+    assert!(e.contains("none|pin|spin"), "PMC-010.3: {e}");
+    let e = parse(&args(&format!("--cpu-plan pin --cpu-plan spin {POS}"))).unwrap_err();
+    assert!(e.contains("given twice"), "PMC-010.3: {e}");
+}

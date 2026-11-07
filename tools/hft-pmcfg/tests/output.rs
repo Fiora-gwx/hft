@@ -528,7 +528,11 @@ fn pmc_008_coinbase_reference() {
     );
     // The slow-connection rotation of the raced Coinbase BBO connections (hft-venue §3a).
     assert_eq!(cbv["feed"]["race_rotate_s"].as_integer(), Some(600), "PMC-008.4");
-    assert_eq!(v["venues"]["bn"]["feed"]["race_rotate_s"].as_integer(), Some(600), "PMC-008.4 bn");
+    assert_eq!(
+        v["venues"]["bn"]["feed"]["race_rotate_s"].as_integer(),
+        Some(600),
+        "PMC-008.4 bn"
+    );
     l.coinbase = false;
     hft_pmcfg::write_polymarket_maker_live(&lo, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
     let v: toml::Value = toml::from_str(&core(&lo)).unwrap();

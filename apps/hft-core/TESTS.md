@@ -4617,6 +4617,19 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-440.5 | `cancel_race = true` | 加载成功;`gw.cancel_race` = true |
 | CORE-440.6 | `cancel_mode = "market"`;`cancel_mode = "token"` | 前者加载成功、`CancelMode::Market`;后者 `ConfigParse` |
 
+### CORE-453 hft-pmcfg 的绑核方案通过线程计划校验
+
+- 规则:[线程计划](README.md#线程计划);方案归 [hft-pmcfg 绑核](../../tools/hft-pmcfg/README.md#绑核)
+- 级别:table
+- 里程碑:M6
+- 前置:`write_polymarket_maker_live`(Cargo feature `polymarket`),再 `hft_pmcfg::apply_cpu_plan`
+- 实现:`apps/hft-core/tests/config.rs::core_453_cpu_plans_load`
+
+| 行 | 方案 | 期望 |
+|---|---|---|
+| CORE-453.1 | `pin` | 加载无错误;`sequencer` 核 1、`feed:*` 核 2、`gw:pm` 核 3、其余核 0;没有 `spin` |
+| CORE-453.2 | `spin` | 加载无错误(隔离在线程启动时才检查);`sequencer`、`gw:pm` 为 `spin`;`feed:*` 的 `park_us` = 20 |
+
 ## 验收
 
 - 本组件完成的标准:里程碑已到的非 `host`/`testnet`/`drill` 用例全部有同编号的实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位)、§6 的追溯检查)。

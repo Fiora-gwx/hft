@@ -18,6 +18,7 @@ status: impl
   - [命令行](#命令行)
   - [多账户](#多账户)
   - [库](#库)
+  - [绑核](#绑核)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -32,7 +33,7 @@ status: impl
 ```text
 hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
           [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--live-account UID KEYS_DIR ...]
-          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--param NAME=RAW ...]
+          [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--cpu-plan none|pin|spin] [--param NAME=RAW ...]
           OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]
 ```
 
@@ -48,6 +49,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `--live-account UID KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `pm-live-<账户号>`,角色 `any`(见[多账户](#多账户)) |
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
 | `--no-coinbase` | 只用于 `--maker` 或 `--live`:不写第二个参考行情 `[venues.cb]`(缺省写:`coinbase-spot`、`id = 16`、`max_sub_insts = 1`、模拟时 `live_feed = true`,线程 `feed-cb`/`build-cb`,`[venues.cb.feed] race_rotate_s = 600`(赛跑 BBO 连接每 10 分钟评估一次,长期落后的轮换,hft-venue §3a);refdata 加 `USD` 资产(Stable,ledger 按面值计价)、Coinbase venue(端点 `wss://ws-feed.exchange.coinbase.com`、`https://api.exchange.coinbase.com`,caps 与限速取 [venue-coinbase](../../crates/venue-coinbase/README.md) 默认)与 inst `BTC-USD` = InstId 8(与 Binance 参考同一 BTC 资产,tick 0.01、lot 1e-8);ECF1 的 feeds 加该 venue;binary-maker 多一个第 8 个 group(InstId 8、不开仓、不绑账户)作为第二参考——v37 `cb_*` 保护读它的 BBO,`cb_win_ms` = 0(缺省)时不影响决定)。带此选项的输出与加入 Coinbase 之前相同,只多 `[venues.bn.feed] race_rotate_s = 600`(2026-11-07 起 Binance 赛跑连接同样轮换慢连接) |
+| `--cpu-plan none\|pin\|spin` | 线程绑核方案(见[绑核](#绑核)),缺省 `none`;任何模式都可用 |
 | `--param NAME=RAW` | 只用于 `--maker` 或 `--live`,可重复:在默认值(实盘做市另在实盘参数)之后把 binary-maker(`--taker-probe` 时为 pm-taker-probe)字段 `NAME` 设为原始值 `RAW` |
 | `OUTPUT_DIR` | 输出目录(不存在则创建);写 `core.toml`、`principals.toml`、`refdata.bin`、`engine.bin`、`risk_params.bin`、`strategy_params.bin` |
 | `TMPFS_DIR` | `paths.journal_ram` |
@@ -89,6 +91,18 @@ pub mod cli { pub fn parse(args: &[String]) -> Result<Cmd, String>; pub fn run(c
 ```
 
 另有不带 `_with` 的两个写函数(无参数值)与常量 `PM_CROSSED_TOLERANCE`、`PM_COINS`、`PM_LIVE_PRESIGN`、`PM_LIVE_DAILY_LOSS`、`PM_LIVE_PARAMS`、`PM_REST_TIMEOUT_MS`、`PM_REST_MAX_IDLE_MS`、`PM_PROBE_RR_MAX_CROSS`。`LiveAccount.label = None` 即 `pm-live-<账户号>`。
+
+### 绑核
+
+`--cpu-plan`(库函数 `apply_cpu_plan(core.toml, plan)`,写完配置后改写 `[[threads]]`)面向 4 核的 pm-strategy 实盘机(c8g.xlarge,逻辑 CPU 0–3):
+
+| 方案 | `sequencer` | `feed:*`(pm、bn、cb) | `gw:pm` | 其余线程 | 主机要求 |
+|---|---|---|---|---|---|
+| `none`(缺省) | 不绑 | 不绑 | 不绑 | 不绑 | 无;全部线程空闲时休眠 `park_us` 100 µs |
+| `pin` | 核 1 | 核 2 | 核 3 | 核 0 | 无;仍休眠,只减少迁核与缓存失效 |
+| `spin` | 核 1,`idle = "spin"` | 核 2,`park_us = 20` | 核 3,`idle = "spin"` | 核 0 | 内核 `isolcpus=1-3`(GRUB,需重启);未隔离时 hft-core 在线程启动时拒绝(`ThreadPolicy`,退出 3) |
+
+依据(2026-11-07,11-06 实盘 journal):决策 → 写出网关 p50 94–150 µs、p99 180–339 µs;行情到达 → 决策 p50 约 145 µs。`spin` 去掉每跳至多一个 `park_us` 的唤醒等待,并免受同机其他进程抢核;两个空转线程各占满一个核,机器上不能再并行跑第二个引擎。
 
 ## 实现说明
 
