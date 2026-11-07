@@ -1048,7 +1048,12 @@ fn ven_415_cancel_by_token() {
         h.poll(5000);
         let st = statuses(&h.reps());
         let n = h.rt.counters();
-        (st, n.rest_cancel_by_token, n.rest_companion_sent, stub::calls("encode_rest_companion").len())
+        (
+            st,
+            n.rest_cancel_by_token,
+            n.rest_companion_sent,
+            stub::calls("encode_rest_companion").len(),
+        )
     };
     // .1 the companion request replaces the cancel: one Written report, no race companion.
     assert_eq!(run(true), (vec![SendStatus::Written], 1, 0, 1), "VEN-415.1");

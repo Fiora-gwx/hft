@@ -415,8 +415,15 @@ mod tests {
         let a = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
         let j = dir.to_string_lossy().into_owned();
         let o = parse(&a(&[
-            "research", "--journal", &j, "--out", "/tmp/x", "--set", "clip_shares=7,pair_margin=1",
-            "--param-base", "live",
+            "research",
+            "--journal",
+            &j,
+            "--out",
+            "/tmp/x",
+            "--set",
+            "clip_shares=7,pair_margin=1",
+            "--param-base",
+            "live",
         ]))
         .unwrap();
         let v = &o.variants[1];
@@ -427,7 +434,18 @@ mod tests {
         }
         assert_eq!(v.set.get("pair_margin"), Some(&1), "RPL-302.4");
         assert_eq!(o.variants[0].base, None, "RPL-302.4 the journal's own run");
-        assert!(parse(&a(&["research", "--journal", &j, "--out", "/tmp/x", "--param-base", "x"])).is_err());
+        assert!(
+            parse(&a(&[
+                "research",
+                "--journal",
+                &j,
+                "--out",
+                "/tmp/x",
+                "--param-base",
+                "x"
+            ]))
+            .is_err()
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

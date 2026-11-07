@@ -289,7 +289,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             let mut alt = RestReqBuf::default();
             let x = &mut self.accts[a];
             if matches!(
-                P::encode_rest_companion(self.rd, &x.tpl, &mut x.ctx, &x.rest_credential, &c, &target, &clk, &mut alt),
+                P::encode_rest_companion(
+                    self.rd,
+                    &x.tpl,
+                    &mut x.ctx,
+                    &x.rest_credential,
+                    &c,
+                    &target,
+                    &clk,
+                    &mut alt
+                ),
                 Ok(true)
             ) {
                 wire = alt;

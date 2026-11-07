@@ -1683,8 +1683,14 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 {
                     m.rotate = true;
                     self.st.n.race_rotated += 1;
-                    self.st
-                        .cs(true, id, ConnStateKind::Degraded, InstId(0), codes::RACE_SLOW, now);
+                    self.st.cs(
+                        true,
+                        id,
+                        ConnStateKind::Degraded,
+                        InstId(0),
+                        codes::RACE_SLOW,
+                        now,
+                    );
                 }
                 self.st.n.race_won += u64::from(m.race_won);
                 self.st.n.race_lost += u64::from(m.race_lost);

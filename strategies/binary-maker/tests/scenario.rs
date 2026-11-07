@@ -3086,7 +3086,9 @@ fn bmk_050_reference_fusion() {
     // mid the fair value reads; off, it stays the Binance mid.
     let ix = |name: &str| {
         let s = BinaryMaker::DESC.schema;
-        (0..s.n_fields()).position(|i| s.field(i).is_some_and(|x| x.name == name)).unwrap()
+        (0..s.n_fields())
+            .position(|i| s.field(i).is_some_and(|x| x.name == name))
+            .unwrap()
     };
     for (w, want_moved) in [(500_000_000i64, true), (0, false)] {
         let p = params(|d| d[ix("ref_cb_w")] = w);
@@ -3094,7 +3096,8 @@ fn bmk_050_reference_fusion() {
         let mut h = StrategyHarness::<BinaryMaker>::new(&p, &g, fixture(), A1).expect("params");
         let cb = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
             h.views_mut().at_engine_ns(t);
-            h.views_mut().bbo(R2, (Px(mid - 1), Qty(1_000_000)), (Px(mid + 1), Qty(1_000_000)));
+            h.views_mut()
+                .bbo(R2, (Px(mid - 1), Qty(1_000_000)), (Px(mid + 1), Qty(1_000_000)));
             let b = h.views_mut().bbo_of(R2);
             h.feed(&ev::bbo(R2, 7, b).as_ref());
         };
