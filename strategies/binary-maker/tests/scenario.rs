@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 39, "BMK-024.1");
+    assert_eq!(schema.version(), 40, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1334,6 +1334,15 @@ fn bmk_024_schema_v6() {
         let f = schema.field(n34 + 8 + k as u16).unwrap();
         assert_eq!((f.name, f.since, f.default), (*name, 39, 0), "BMK-024.35");
     }
+    // .36 v40 appends the calm module's thick-queue exemption (0 = off).
+    let n39 = n34 + 8 + v39.len() as u16;
+    assert_eq!(n_fields_at(schema, 40), Some(n39 + 1), "BMK-024.36");
+    let f = schema.field(n39).unwrap();
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("lo_thick_free", 40, 0),
+        "BMK-024.36"
+    );
 }
 
 #[test]

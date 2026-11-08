@@ -1757,6 +1757,7 @@ impl Fast {
             let lo_plain = lo_fav_on && d.lo_plain;
             let dip_leg = d.dip_mode && own_q >= other_q && !favoured && !lo_plain;
             let thick = d.mm_max_bq > 0
+                && !(lo_plain && d.lo_thick_free)
                 && book
                     .best(Side::Buy)
                     .is_some_and(|l| l.qty.0 > i64::from(d.mm_max_bq).saturating_mul(unit_qty));

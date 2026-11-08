@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 39, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 40, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -422,6 +422,9 @@ hft_strategy_sdk::define_params! {
         /// lo_sigma_max = the low band's openings need implied sigma below this (1e-9; 0 = off)
         lo_chop_k: Count [min = 0, max = 24, default = 0, since = 39, relax = None],
         lo_sigma_max: Rate [min = 0, max = 1_000_000_000, default = 0, since = 39, relax = None],
+        /// (schema v40) the calm module's plain openings (lo_plain in the low band) ignore the thick-queue
+        /// rule mm_max_bq; 0 = off
+        lo_thick_free: Bool [default = 0, since = 40, relax = None],
     }
 }
 
