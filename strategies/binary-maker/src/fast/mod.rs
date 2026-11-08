@@ -1234,6 +1234,9 @@ impl Fast {
         let vol = self.vol_state(left_ms);
         let vol_low = vol == 1;
         let quoting = ok && left_ms > i64::from(d.stop_before_ms) && vol > 0 && !load && !slow;
+        // v39 pair_ignore_lag: the venue-load gates close openings only; pairing bids keep quoting.
+        let lag_pair =
+            d.pair_ignore_lag && ok && left_ms > i64::from(d.stop_before_ms) && vol > 0 && (load || slow);
         // Last-minute stop-loss (late_hedge_ms): only pairing bids by the leg the score favours.
         // Pairing priority (pair_stop_ms): a short leg pairs until pair_stop_ms before the end.
         let pair_window = ok && d.pair_stop_ms > 0 && left_ms > i64::from(d.pair_stop_ms);
@@ -1340,7 +1343,30 @@ impl Fast {
         } else {
             None
         };
+        // v39 calm trend mean over lo_chop_k windows (0 = chop_k) and the implied sigma for lo_sigma_max.
+        let lo_k = if d.lo_chop_k > 0 { d.lo_chop_k } else { d.chop_k };
+        let lo_trend_mean = if lo_k > 0 {
+            self.chop.mean(lo_k as usize)
+        } else {
+            None
+        };
+        let implied_now = self
+            .feat
+            .vol
+            .sigma(d.vol_min_samples as usize)
+            .map(|s| (i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE)) as i64);
         let chop_ok = d.chop_k == 0 || chop_mean.is_some_and(|e| e <= d.chop_er_max.0);
+        // v39 calm favourite: this window's running efficiency ratio of the Up mid (30 s .. now) and
+        // the direction it moved (+1 Up, -1 Down, 0 flat or too few seconds).
+        let (win_er, win_dir) = if self.chop.win == start && self.chop.n >= 20 && self.chop.path > 0 {
+            let net = self.chop.last - self.chop.first;
+            (
+                (i128::from(net.abs()) * i128::from(ONE) / i128::from(self.chop.path)) as i64,
+                net.signum(),
+            )
+        } else {
+            (0, 0)
+        };
         let den = self.feat.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
             let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
             let v_ms = (left_ms - TWAP_TAIL_MS).max(1);
@@ -1374,7 +1400,7 @@ impl Fast {
                 }
             }
         }
-        let lims = if d.fv_limit && quoting {
+        let lims = if d.fv_limit && (quoting || lag_pair) {
             self.fair_limits(
                 v,
                 start,
@@ -1616,6 +1642,8 @@ impl Fast {
                 };
                 !in_window && !risky
             };
+            // v39 lo_no_pair: inside the low band a short leg does not quote its pairing bid.
+            let no_pair = no_pair || (vol_low && d.lo_no_pair && other_q > own_q);
             if let Some(x) = self.mic.get_mut(i) {
                 *x = m;
             }
@@ -1656,7 +1684,7 @@ impl Fast {
             let pairing = pair_window
                 && other_q > own_q
                 && (d.pair_prio_age_ms == 0 || age_ms < i64::from(d.pair_prio_age_ms));
-            let mine = (quoting || hedge || pairing) && i / 2 == up / 2;
+            let mine = (quoting || hedge || pairing || (lag_pair && other_q > own_q)) && i / 2 == up / 2;
             let late_pair = d.pair_late_ms > 0 && age_ms >= i64::from(d.pair_late_ms);
             let free_fav = d.dir_pair_free && favoured && !(d.pair_late_all && late_pair);
             let lim =
@@ -1667,6 +1695,8 @@ impl Fast {
                         -d.fav_pair_cap.0
                     } else if late_pair {
                         d.pair_late_margin.0
+                    } else if vol_low && d.lo_pair_margin.0 > 0 {
+                        d.lo_pair_margin.0
                     } else {
                         d.pair_margin.0
                     };
@@ -1714,7 +1744,18 @@ impl Fast {
             // Opening rules (schema v9): a leg that is not short may not raise the net when one holds.
             let opens = own_q >= other_q && (!favoured || d.fav_obey_open);
             // dip_mode: a leg that is not short and not favoured opens only while its dip bid is on.
-            let dip_leg = d.dip_mode && own_q >= other_q && !favoured;
+            // v39 calm favourite (low band): the opening conditions; lo_plain quotes the plain best bid.
+            let lo_fav_on = vol_low
+                && (d.lo_fav_min_px.0 > 0
+                    || d.lo_fav_max_px.0 > 0
+                    || d.lo_win_er_min.0 > 0
+                    || d.lo_trend
+                    || d.lo_plain
+                    || d.lo_max_shares > 0
+                    || d.lo_chop_min.0 > 0
+                    || d.lo_sigma_max.0 > 0);
+            let lo_plain = lo_fav_on && d.lo_plain;
+            let dip_leg = d.dip_mode && own_q >= other_q && !favoured && !lo_plain;
             let thick = d.mm_max_bq > 0
                 && book
                     .best(Side::Buy)
@@ -1732,7 +1773,7 @@ impl Fast {
                     i128::from(b) * i128::from(ONE) < i128::from(d.open_min_px.0) * i128::from(unit_px)
                 });
             let against = d.open_skip_z.0 > 0 && z.is_some_and(|z| z < -d.open_skip_z.0);
-            let no_open = opens && (quiet || thick || early || cheap || dear || against);
+            let no_open = opens && ((quiet && !lo_plain) || thick || early || cheap || dear || against);
             // Book imbalance (open_min_imb): a leg that is not short skips a thin own bid side.
             let thin = d.open_min_imb.0 > 0 && own_q >= other_q && {
                 let own_bq = book.best(Side::Buy).map_or(0, |l| l.qty.0);
@@ -1794,7 +1835,28 @@ impl Fast {
                             || (i128::from(bq) - i128::from(aq)) * i128::from(ONE)
                                 < i128::from(d.lo_obi_min.0) * sum
                     }));
-            let no_open = no_open || chop_block || lo_block;
+            let lo_fav_block = opening && lo_fav_on && {
+                let px_ok = |lim: i64, above: bool| {
+                    lim <= 0
+                        || bid.is_some_and(|b| {
+                            let l = i128::from(b) * i128::from(ONE);
+                            let r = i128::from(lim) * i128::from(unit_px);
+                            if above { l >= r } else { l < r }
+                        })
+                };
+                let leg_dir = if is_up { 1 } else { -1 };
+                !px_ok(d.lo_fav_min_px.0, true)
+                    || !px_ok(d.lo_fav_max_px.0, false)
+                    || (d.lo_from_ms > 0 && age_ms < i64::from(d.lo_from_ms))
+                    || (d.lo_to_ms > 0 && age_ms >= i64::from(d.lo_to_ms))
+                    || (d.lo_win_er_min.0 > 0 && win_er < d.lo_win_er_min.0)
+                    || (d.lo_trend && win_dir != leg_dir)
+                    || (d.lo_max_shares > 0
+                        && own_q.saturating_add(clip) > i64::from(d.lo_max_shares).saturating_mul(unit_qty))
+                    || (d.lo_chop_min.0 > 0 && !lo_trend_mean.is_some_and(|e| e >= d.lo_chop_min.0))
+                    || (d.lo_sigma_max.0 > 0 && !implied_now.is_some_and(|x| x < d.lo_sigma_max.0))
+            };
+            let no_open = no_open || chop_block || lo_block || lo_fav_block;
             // v35 trade-activity gate: both legs' prints over trd_win_ms (history too short: no block).
             let quiet = opening && d.trd_win_ms > 0 && {
                 let ms = i64::from(d.trd_win_ms);
@@ -1869,7 +1931,9 @@ impl Fast {
                 QState::Live => {
                     let mut cancel = !(mine && live) || (skip && !hedge) || no_open || no_pair;
                     let mut cooled = false;
-                    if !cancel && d.fv_cancel.0 > 0 && !pairing {
+                    // v39 sticky pairing: a short leg's bid at the pair-cost limit ignores fair-value moves.
+                    let sticky = d.pair_sticky && other_q > own_q && lim.is_some_and(|l| q.px == l);
+                    if !cancel && d.fv_cancel.0 > 0 && !pairing && !sticky {
                         let x = self.dfv(&q);
                         if (is_up && x <= -d.fv_cancel.0) || (!is_up && x >= d.fv_cancel.0) {
                             cancel = true;
@@ -1900,7 +1964,8 @@ impl Fast {
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
-                    cancel |= !hedge && !pairing && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
+                    cancel |=
+                        !hedge && !pairing && !sticky && fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()

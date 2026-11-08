@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 38, "BMK-024.1");
+    assert_eq!(schema.version(), 39, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1307,6 +1307,33 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 38), Some(n34 + 8), "BMK-024.34");
     let f = schema.field(n34 + 7).unwrap();
     assert_eq!((f.name, f.since, f.default), ("ref_cb_w", 38, 0), "BMK-024.34");
+    // .35 v39 appends the calm-window module and the pairing research switches (0 = off).
+    let v39 = [
+        "lo_fav_min_px",
+        "lo_fav_max_px",
+        "lo_from_ms",
+        "lo_to_ms",
+        "lo_win_er_min",
+        "lo_trend",
+        "lo_plain",
+        "pair_sticky",
+        "pair_ignore_lag",
+        "lo_pair_margin",
+        "lo_no_pair",
+        "lo_max_shares",
+        "lo_chop_min",
+        "lo_chop_k",
+        "lo_sigma_max",
+    ];
+    assert_eq!(
+        n_fields_at(schema, 39),
+        Some(n34 + 8 + v39.len() as u16),
+        "BMK-024.35"
+    );
+    for (k, name) in v39.iter().enumerate() {
+        let f = schema.field(n34 + 8 + k as u16).unwrap();
+        assert_eq!((f.name, f.since, f.default), (*name, 39, 0), "BMK-024.35");
+    }
 }
 
 #[test]
