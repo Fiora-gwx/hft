@@ -776,20 +776,25 @@ where
             ..FeedCfg::default()
         }
     } else {
-        let levels = P::routes()
+        // A protocol without a depth route either (polymarket-price: Index/Mark only) runs its
+        // Md streams on one connection; `topn_levels` is then unused.
+        let depth_levels = P::routes()
             .iter()
             .filter(|r| r.kind == RouteKind::DepthTopN)
             .flat_map(|r| r.topn_levels.iter().copied())
-            .max()
-            .ok_or_else(|| Error::config("Feed", "protocol has neither Bbo nor DepthTopN routes"))?;
+            .max();
         FeedCfg {
             routes: hft_venue::FeedRoutes::Md,
             max_sub_insts: v.max_sub_insts,
             depth: hft_venue::DepthMode::TopN,
-            topn_levels: levels,
+            topn_levels: depth_levels.unwrap_or(FeedCfg::default().topn_levels),
             snapshot_part_levels: 256,
-            // Two connections per group: the exchange closes single connections (WS 1013).
-            depth_conns: v.feed.depth_conns.unwrap_or(2),
+            // Two connections per group for a book (the exchange closes single connections,
+            // WS 1013); one for a price-only stream.
+            depth_conns: v
+                .feed
+                .depth_conns
+                .unwrap_or(if depth_levels.is_some() { 2 } else { 1 }),
             raw_bbo,
             raw_md,
             venue: feed_venue,
