@@ -115,6 +115,9 @@ pub struct LeadState {
     /// The lead trigger and the perp-cancel trigger; both restart with each window.
     pub lead: Trigger,
     pub pc: Trigger,
+    /// The fair-value (spot) reference's mids and its own lead trigger (`lead_src` bit 1).
+    pub spot: PerpRing,
+    pub lead_spot: Trigger,
     pub win: i64,
     /// Per slot leg (quote order).
     pub legs: Vec<LeadLeg>,
@@ -129,6 +132,38 @@ impl LeadState {
             self.win = start;
             self.lead = Trigger::default();
             self.pc = Trigger::default();
+            self.lead_spot = Trigger::default();
         }
     }
+}
+
+/// Rule 15 model price (raw price units; `cent` = one cent): the token mid plus the expected
+/// repricing E = `k` × `delta` (cents per bp, 1e-9) × |move| (`move_abs`, 1e-9 of one) minus `m`
+/// (cents, 1e-9), floored to a whole cent, then held within [bid + 1 cent, min(bid + `maxtick`
+/// cents, ask − 1 cent)]: max(bid + 1, min(bid + maxtick, ⌊mid + E − m⌋, ask − 1)).
+#[allow(clippy::too_many_arguments)]
+pub fn model_px(
+    bid: i64,
+    ask: i64,
+    cent: i64,
+    delta: i64,
+    move_abs: i64,
+    k: i64,
+    m: i64,
+    maxtick: i64,
+) -> i64 {
+    let one = 1_000_000_000i128;
+    let cent = i128::from(cent.max(1));
+    // E in raw price units: k · delta · (move in bp) · cent; move bp = move_abs / 1e5.
+    let e = i128::from(k) * i128::from(delta) / one * i128::from(move_abs) / 100_000 * cent / one;
+    let m_raw = i128::from(m) * cent / one;
+    // ⌊mid + E − m⌋ to a whole cent, mid = (bid + ask) / 2 (doubled to stay exact).
+    let cap2 = i128::from(bid) + i128::from(ask) + 2 * e - 2 * m_raw;
+    let cap = cap2.div_euclid(2 * cent) * cent;
+    let lo = i128::from(bid) + cent;
+    let hi = (i128::from(bid) + i128::from(maxtick) * cent)
+        .min(cap)
+        .min(i128::from(ask) - cent);
+    lo.max(hi)
+        .clamp(i128::from(i64::MIN / 4), i128::from(i64::MAX / 4)) as i64
 }

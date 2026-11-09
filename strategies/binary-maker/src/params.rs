@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 42, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 43, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -441,6 +441,18 @@ hft_strategy_sdk::define_params! {
         /// true: rule 15 only — no other opening rule (rules 1–14, pairing, dip) places anything;
         /// inventory is held to settlement
         lead_only: Bool [default = 0, since = 42, relax = Down],
+        /// rule 15 trigger sources (bits): 1 = the perpetual reference, 2 = the fair-value (spot)
+        /// reference; each source and direction has its own cool-down
+        lead_src: Count [min = 0, max = 3, default = 1, since = 43, relax = None],
+        /// rule 15 bid price: 0 = best bid + 1 cent; 1 = the model price (mid + lead_k × Delta ×
+        /// |move| − lead_m, between 1 and lead_maxtick cents above the bid, below the ask)
+        lead_price: Count [min = 0, max = 1, default = 0, since = 43, relax = None],
+        /// rule 15 model price margin, cents (1e-9)
+        lead_m: Rate [min = -10_000_000_000, max = 50_000_000_000, default = 500_000_000, since = 43, relax = None],
+        /// rule 15 model price: at most this many cents above the best bid
+        lead_maxtick: Count [min = 1, max = 50, default = 3, since = 43, relax = None],
+        /// rule 15 model price: repricing factor k of the expected move (1e-9)
+        lead_k: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 43, relax = None],
     }
 }
 

@@ -111,6 +111,11 @@ status: impl
 | `lead_pc_w_ms` / `lead_pc_x_bp` | DurationMs / Rate | 0 / 0(关) | 规则 15 永续撤单:回看时长与阈值 | None |
 | `lead_pc_block_ms` / `lead_pc_cool_ms` | DurationMs | 1 000 / 1 000 | 规则 15 永续撤单:规则 14 在被不利代币上的封锁时长;同方向两次的最短间隔 | None |
 | `lead_only` | Bool | 0 | 规则 15 独占:其他开仓规则都不运行,持仓到结算 | Down |
+| `lead_src` | Count | 1 | 规则 15 触发源(位):1 = 永续,2 = 公允价参考(现货);schema v43 | None |
+| `lead_price` | Count | 0 | 规则 15 挂单价:0 = 买一 + 1 美分;1 = 模型价 | None |
+| `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
+| `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
+| `lead_k` | Rate | 1 | 规则 15 模型价的重定价系数 k | None |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 
@@ -202,6 +207,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - **生命周期**:挂单后 `lead_life_ms`(引擎时间)未完全成交即撤;距结束 ≤ 2 s、`enabled` 关或时钟不可用时撤;陈旧单按规则 8。每个永续报价与每次判定都检查。
 - 领先挂单占用该腿的订单槽:规则 1–14 不管理它(跳过该腿),它终结后该腿恢复正常。
 - **`lead_only`**:只有规则 15 下单——规则 1–14(含配对、反转、规则 12)都不运行,其余挂着的单撤掉;持仓到结算。
+- **触发源与模型价(schema v43)**:`lead_src` 的位 0 = 永续(缺省)、位 1 = 公允价参考(现货 BTCUSDT 的 BBO 中间价,自己的环);两个源用同样的 W/X,冷却按(源, 方向)各自独立,任一源触发都走同一个挂单判定(每个代币仍只有一张领先单);永续撤单只看永续。`lead_price` 1:挂单价 = max(买一 + 1 美分, min(买一 + `lead_maxtick` 美分, ⌊代币中间价 + E − `lead_m`⌋, 卖一 − 1 美分)),E = `lead_k` × Δ × |move bp|,Δ = 100·φ(d)/(max(σ, 0.03)·sq)·remf、d = dist/(max(σ, 0.03)·sq)(规则 14 的同一组特征,不乘 `fc_s`;dist 按代币方向);特征不可用(无 Chainlink 组、无起点 TWAP、无新鲜价格)时为买一 + 1 美分。`lead_price` 1 时每秒取一个隐含 σ 样本(与规则 14 同一个环)。`lead_src` 1、`lead_price` 0(缺省)与 v42 逐位相同。与 Python 参照 `Strat.on_lead`(`lead_src`/`lead_price`/`lead_m`/`lead_maxtick`/`lead_k`)的挂单价逐笔相同(BMK-055.2)。
 - 时间常量(研究里的固定值):`LEAD_START_MS` 5 000、`LEAD_END_MS` 2 000、`LEAD_LAST_MS` 10 000。
 
 ### Note 码表与报表字段

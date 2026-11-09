@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 42, "BMK-024.1");
+    assert_eq!(schema.version(), 43, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1365,7 +1365,33 @@ fn bmk_024_schema_v6() {
         ],
         "BMK-024.36"
     );
-    assert_eq!(n_fields_at(schema, 42), Some(schema.n_fields()), "BMK-024.36");
+    let n43 = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 43)
+        .count() as u16;
+    assert_eq!(
+        n_fields_at(schema, 42),
+        Some(schema.n_fields() - n43),
+        "BMK-024.36"
+    );
+    // .37 v43 appends rule 15's trigger sources and model price; the defaults keep v42 (perpetual
+    // only, best bid + 1 cent).
+    let v43: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 43)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v43,
+        [
+            ("lead_src", 1),
+            ("lead_price", 0),
+            ("lead_m", 500_000_000),
+            ("lead_maxtick", 3),
+            ("lead_k", 1_000_000_000)
+        ],
+        "BMK-024.37"
+    );
 }
 
 #[test]
@@ -3688,5 +3714,135 @@ fn bmk_054_rule15_lead_quote() {
     assert!(
         places(&perp(&mut h, up + 400 * ms, 10_005_000)).is_empty(),
         "BMK-054.7 off"
+    );
+}
+
+#[test]
+fn bmk_055_rule15_sources_and_model_price() {
+    use binary_maker::fcev;
+    use binary_maker::lead::model_px;
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    // .1 the price formula (raw px, cent = 10): max(bid + 1, min(bid + maxtick, ⌊mid + E − m⌋, ask − 1)).
+    // Δ 2 c/bp × 1.5 bp × k 1 = E 3 c; Up 0.450 / 0.500 (mid 47.5): ⌊47.5 + 3 − 0.5⌋ = 50 → min(48, 50, 49) = 48.
+    let c = 1_000_000_000i64;
+    assert_eq!(
+        model_px(450, 500, 10, 2 * c, 150_000, c, c / 2, 3),
+        480,
+        "BMK-055.1 maxtick"
+    );
+    // E 0.3 c: ⌊47.5 + 0.3 − 0.5⌋ = 47 → 47 (inside the cap).
+    assert_eq!(
+        model_px(450, 500, 10, 200_000_000, 150_000, c, c / 2, 3),
+        470,
+        "BMK-055.1 model"
+    );
+    // E 0: ⌊47.5 − 0.5⌋ = 47 above bid + 1; a tight spread caps at ask − 1; never below bid + 1.
+    assert_eq!(
+        model_px(450, 470, 10, 0, 0, c, c / 2, 3),
+        460,
+        "BMK-055.1 ask − 1"
+    );
+    assert_eq!(
+        model_px(450, 500, 10, 0, 0, c, 10 * c, 3),
+        460,
+        "BMK-055.1 floor bid + 1"
+    );
+    // .2 parity with sim2.py: the 116 lead bids PS1_mod05_pc_life1 placed on 2026-11-08 (29
+    // windows) from the features sim2 computed.
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/binary-maker-fcev/lead_px_20261108.jsonl");
+    let text = std::fs::read_to_string(path).unwrap();
+    let e9 = |x: f64| (x * 1e9).round() as i64;
+    let (mut rows, mut same) = (0, 0);
+    for line in text.lines() {
+        let f = |k: &str| json_num(line, k);
+        let up = line.contains("\"tok\": \"up\"");
+        let dist = if up { f("dist_up") } else { -f("dist_up") };
+        let delta = fcev::delta(e9(dist), e9(f("sq")), e9(f("remf")), e9(f("sig")));
+        let raw = |cents: f64| (cents * 10.0).round() as i64;
+        let move_abs = (f("ret_bp").abs() * 100_000.0).round() as i64;
+        let px = model_px(raw(f("bid")), raw(f("ask")), 10, delta, move_abs, c, c / 2, 3);
+        rows += 1;
+        if px == raw(f("px")) {
+            same += 1;
+        }
+    }
+    assert_eq!(rows, 116, "BMK-055.2 rows");
+    assert_eq!(same, rows, "BMK-055.2 identical prices");
+    // .3 the spot source: lead_src 2, reference (spot) quotes +1.5 bp over 400 ms place the Up
+    // lead bid; the perpetual alone (src 1 only) does not see spot moves; each source has its
+    // own cool-down (a perpetual trigger, then a spot trigger in the same direction 0.5 s later
+    // still fires).
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let lead = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 3),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 100_000),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    let setup = |p: &BinaryMakerParams| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        slot_book(h.views_mut(), SLOTS[4], 450, 470);
+        slot_book(h.views_mut(), SLOTS[5], 530, 550);
+        h
+    };
+    let spot = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        ref_quote(h.views_mut(), mid);
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref())
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let t0 = 640 * s;
+    let mut h = setup(&lead(&[("lead_src", 2)]));
+    spot(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&spot(&mut h, t0 + 400 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-055.3 spot"
+    );
+    let mut h = setup(&lead(&[]));
+    spot(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&spot(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-055.3 src 1"
+    );
+    let mut h = setup(&lead(&[("lead_src", 3)]));
+    perp(&mut h, t0, 10_000_000);
+    spot(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-055.3 perp first"
+    );
+    {
+        let q = &mut h.strategy_mut().fast.quotes[4];
+        q.state = binary_maker::fast::QState::None;
+        q.r = None;
+    }
+    assert_eq!(
+        placed(&spot(&mut h, t0 + 900 * ms, 10_001_500)).len(),
+        1,
+        "BMK-055.3 own cool-down"
+    );
+    // .4 lead_price 1 without Chainlink features (no strike TWAP): one cent above the bid.
+    let mut h = setup(&lead(&[("lead_price", 1)]));
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-055.4"
     );
 }

@@ -42,6 +42,9 @@ pub const SETTLE_TWAP_S: i64 = 60;
 pub const LEAD_START_MS: i64 = 5_000;
 pub const LEAD_END_MS: i64 = 2_000;
 pub const LEAD_LAST_MS: i64 = 10_000;
+/// Rule 15 trigger sources (`lead_src` bits): the perpetual and the fair-value (spot) reference.
+pub const LEAD_SRC_PERP: u32 = 1;
+pub const LEAD_SRC_SPOT: u32 = 2;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -1132,6 +1135,10 @@ impl Fast {
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => {
+                if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_SPOT != 0 {
+                    let mid_x2 = self.feat.top.mid_x2;
+                    self.lead_quote(LEAD_SRC_SPOT, mid_x2, v, ctx);
+                }
                 if self.feat.top.mid_x2 > 0 {
                     self.fc
                         .on_spot(v.now().utc_ns.div_euclid(1_000_000_000), self.feat.top.mid_x2);
@@ -1270,13 +1277,25 @@ impl Fast {
     /// Rule 15 on a perpetual BBO (2 × mid `mid_x2`): the perp-cancel and the lead triggers over
     /// the ring of perpetual mids, then the lead orders' lifetime (README "规则" 15).
     fn lead_perp<V: Views>(&mut self, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
+        self.lead_quote(LEAD_SRC_PERP, mid_x2, v, ctx);
+    }
+
+    /// Rule 15 on a quote of trigger source `src` (`LEAD_SRC_PERP` or `LEAD_SRC_SPOT`, 2 × mid
+    /// `mid_x2`): the perp cancel (perpetual only), the lead trigger of that source (own ring and
+    /// cool-downs) and the lead orders' lifetime.
+    fn lead_quote<V: Views>(&mut self, src: u32, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
         use crate::lead::ret;
         let now = v.now();
         let ens = now.engine_ns;
         if mid_x2 <= 0 {
             return;
         }
-        self.lead.ring.push(ens, mid_x2);
+        let perp = src == LEAD_SRC_PERP;
+        if perp {
+            self.lead.ring.push(ens, mid_x2);
+        } else {
+            self.lead.spot.push(ens, mid_x2);
+        }
         let d = *self.p.defaults();
         let n = self.quotes.len();
         let pairs = (n / 2) as i64;
@@ -1293,7 +1312,17 @@ impl Fast {
         // Triggers count only inside [start + 5 s, end − 2 s] (the research's trigger range).
         let in_range = age_ms >= LEAD_START_MS && left_ms >= LEAD_END_MS;
         let ms = 1_000_000i64;
+        // Model price (lead_price 1): the rule-14 features, with one implied-σ sample per second.
+        let model = d.lead_price == 1;
+        if model {
+            self.fc.window(start);
+            let sec = utc_ms.div_euclid(1_000);
+            if self.fc.iv_due(sec) {
+                let _ = self.fc_features(v, sec, start, w, left_ms, up);
+            }
+        }
         if in_range
+            && perp
             && d.lead_pc_w_ms > 0
             && d.lead_pc_x_bp.0 > 0
             && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.lead_pc_w_ms) * ms)
@@ -1321,20 +1350,30 @@ impl Fast {
                 m.last_ens = ens;
             }
         }
+        let ring = if perp { &self.lead.ring } else { &self.lead.spot };
+        let move_ = ring
+            .at_or_before(ens - i64::from(d.lead_w_ms) * ms)
+            .map(|base| ret(mid_x2, base));
+        let trigger = if perp {
+            &mut self.lead.lead
+        } else {
+            &mut self.lead.lead_spot
+        };
         if in_range
+            && d.lead_src & src != 0
             && d.lead_w_ms > 0
             && d.lead_x_bp.0 > 0
-            && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.lead_w_ms) * ms)
-            && let Some(sg) = self.lead.lead.fire(
-                ret(mid_x2, base),
-                d.lead_x_bp.0,
-                ens,
-                i64::from(d.lead_cool_ms) * ms,
-            )
+            && let Some(r) = move_
+            && let Some(sg) = trigger.fire(r, d.lead_x_bp.0, ens, i64::from(d.lead_cool_ms) * ms)
         {
             let i = if sg > 0 { up } else { up + 1 };
             if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
-                self.lead_place(i, start, v, ctx);
+                let feat = if model {
+                    self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)
+                } else {
+                    None
+                };
+                self.lead_place(i, start, r.abs(), feat, v, ctx);
             }
         }
         self.lead_maint(v, ctx, d.lead_only);
@@ -1343,7 +1382,15 @@ impl Fast {
     /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
     /// favoured token of window `start`) when the leg has no order, the spread is at least two
     /// cents and the leg's net shares stay within `inv_max_shares`.
-    fn lead_place<V: Views>(&mut self, i: usize, start: i64, v: &V, ctx: &mut Ctx<'_>) {
+    fn lead_place<V: Views>(
+        &mut self,
+        i: usize,
+        start: i64,
+        move_abs: i64,
+        feat: Option<(i64, i64, i64, i64)>,
+        v: &V,
+        ctx: &mut Ctx<'_>,
+    ) {
         let d = *self.p.defaults();
         let Some(q) = self.quotes.get(i).copied() else {
             return;
@@ -1365,8 +1412,25 @@ impl Fast {
         if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
             return;
         }
-        let px = bid.div_euclid(cent) * cent + cent;
-        if px >= ask {
+        // lead_price 1: the model price; without features (or 0) one cent above the bid.
+        let px = match (d.lead_price, feat) {
+            (1, Some((dist_up, sq, remf, sig))) => {
+                let dist = if i.is_multiple_of(2) { dist_up } else { -dist_up };
+                crate::lead::model_px(
+                    bid,
+                    ask,
+                    cent,
+                    crate::fcev::delta(dist, sq, remf, sig),
+                    move_abs,
+                    d.lead_k.0,
+                    d.lead_m.0,
+                    i64::from(d.lead_maxtick),
+                )
+            }
+            (1, None) => bid + cent,
+            _ => bid.div_euclid(cent) * cent + cent,
+        };
+        if px >= ask || px <= bid {
             return;
         }
         let pos = |k: usize| {
