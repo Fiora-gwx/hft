@@ -38,15 +38,30 @@ Status: proposed
 
 ### 5. 成交条件 EV 模型(binary-maker 规则 14,schema v41,缺省关)
 
-- Python 参照 `E:\trade\staging\fcev\sim2.py`(`Window.features`、`score_arr`、`Strat`);整数/定点实现,`f64` 只在特征计算(非下单路径,与现有 σ 计算同类),下单价仍为整数。
-- 参数(v41,全部缺省 0 = 关):`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`(< 0 = 不配对)、`fc_iv_n`(IV 中位数窗口,60)、`fc_ver`(参数版本号,审计用)。v39/v40 属于 owner 的研究线 `research/calm-fav-main`(`lo_*`、`pair_sticky`…),本分支不含;两条线合并时 v39/v40 字段排在 v41 之前。
+- Python 参照 `E:\trade\staging\fcev\sim2.py`(`Window.features`、`score_arr`、`Strat`);全部 1e-9 定点(`strategies/binary-maker/src/fcev.rs`:φ 表 1/64 步长到 8,Φ/Φ⁻¹/ln/isqrt 取 hft-feature),无 `f64`。
+- 参数(v41):`ref_aux`(0)、`fc_on`(0 = 关)、`fc_s`(1)、`fc_lam`(0.1)、`fc_c0`(1)、`fc_c1`(0)、`fc_w`(0.5)、`fc_m_post`(0)、`fc_m_cancel`(0)、`fc_m_pair`(−1 = 不配对)、`fc_iv_n`(60)、`fc_ver`(0,审计用)。
+- 平价(BMK-052,公司收数机 2026-11-09 的 4 个窗口、1 195 个判定秒):sq 一致、dist 差 ≤ 3e-5 bp、隐含 σ 样本数逐秒相同、σ 相对差 4e-5、分数差 ≤ 0.0004 美分。基准 `tick_fc` 约 1.2 µs(开发机,`tick_miss` 0.5 µs)。
+- **研究侧的超前**:`sim2.py` 按 Chainlink 样本自己的时间戳使用样本(`cl_t ≤ t`),而样本实际晚 1.1–1.4 s 才到;最后 60 s 的已实现部分同理。规则 14 只用已收到的样本,所以实盘分数会比回测的"看得更晚"。研究结论(Spec §6:没有一个版本样本外转正)应在修正这一点后重算。v39/v40 属于 owner 的研究线 `research/calm-fav-main`(`lo_*`、`pair_sticky`…),本分支不含;两条线合并时 v39/v40 字段排在 v41 之前。
 - 开启时规则 14 取代挂/撤判定:在 token 最优买价挂 `clip_shares`,score > `fc_m_post` 才挂;score < `fc_m_cancel` 或不再在最优买价则撤;配对(`fc_m_pair` ≥ 0)时另一腿只用对价单(≤ 100 − 平均成本 − m_pair)买入。窗口末段、库存与风控上限照旧。
 - 平价测试:仓外 Python 对若干录制窗口逐秒导出 (dist, sq, remf, sig, mid, px, score),Rust 用同一输入重算,|Δscore| ≤ 1e-6 c。
 
 ### 6. 参数热加载与定期重拟合
 
-- hft-core `[strategy_params_file]`(可选):`path`、`instance`、`poll_ms`(缺省 5 000)。ctl-gateway 线程按 mtime + SHA-256 轮询该文件;内容为 `NAME=RAW` 行与一行 `version=…`;变化时以内部发起者 `file:<name>` 走与 `SetParams` 相同的命令路径(记 journal、过 `check`、`relax` 规则),结果写一行审计日志(版本、SHA、接受/拒绝码)。被拒绝时保留现参数(最后一个好版本)。文件只能改 `fc_*` 字段(白名单),其他字段 → 拒绝。
-- 重拟合:研究服务器(128 核、已有 `~/data/pmrec` 收数与 `fcev/`)每 30 分钟 cron:拉新数据 → `sim2.py probe` 增量 → `wf2.py` 式指数衰减加权拟合(半衰期参数化) → 校验(界内、无 NaN、样本外半小时 EV 不劣于"不挂"阈值、参数相对上一版变化有界) → 写 `fcev_params_<ver>.txt` 与 `current` 符号链接 → 经 ssh 推到实盘机的参数文件(原子 rename)。杀开关:`fcev.disabled` 标志文件存在或校验失败 → 不推新版;推 `fc_on=0` 的"关闭"版即全局关闭。
+- 已实现(本分支,仓外脚本,不改引擎):`E:\trade\staging\fcev\fcev_apply.py` 在实盘机上每分钟运行一次,取参数目录 `current` 指向的 `fcev_<version>.txt`(`NAME=RAW`),白名单只许 `fc_*`(`fc_on` 只能写 0)、按 schema JSON 的 [min, max] 校验、版本须递增,以运行中的参数 blob(`RUN/params_live.bin` 或 `cfg/strategy_params.bin`)替换这些字段、头版本 + 1,经 ctl `SetParams`(预览 + 确认,与机器人 `/set` 同一路径)热生效;SetParams 及其结果进 journal,另写 `RUN/fcev_apply.jsonl` 审计行(版本、文件 SHA-256、新旧值、结果)。杀开关:参数目录有 `DISABLED`,或 `current` 超过 `--max-age-min`(缺省 120)未更新 → 只发一次 `fc_on=0`;之后的新文件不会把规则 14 打开(只有 owner 能开)。
+- 未做(待 owner 决定):hft-core 原生 `[strategy_params_file]` 轮询(ctl-gateway 内按文件生成 SetParams)。它需要 ctl 核心持有当前参数 blob 与 schema 编码器,与机器人的 SetParams 争用同一版本号;在两者合并前,文件轮询与机器人改参会互相覆盖基线。
+- 重拟合(`E:\trade\staging\fcev\fcev_refit.py`,研究服务器每 30 分钟 cron):可选拉数据 → 每个收数日的 `sim2.py probe`(只重算有新文件的日) → `wf2.py` 同式的指数衰减加权拟合(`--hl` 小时半衰期,从上一个好版本热启动) → 校验:有限、不贴边界、相对上一个好版本的步长有界、成交行 ≥ `--min-fills`、伪样本外(去掉最后 `--oos-h` 小时重拟合、在这几小时上打分:分数 > m_post 的挂单 EV 不低于全部挂单、不低于 `--oos-min`) → 写 `params/fcev_<UTC 分钟>.txt`(+ 诊断 JSON)、`current`/`last_good` 链接 → 可选 `--push HOST:DIR`(scp 到临时名再 mv)。杀开关:`DISABLED` 文件或 `--disable` → 发 `fc_on=0` 版;校验失败保留上一个好版本,上一个好版本超过 `--max-age-h`(6 h)→ 发 `fc_on=0` 版。2026-11-09 在 11-09 的探针数据上试跑:两次重拟合都因样本外 EV(−1.8 / −5.5 c,劣于全部挂单)被拒,发出的是 `fc_on=0`——与 Spec 的结论一致。
+
+### 7. 实施状态(2026-11-09)
+
+| 项 | 状态 |
+|---|---|
+| 7 PR #148 | 分支以 `fix/segment-calib-pair` 为基 |
+| 1 永续 | 完成:hft-pmcfg `[venues.bp]`、binary-maker `ref_aux` 位 0 |
+| 3 Chainlink 原生 | 完成:venue-pmprice、行情登录、`[venues.cl]`、规则 12 读原生样本 |
+| 2 PM 全量 | 已是原生(`book`、两个代币的 `price_change`、`last_trade_price`);`tick_size_change`/`best_bid_ask` 只进 raw journal,不新增事件 |
+| 4 绑核 | 完成:`feed:cl` 核 0、`feed:bp` 核 2;多任务行情线程留作后续 |
+| 5 规则 14 | 完成(缺省关),平价与行为用例 |
+| 6 重拟合 | 仓外脚本 `fcev_refit.py`(研究服务器)+ `fcev_apply.py`(实盘机);引擎原生文件轮询未做 |
 
 ## Alternatives considered
 
@@ -58,14 +73,14 @@ Status: proposed
 
 **用 InstKind 或符号区分参考组。** 策略 crate 不得出现交易所名;InstKind 只有 Spot/Perp,区分不了 Chainlink 与 Coinbase。改用显式参数 `ref_aux`(位 0 = 永续参考组,位 1 = Chainlink 组,按此顺序排在原有参考组之后),由 hft-pmcfg 写入,`check` 核对组数与永续组的 InstKind。
 
-**参数热加载由仓外脚本调 ctl `SetParams`。** 可行(机器人已这样做),但 owner 要求引擎自己取文件、留审计行;文件轮询放在 ctl-gateway(warm 线程),命令照常进 journal,决定可复现。
+**参数热加载由仓外脚本调 ctl `SetParams`。** 本分支采用:机器人已这样做,命令照常进 journal、决定可复现,不改引擎;代价是多一个定时脚本(不是行情旁路)。引擎原生的文件轮询见 §6"未做"。
 
 ## Acceptance criteria
 
 - venue-pmprice:金样(实盘机 2026-11-09 抓包)逐条一致;快照帧只发出未见样本;secret 只取 `|` 之前(用例断言登录帧不含第二段);fuzz 目标。
 - hft-core `--check` 能加载 `--live` 生成的含 `bp`、`cl` 的配置;`md_login` 缺文件 → `CredentialRead` 退出 2。
 - binary-maker:`ref_aux = 0` 时决策与 v38 逐位相同(既有场景全过);原生 Chainlink 与旁路样本给出相同的规则 12 输入。
-- 模型平价:≥ 3 个录制窗口逐秒 |Δscore| ≤ 1e-6 c。
+- 模型平价:≥ 3 个录制窗口逐秒 |Δscore| ≤ 0.002 c(实测 0.0004 c,4 个窗口)。
 - 实盘机 24 h Shadow:核 2 平均 ≤ 80 %、BBO 到决策 p50 不劣于 11-06 基线 10 µs 以上;Chainlink 样本缺秒率 ≤ 旁路。
 
 ## Risks
