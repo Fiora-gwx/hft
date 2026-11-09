@@ -923,7 +923,8 @@ spec: README.md
 | TYP-085.20 | 34 | `None` | `None` |
 | TYP-085.21 | 255 | `None` | `None` |
 | TYP-085.22 | 16 | `Some(Spot)` | `Some("COINBASE_SPOT")` |
-| TYP-085.23 | 17 | `None` | `None` |
+| TYP-085.23 | 17 | `Some(Spot)` | `Some("POLYMARKET_PRICE")` |
+| TYP-085.24 | 18 | `None` | `None` |
 
 ### TYP-086 线格式枚举的码值往返,0 与越界值解码失败
 

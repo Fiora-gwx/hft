@@ -720,6 +720,7 @@ fn default_caps(v: VenueId, assets: &[AssetSpec]) -> Option<VenueCaps> {
         VenueId::BITGET_UTA_SPOT => venue_bitget::BitgetSpot::default_caps(asset),
         VenueId::POLYMARKET_CLOB => venue_polymarket::PolymarketClob::default_caps(asset),
         VenueId::COINBASE_SPOT => venue_coinbase::CoinbaseSpot::default_caps(asset),
+        VenueId::POLYMARKET_PRICE => venue_pmprice::PolymarketPrice::default_caps(asset),
         _ => return None,
     })
 }

@@ -25,8 +25,8 @@ impl SecretFiles {
     pub fn read_and_unlink(config: &Config) -> Result<Self, Vec<Error>> {
         let mut result = Self::default();
         let mut errors = Vec::new();
-        for keys in config.venues.values().flat_map(|v| &v.accounts) {
-            for path in [
+        let account_paths = config.venues.values().flat_map(|v| &v.accounts).flat_map(|keys| {
+            [
                 &keys.api_key_path,
                 &keys.session_seed_path,
                 &keys.rest_api_key_path,
@@ -34,7 +34,20 @@ impl SecretFiles {
             ]
             .into_iter()
             .chain(keys.passphrase_path.iter())
-            {
+        });
+        // Market-data login files (`venues.<v>.md_login`); a path shared with an account is
+        // read once.
+        let md_paths = config
+            .venues
+            .values()
+            .filter_map(|v| v.md_login.as_ref())
+            .flat_map(|m| {
+                [&m.api_key_path, &m.secret_path]
+                    .into_iter()
+                    .chain(m.passphrase_path.iter())
+            });
+        {
+            for path in account_paths.chain(md_paths) {
                 if result.aliases.contains_key(path) {
                     continue;
                 }

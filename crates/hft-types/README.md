@@ -201,6 +201,7 @@ pub const MAX_BBO_CONN_SLOTS: u8 = 8;
 | 14 | `HYPERLIQUID_PERP` | `LinearPerp`(USDC 结算) | optional |
 | 15 | `POLYMARKET_CLOB` | `Spot`(二元结果代币,USDC 计价) | optional |
 | 16 | `COINBASE_SPOT` | `Spot`(只读行情,USD 计价) | optional |
+| 17 | `POLYMARKET_PRICE` | `Spot`(只读行情:Polymarket 实时价格流的 Chainlink 价格与 60 s TWAP,USD 计价) | optional |
 | 32 | `CHAIN_BSC`(外部 venue) | — | optional |
 | 33 | `CHAIN_SOLANA`(外部 venue) | — | optional |
 

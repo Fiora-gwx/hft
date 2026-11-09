@@ -44,7 +44,7 @@
 | hft-py | PY | book-observer | OBS | treasury | TRS |
 | latency-slice | SLC | binary-maker | BMK | hft-pmcfg | PMC |
 | portfolio-carry | CARRY | hft-replay | RSR | hft-feature | FEA |
-| pm-taker-probe | PTP | venue-coinbase | CBX | | |
+| pm-taker-probe | PTP | venue-coinbase | CBX | venue-pmprice | PPX |
 
 ## 4. 用例格式
 

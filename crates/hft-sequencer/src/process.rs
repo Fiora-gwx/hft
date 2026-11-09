@@ -366,6 +366,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
                 p.market = Some(MarketEv::Index {
                     inst: m.h.inst,
                     px: m.px,
+                    ex_ts_ns: m.h.ex_ts_ns,
                 });
             }
             Ok(())
@@ -842,7 +843,11 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
     upnl_pnl(e, inst, drv)?;
     e.trace.rec("exec.touch_inst", u64::from(i.0), 2);
     e.exec.touch_inst(i);
-    p.market = Some(MarketEv::Mark { inst: i, px: m.px });
+    p.market = Some(MarketEv::Mark {
+        inst: i,
+        px: m.px,
+        ex_ts_ns: m.h.ex_ts_ns,
+    });
     Ok(())
 }
 

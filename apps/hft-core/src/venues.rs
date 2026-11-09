@@ -189,12 +189,51 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        // Market data only, logged in with `md_login` (`md_login_error`).
+        "polymarket-price" => build::<venue_pmprice::PolymarketPrice>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            utc,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_pmprice::FeedCtx::default(),
+            || (),
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
 }
 
 /// Protocols without order entry or accounts (market data only).
-pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot"];
+pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot", "polymarket-price"];
+
+/// Protocols whose market-data connections log in (`venues.<v>.md_login` required).
+pub const MD_LOGIN_PROTOCOLS: &[&str] = &["polymarket-price"];
+
+/// Load-time check of `venues.<v>.md_login`: required by a protocol whose market data needs a
+/// login (`MD_LOGIN_PROTOCOLS`), refused elsewhere.
+pub fn md_login_error(name: &str, v: &Venue) -> Option<Error> {
+    let needs = MD_LOGIN_PROTOCOLS.contains(&v.protocol.as_str());
+    match (needs, v.md_login.is_some()) {
+        (true, false) => Some(Error::config(
+            "MdLoginRequired",
+            format!("venues.{name}: {} market data needs md_login", v.protocol),
+        )),
+        (false, true) => Some(Error::config(
+            "MdLoginUnsupported",
+            format!("venues.{name}: {} market data takes no login", v.protocol),
+        )),
+        _ => None,
+    }
+}
 
 /// Load-time check: a read-only protocol takes no `accounts` (it has no order, report or account
 /// methods; venue-coinbase README "账户").
@@ -260,6 +299,7 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
         ("coinbase-spot", EndpointRole::Rest) => host == "api.exchange.coinbase.com",
         ("coinbase-spot", _) => host == "ws-feed.exchange.coinbase.com",
+        ("polymarket-price", _) => host == "ws-live-v2.polymarket.com",
         _ => false,
     }
 }
@@ -641,6 +681,15 @@ where
         },
         creds,
     );
+    if let Some(m) = &v.md_login {
+        session.set_md_credential(credential(
+            &m.api_key_path,
+            &m.secret_path,
+            m.passphrase_path.as_deref(),
+            SignAlg::HmacSha256,
+            secrets,
+        )?);
+    }
     let (mut fh_tx, fh_rx) = ring(256)?;
     let (fb_tx, mut fb_rx) = ring(256)?;
     let (fr_tx, mut fr_rx) = ring(256)?;
@@ -1177,6 +1226,7 @@ pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
         "coinbase-spot" => of::<venue_coinbase::CoinbaseSpot>(),
+        "polymarket-price" => of::<venue_pmprice::PolymarketPrice>(),
         _ => return None,
     })
 }
@@ -1205,6 +1255,7 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
             ));
         }
         "coinbase-spot" => VenueId::COINBASE_SPOT,
+        "polymarket-price" => VenueId::POLYMARKET_PRICE,
         _ => return Err(Error::config("UnknownVenue", protocol)),
     };
     if id != expected {
@@ -1255,6 +1306,7 @@ pub fn shared_egress_ip(protocol: &str) -> bool {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
         "coinbase-spot" => venue_coinbase::CoinbaseSpot::SHARED_EGRESS_IP,
+        "polymarket-price" => venue_pmprice::PolymarketPrice::SHARED_EGRESS_IP,
         _ => false,
     }
 }

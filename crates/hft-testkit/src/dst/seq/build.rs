@@ -47,6 +47,7 @@ pub fn exchange_of(v: VenueId) -> Exchange {
         12 | 13 => Exchange::Kucoin,
         15 => Exchange::Polymarket,
         16 => Exchange::Coinbase,
+        17 => Exchange::Polymarket,
         _ => Exchange::Hyperliquid,
     }
 }

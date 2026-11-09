@@ -282,6 +282,19 @@ pub struct Venue {
     /// this assembly.
     #[serde(default)]
     pub gw: GwOpts,
+    /// `venues.<v>.md_login`: the credential files market-data connections log in with
+    /// (`venues::MD_LOGIN_PROTOCOLS` only); read and unlinked at startup like account keys.
+    #[serde(default)]
+    pub md_login: Option<MdLogin>,
+}
+/// `venues.<v>.md_login` (README "配置文件字段"): key, secret and optional passphrase files. A path
+/// shared with an account's key files is read once.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MdLogin {
+    pub api_key_path: PathBuf,
+    pub secret_path: PathBuf,
+    pub passphrase_path: Option<PathBuf>,
 }
 /// `venues.<v>.presign` (venue-polymarket "预签名"): prices `below`/`above` the last place's in
 /// `step`s (decimal USDC text), each order used within `max_age_ms` of its signing.
@@ -756,6 +769,9 @@ pub fn load_timed(
             errors.push(e);
         }
         if let Some(e) = crate::venues::read_only_error(name, v) {
+            errors.push(e);
+        }
+        if let Some(e) = crate::venues::md_login_error(name, v) {
             errors.push(e);
         }
         if v.net.rest_timeout_ms == Some(0) {

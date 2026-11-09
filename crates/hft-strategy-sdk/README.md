@@ -836,8 +836,8 @@ pub enum EventRef<'a> {
     Book { inst: InstId, gix: u16 },                         // 一条 L2Batch 整批应用后,或一条交易所来源的 L2Snapshot(含 origin = TopN)整替换后;从 v.book() 读
     Trade { inst: InstId, gix: u16, t: &'a TradeView },
     Funding { inst: InstId, gix: u16, f: &'a FundingView },
-    Mark { inst: InstId, gix: u16, px: Px },
-    Index { inst: InstId, gix: u16, px: Px },                // IndexPrice 事件(订阅 EvMask::INDEX)
+    Mark { inst: InstId, gix: u16, px: Px, ex_ts_ns: i64 },  // ex_ts_ns = MarketHdr.ex_ts_ns(交易所给出的样本时间,无则 0)
+    Index { inst: InstId, gix: u16, px: Px, ex_ts_ns: i64 }, // IndexPrice 事件(订阅 EvMask::INDEX);ex_ts_ns 同上
     Liquidation { inst: InstId, gix: u16, l: &'a LiquidationView }, // 公开市场强平流(订阅 EvMask::LIQUIDATION)
     Order { gix: u16, u: &'a OrderUpdate },
     Exec { gix: u16, u: &'a ExecUpdate },

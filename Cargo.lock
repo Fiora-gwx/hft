@@ -1484,6 +1484,7 @@ dependencies = [
  "venue-binance",
  "venue-bitget",
  "venue-coinbase",
+ "venue-pmprice",
  "venue-polymarket",
  "zerocopy",
 ]
@@ -1525,6 +1526,7 @@ dependencies = [
  "venue-binance",
  "venue-bitget",
  "venue-coinbase",
+ "venue-pmprice",
  "venue-polymarket",
  "zerocopy",
  "zeroize",
@@ -4151,6 +4153,19 @@ dependencies = [
 
 [[package]]
 name = "venue-coinbase"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-refdata",
+ "hft-types",
+ "hft-venue-proto",
+ "serde",
+ "serde_json",
+ "sonic-rs",
+]
+
+[[package]]
+name = "venue-pmprice"
 version = "0.1.0"
 dependencies = [
  "hft-event",

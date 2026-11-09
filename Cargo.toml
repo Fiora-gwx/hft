@@ -26,6 +26,7 @@ members = [
     "crates/venue-bitget",
     "crates/venue-polymarket",
     "crates/venue-coinbase",
+    "crates/venue-pmprice",
     "crates/hft-risk",
     "crates/hft-py",
     "crates/hft-sequencer",
@@ -95,6 +96,7 @@ venue-binance = { path = "crates/venue-binance" }
 venue-bitget = { path = "crates/venue-bitget" }
 venue-polymarket = { path = "crates/venue-polymarket" }
 venue-coinbase = { path = "crates/venue-coinbase" }
+venue-pmprice = { path = "crates/venue-pmprice" }
 hft-risk = { path = "crates/hft-risk" }
 hft-sequencer = { path = "crates/hft-sequencer" }
 hft-replay = { path = "crates/hft-replay" }
