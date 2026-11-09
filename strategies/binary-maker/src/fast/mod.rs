@@ -37,6 +37,11 @@ pub fn settle_tag_of(gix: u16) -> u32 {
 /// the strike averaged over the `SETTLE_TWAP_S` before the window start.
 pub const SETTLE_TWAP_S: i64 = 60;
 
+/// Rule 14: no new entry bid before this age of the window (ms).
+pub const FC_START_MS: i64 = 5_000;
+/// Rule 14: every bid is cancelled and none placed this close to the window end (ms).
+pub const FC_END_MS: i64 = 2_000;
+
 /// `InjectWarmup` local kind of a Chainlink BTC/USD sample (README "Chainlink").
 pub const CL_WARMUP_KIND: u16 = 1;
 /// A Chainlink sample older than this many seconds is not the current price.
@@ -724,6 +729,10 @@ pub struct Fast {
     /// Chainlink price units (the Chainlink inst's px) per 1e-8 USD, as a multiplier (10^(8 + px_exp));
     /// 0 = unknown (no native samples are used).
     pub cl_mul: i64,
+    /// Rule 14 state (implied-σ ring, reference mid per second); not in the snapshot.
+    pub fc: crate::fcev::FcState,
+    /// Rule 14, per slot leg (quote order): its current order is a pair bid; not in the snapshot.
+    pub fc_pair: Vec<bool>,
     /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
     /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
     /// the fair value reads (0 = off or not ready: the first reference's own mid).
@@ -782,6 +791,8 @@ impl Fast {
             perp: INST_NONE,
             clref: INST_NONE,
             cl_mul: 0,
+            fc: crate::fcev::FcState::default(),
+            fc_pair: Vec::new(),
             fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
@@ -882,6 +893,8 @@ impl Fast {
         self.trd.resize(self.quotes.len(), TrdRing::default());
         self.cb_until.clear();
         self.cb_until.resize(self.quotes.len(), i64::MIN);
+        self.fc_pair.clear();
+        self.fc_pair.resize(self.quotes.len(), false);
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -1084,6 +1097,10 @@ impl Fast {
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => {
+                if self.feat.top.mid_x2 > 0 {
+                    self.fc
+                        .on_spot(v.now().utc_ns.div_euclid(1_000_000_000), self.feat.top.mid_x2);
+                }
                 let w = self.p.defaults().ref_cb_w.0;
                 if w > 0 {
                     self.fuse.on_first(self.feat.top.mid_x2, v.now().engine_ns, w);
@@ -1309,7 +1326,288 @@ impl Fast {
     }
 
     /// README "规则": decides every slot leg's quote.
+    /// Rule 14 features at UTC second `sec` of window `start` (`left_ms` before its end), Up leg
+    /// `up`: `(dist_up, sq, remf, sigma)`, 1e-9 (bp, √s, fraction, bp/√s). `None` without the
+    /// Chainlink group, the strike TWAP at the window start or a fresh Chainlink price. Takes the
+    /// second's implied-σ sample (once per second).
+    fn fc_features<V: Views>(
+        &mut self,
+        v: &V,
+        sec: i64,
+        start: i64,
+        w: i64,
+        left_ms: i64,
+        up: usize,
+    ) -> Option<(i64, i64, i64, i64)> {
+        use crate::fcev;
+        if self.clref == INST_NONE {
+            return None;
+        }
+        let d = *self.p.defaults();
+        let k = self.cl.twap_at(start)?;
+        let cl_now = self.cl.now(sec)?;
+        // S = the latest Chainlink price moved by the reference since that sample's second.
+        let spot_now = self.feat.top.mid_x2;
+        let s_now = match self.fc.spot_before(self.cl.last_s) {
+            Some(then) if then > 0 && spot_now > 0 => {
+                (i128::from(cl_now) * i128::from(spot_now) / i128::from(then)) as i64
+            }
+            _ => cl_now,
+        };
+        // Realized Chainlink seconds of the final average.
+        let (mut n_real, mut real_sum) = (0i64, 0i128);
+        if left_ms < fcev::AVG_S * 1_000 {
+            let end = start + w;
+            for s in end - fcev::AVG_S..=sec.min(end - 1) {
+                if let Some(x) = self.cl.sec.exact(s) {
+                    n_real += 1;
+                    real_sum += i128::from(x);
+                }
+            }
+        }
+        let (sq, remf) = fcev::time_factors(left_ms, n_real);
+        let dist = fcev::dist_up(k, s_now, left_ms, real_sum, n_real)?;
+        if self.fc.iv_due(sec) {
+            let up_mid = self.quotes.get(up).and_then(|q| {
+                let b = v.book(q.inst);
+                let unit = 10i64.saturating_pow(u32::from(v.inst(q.inst).px_exp.unsigned_abs()));
+                match (b.best(Side::Buy), b.best(Side::Sell)) {
+                    (Some(x), Some(y)) if unit > 0 && x.px.0 < y.px.0 => Some(
+                        ((i128::from(x.px.0) + i128::from(y.px.0)) * i128::from(ONE) / (2 * i128::from(unit)))
+                            as i64,
+                    ),
+                    _ => None,
+                }
+            });
+            let iv = up_mid.and_then(|m| fcev::implied_sigma(m, dist, sq));
+            self.fc.push_iv(sec, iv, d.fc_iv_n as usize);
+        }
+        let sig = self
+            .fc
+            .iv_median()
+            .or_else(|| {
+                self.feat
+                    .vol
+                    .sigma(d.vol_min_samples as usize)
+                    .map(|s| s.saturating_mul(10_000))
+            })
+            .unwrap_or(fcev::SIG_DEFAULT);
+        Some((dist, sq, remf, sig))
+    }
+
+    /// Rule 14 (`fc_on`, README "规则" 14): the fill-conditional EV score decides the bids of the
+    /// current window's two legs; rules 1–13 do not run.
+    fn fc_run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
+        use crate::fcev;
+        let now = v.now();
+        let d = *self.p.defaults();
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let sec = utc_ms.div_euclid(1_000);
+        let start = sec.div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let age_ms = w * 1_000 - left_ms;
+        let ok = d.enabled && now.clock_ok;
+        self.fc.window(start);
+        let feat = if ok {
+            self.fc_features(v, sec, start, w, left_ms, up)
+        } else {
+            None
+        };
+        let model = fcev::Model {
+            s: d.fc_s.0,
+            lam: d.fc_lam.0,
+            c0: d.fc_c0.0,
+            c1: d.fc_c1.0,
+            w: d.fc_w.0,
+        };
+        let pos = |k: usize| {
+            self.quotes
+                .get(k)
+                .and_then(|q| {
+                    v.group_pos(self.account, q.id)
+                        .legs
+                        .first()
+                        .map(|l| (l.qty.0, l.entry_px.0))
+                })
+                .unwrap_or((0, 0))
+        };
+        let (qu, cu) = pos(up);
+        let (qd, cd) = pos(up + 1);
+        let cost_full = d.max_window_cost.0 > 0
+            && self.quotes.get(up).is_some_and(|q| {
+                let hot = v.inst(q.inst);
+                let e = i32::from(hot.qty_exp) + i32::from(hot.px_exp) + 6;
+                let raw = i128::from(qu) * i128::from(cu) + i128::from(qd) * i128::from(cd);
+                let cost = if e >= 0 {
+                    raw * 10i128.pow(e.unsigned_abs())
+                } else {
+                    raw / 10i128.pow(e.unsigned_abs())
+                };
+                cost >= i128::from(d.max_window_cost.0)
+            });
+        let pairing = d.fc_m_pair.0 >= 0;
+        let requote = i64::from(d.requote_ms) * 1_000_000;
+        let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
+        let ens = now.engine_ns;
+        let one = i128::from(ONE);
+        for i in 0..n {
+            let Some(mut q) = self.quotes.get(i).copied() else {
+                continue;
+            };
+            // Stale state as in rule 8.
+            let old_window = i / 2 == up / 2 && q.win != start;
+            let stale = match q.state {
+                QState::Live => old_window,
+                QState::Cancelling => old_window || ens.saturating_sub(q.last_ens) >= stuck,
+                QState::None | QState::Placing => false,
+            };
+            if stale {
+                if let Some(r) = q.r {
+                    let _ = ctx.cancel(r);
+                }
+                q.state = QState::None;
+                q.r = None;
+                if let Some(m) = self.quotes.get_mut(i) {
+                    m.state = QState::None;
+                    m.r = None;
+                }
+            }
+            if i / 2 != up / 2 {
+                continue;
+            }
+            let is_up = i % 2 == 0;
+            let hot = *v.inst(q.inst);
+            let unit_px = i128::from(10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs())).max(1));
+            let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+            let book = v.book(q.inst);
+            let bid = book.best(Side::Buy).map(|l| l.px.0);
+            let ask = book.best(Side::Sell).map(|l| l.px.0);
+            // Cents (1e-9) of a raw price, and the raw price of whole cents.
+            let cents = |px: i64| (i128::from(px) * 100 * one / unit_px) as i64;
+            let raw_of_cents = |c: i128| (c * unit_px / (100 * one)) as i64;
+            let mid_c = match (bid, ask) {
+                (Some(b), Some(a)) if b < a => Some(cents(b + a) / 2),
+                _ => None,
+            };
+            let score = |px: i64| -> Option<i64> {
+                let (dist_up, sq, remf, sig) = feat?;
+                let dist = if is_up { dist_up } else { -dist_up };
+                Some(fcev::score(&model, dist, sq, remf, sig, mid_c?, cents(px)))
+            };
+            let (own_q, oth_q, oth_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
+            let excess = oth_q.saturating_sub(own_q);
+            let short = pairing && excess > 0;
+            // Pair bid: at most 100 − the long leg's average cost − fc_m_pair (whole cents) and
+            // the best bid floored to a whole cent.
+            let pair_px = if short && oth_q > 0 {
+                let target =
+                    (100 * one - i128::from(cents(oth_c)) - i128::from(d.fc_m_pair.0)).div_euclid(one) * one;
+                let floor_bid = bid.map(|b| i128::from(cents(b)).div_euclid(one) * one);
+                match floor_bid {
+                    Some(fb) if target >= one => Some(raw_of_cents(target.min(fb))).filter(|p| *p > 0),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let is_pair = self.fc_pair.get(i) == Some(&true);
+            match q.state {
+                QState::Live => {
+                    let end = !ok || left_ms <= FC_END_MS;
+                    let cancel = end
+                        || if is_pair {
+                            pair_px != Some(q.px)
+                        } else {
+                            short
+                                || bid.is_some_and(|b| b > q.px)
+                                || score(q.px).is_none_or(|s| s < d.fc_m_cancel.0)
+                        };
+                    if cancel
+                        && let Some(r) = q.r
+                        && ctx.cancel(r).is_ok()
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Cancelling;
+                        m.last_ens = ens;
+                    }
+                }
+                QState::None => {
+                    if !ok || left_ms <= FC_END_MS || ens.saturating_sub(q.last_ens) < requote || cost_full {
+                        continue;
+                    }
+                    let (px, qty, pair) = if short {
+                        let Some(px) = pair_px else { continue };
+                        let lot = hot.lot.max(1);
+                        let qty = excess / lot * lot;
+                        if qty < hot.min_qty.0 || qty <= 0 {
+                            continue;
+                        }
+                        (px, qty, true)
+                    } else {
+                        let Some(b) = bid else { continue };
+                        let clip = i64::from(d.clip_shares).saturating_mul(unit_qty);
+                        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+                        let in_band = i128::from(b) * one >= i128::from(d.p_min.0) * unit_px
+                            && i128::from(b) * one <= i128::from(d.p_max.0) * unit_px;
+                        if age_ms < FC_START_MS
+                            || left_ms <= i64::from(d.stop_before_ms)
+                            || !in_band
+                            || own_q.saturating_sub(oth_q).saturating_add(clip) > cap
+                            || score(b).is_none_or(|s| s <= d.fc_m_post.0)
+                        {
+                            continue;
+                        }
+                        (b, clip, false)
+                    };
+                    let it = OrderIntent {
+                        venue: q.venue,
+                        account: self.account,
+                        side: Side::Buy,
+                        tif: Tif::PostOnly,
+                        class: IntentClass::Open,
+                        flags: 0,
+                        _pad: [0; 2],
+                        inst: q.inst,
+                        group: q.id,
+                        px: Px(px),
+                        qty: Qty(qty),
+                        link: LegLinkOpt::NONE,
+                        tag: tag_of(i as u16),
+                        max_rest_ms: d.max_rest_ms,
+                    };
+                    if let Ok(h) = ctx.place(it)
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Placing;
+                        m.handle = h.0;
+                        m.px = px;
+                        m.last_ens = ens;
+                        m.win = start;
+                        if let Some(x) = self.fc_pair.get_mut(i) {
+                            *x = pair;
+                        }
+                        if let Some(x) = self.skind.get_mut(i) {
+                            *x = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
+        if self.p.defaults().fc_on {
+            self.fc_run(v, ctx);
+            return;
+        }
         let now = v.now();
         let d = *self.p.defaults();
         let pairs = (self.quotes.len() / 2) as i64;

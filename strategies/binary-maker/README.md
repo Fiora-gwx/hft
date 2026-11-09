@@ -94,6 +94,15 @@ status: impl
 | `late_hedge_ms` | DurationMs | 0(关) | 最后一分钟止损:从 `stop_before_ms` 到窗口结束前 `late_hedge_ms`,只挂凑对的买单,由分数高于 `late_hedge_z` 的腿(信号与净持仓相反)在买一挂、不受对价上限;0 = 关 | None |
 | `late_hedge_z` | Rate | 0 | 止损凑对的腿需要的分数 | None |
 | `ref_aux` | Count | 0 | 辅助组(见 [group 形态](#group-形态)):位 0 = 永续参考,位 1 = Chainlink 组;范围 0–3;schema v41(v39/v40 属于另一条研究线,本线没有) | None |
+| `fc_on` | Bool | 0(关) | 规则 14 开:成交条件 EV 模型独自决定当前窗口的买单;需要 Chainlink 组;schema v41 | Down |
+| `fc_s` | Rate | 1 | 规则 14:σ 的厚尾系数 s | None |
+| `fc_lam` | Rate | 0.1 | 规则 14:每次成交的不利移动 λ(bp) | None |
+| `fc_c0` / `fc_c1` | Rate | 1 / 0 | 规则 14:每次成交的固定成本与价格相关成本(美分;成本 = c0 + c1 · \|p − 50\| / 50) | None |
+| `fc_w` | Rate | 0.5 | 规则 14:模型概率的权重(其余为代币中间价) | None |
+| `fc_m_post` / `fc_m_cancel` | Rate | 0 / 0 | 规则 14:挂单与撤单的分数阈值(美分) | None |
+| `fc_m_pair` | Rate | −1(不配对) | 规则 14:配对差额(美分);< 0 不配对 | None |
+| `fc_iv_n` | Count | 60 | 规则 14:隐含 σ 的样本数(每秒一个,5–600) | None |
+| `fc_ver` | Count | 0 | 规则 14 参数版本(重拟合的编号,只用于审计) | None |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 
@@ -164,6 +173,17 @@ v6(规则 9,默认关闭)来自 2026-10-24/25 的方向因子研究与回放(仓
 v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市研究(仓库外整数移植 `bm_port.py` 与按引擎回放的 `bm_sim.py`,`E:\trade\staging\pm5m\v7spec`):8 个代币级特征的组合分数对下一段代币方向有预测力,做市与按分数持有方向性库存的混合优于 v6;繁忙(上一分钟行情延迟 90 分位中位数在研究的高档,阈值 11.2105 / 12.6885 ms 的第 2 档)与慢行情(中位数 > 40 ms)分钟的挂单亏损,停挂。研究的分数用浮点、行情延迟用 journal 的 `rx_ns`(即 `sw_rx_ns`);本实现的定点算法即上文,移植以此逐位对齐。
 
 持仓不平:窗口结束后由发现进程的 `Settle` 交割(模拟账户经 sim-gw;实盘交割尚未实现)。
+
+
+**规则 14:成交条件 EV(schema v41,`fc_on`,缺省关)**。研究 Spec "成交条件期望_数学模型"(仓外 `E:\trade\reports\`,Python 参照 `E:\trade\staging\fcev\sim2.py` 的 `Window.features`/`score_arr`/`Strat`)。开启时只有本规则决定当前窗口两腿的买单,规则 1–13(含规则 12 结算模块)不运行;需要 Chainlink 辅助组(`ref_aux` 位 1),没有时不挂、已挂的撤。全部定点 1e-9(`src/fcev.rs`):
+
+- **特征**(每个判定时刻):K = 窗口起点的官方 60 s TWAP(不晚于起点、至多往前 3 s 的最新样本);C = 最新 Chainlink 价格(须在 3 s 内);S = C × 参考中间价(当前)/ 参考中间价(C 的样本秒开始时,即前一秒的最后一条报价)。剩余 τ ≥ 60 s:μ = S,sq = √(τ − 40),remf = 1;τ < 60 s:n = 最后 60 s 中已收到的 Chainlink 秒数,rem = 60 − n,μ = (已收到样本之和 + rem × S) / 60,sq = max(rem/60 · √(max(rem, 1)/3), 0.001),remf = rem/60。dist = ln(μ / K) × 1e4(bp,Down 取负)。
+- **σ**:每个 UTC 秒至多取一个隐含 σ 样本(该秒第一次判定时):z = Φ⁻¹(clip(Up 中间价, 0.02, 0.98)),|z| > 0.25、|dist| > 0.5 bp 且同号时取 clip(dist / (z · sq), 0.03, 5);每窗口重新开始,至多 `fc_iv_n` 个;≥ 5 个时 σ = 中位数,否则取参考市场实现 σ(1 秒收益,`vol_window_s`)× 1e4,再没有取 0.3 bp。**与 Python 的差别**:Python 的回退 σ 是 300 s 子采样实现波动;Python 按样本时间戳使用 Chainlink 样本(研究数据有约 1.2 s 的超前),本规则只用已收到的样本。
+- **分数**(美分):s' = max(`fc_s` · σ, 0.03),d = clip(dist / (s' · sq), ±8),Δ = 100 · φ(d) / (s' · sq) · remf,fair = `fc_w` · 100 · Φ(d) + (1 − `fc_w`) · 该代币中间价,score(p) = fair − p − `fc_lam` · Δ − (`fc_c0` + `fc_c1` · |p − 50| / 50)。Φ 用 hft-feature 的表,φ 用 1/64 步长到 8 的表,均线性插值;与 Python 参照的逐秒平价见 BMK-052。
+- **挂单**:窗口年龄 ≥ 5 s、剩余 > `stop_before_ms`、买一在 [`p_min`, `p_max`] 内、净份数(本腿 − 另一腿)+ `clip_shares` ≤ `inv_max_shares`、窗口买入成本未到 `max_window_cost`、距上次改动 ≥ `requote_ms` 时,score(买一) > `fc_m_post` 则在买一挂 `clip_shares` 份 post-only 买单。
+- **撤单**:挂着的单在 score(挂单价) < `fc_m_cancel`、买一高于挂单价、特征缺失、`enabled` 关或剩余 ≤ 2 s 时撤;陈旧单(上一窗口、撤单无终态)按规则 8 处理。
+- **配对**(`fc_m_pair` ≥ 0):本腿份数少于另一腿时,本腿只挂配对单:价 = min(⌊100 − 另一腿平均成本 − `fc_m_pair`⌋ 美分,买一取整到美分),量 = 份数差(按 lot 向下取整,小于 `min_qty` 不挂);目标价变化即撤单重挂;本腿此时的普通挂单撤掉(Python 参照允许两张并存,这里一腿只有一张单)。
+- 参数可由 hft-core 的参数文件热加载(`[strategy_params_file]`,只许 `fc_*` 字段);`fc_ver` 只用于审计。
 
 ### Note 码表与报表字段
 

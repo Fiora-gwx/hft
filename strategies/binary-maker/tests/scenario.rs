@@ -1316,8 +1316,32 @@ fn bmk_024_schema_v6() {
             (f.name, f.since, f.default)
         })
         .collect();
-    assert_eq!(v41.first(), Some(&("ref_aux", 41, 0)), "BMK-024.35");
-    assert!(v41.iter().all(|f| f.1 == 41 && f.2 == 0), "BMK-024.35 {v41:?}");
+    let names: Vec<&str> = v41.iter().map(|f| f.0).collect();
+    assert_eq!(
+        names,
+        [
+            "ref_aux",
+            "fc_on",
+            "fc_s",
+            "fc_lam",
+            "fc_c0",
+            "fc_c1",
+            "fc_w",
+            "fc_m_post",
+            "fc_m_cancel",
+            "fc_m_pair",
+            "fc_iv_n",
+            "fc_ver"
+        ],
+        "BMK-024.35"
+    );
+    assert!(v41.iter().all(|f| f.1 == 41), "BMK-024.35 {v41:?}");
+    // Off by default: no auxiliary group, rule 14 off, no pairing.
+    assert_eq!(
+        (v41[0].2, v41[1].2, v41[9].2),
+        (0, 0, -1_000_000_000),
+        "BMK-024.35"
+    );
 }
 
 #[test]
@@ -3294,4 +3318,169 @@ fn bmk_050_reference_fusion() {
         let m = h.strategy().fast.ref_mid_x2();
         assert_eq!(m != 20_000_000, want_moved, "BMK-050.5 w {w}: {m}");
     }
+}
+
+/// A numeric field of a flat JSON object line (fixture rows; no JSON crate in this test binary).
+fn json_num(line: &str, key: &str) -> f64 {
+    let pat = format!("\"{key}\": ");
+    let at = line.find(&pat).unwrap_or_else(|| panic!("no {key}")) + pat.len();
+    let rest = &line[at..];
+    let end = rest.find([',', '}']).unwrap();
+    rest[..end].trim().parse().unwrap()
+}
+
+#[test]
+fn bmk_052_fcev_parity_with_the_python_reference() {
+    use binary_maker::fcev::{self, FcState, Model};
+    let e9 = |x: f64| (x * 1e9).round() as i64;
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/binary-maker-fcev/parity_20261109.jsonl");
+    let text = std::fs::read_to_string(path).unwrap();
+    let m = Model {
+        s: 1_250_000_000,
+        lam: 350_000_000,
+        c0: 1_300_000_000,
+        c1: 500_000_000,
+        w: 500_000_000,
+    };
+    let mut st = FcState::default();
+    let (mut rows, mut iv_rows, mut iv_len_diff) = (0usize, 0usize, 0usize);
+    let (mut max_sq, mut max_dist, mut max_sig_rel, mut max_score) = (0i64, 0i64, 0f64, 0i64);
+    for line in text.lines() {
+        let f = |k: &str| json_num(line, k);
+        let (start, sec, left_ms) = (f("start") as i64, f("t_s") as i64, f("left_ms") as i64);
+        let n_real = f("n_real") as i64;
+        // .1 time factors.
+        let (sq, remf) = fcev::time_factors(left_ms, n_real);
+        max_sq = max_sq
+            .max((sq - e9(f("sq"))).abs())
+            .max((remf - e9(f("remf"))).abs());
+        // .2 distance of the final average from the strike.
+        let real_sum = f("real_sum_e8") as i128;
+        let dist = fcev::dist_up(f("K_e8") as i64, f("s_now_e8") as i64, left_ms, real_sum, n_real).unwrap();
+        max_dist = max_dist.max((dist - e9(f("dist_up"))).abs());
+        // .3 implied σ: one sample per second, median of the window's samples.
+        st.window(start);
+        st.push_iv(sec, fcev::implied_sigma(e9(f("mid_up")), dist, sq), 60);
+        if st.iv_len() != f("iv_n") as usize {
+            iv_len_diff += 1;
+        }
+        let py_sig = f("sig");
+        let sig = if f("iv_n") >= 5.0 {
+            iv_rows += 1;
+            let s = st.iv_median().unwrap();
+            max_sig_rel = max_sig_rel.max(((s as f64) / 1e9 - py_sig).abs() / py_sig);
+            s
+        } else {
+            // The realized-σ fallback differs by design (README "规则" 14): compare the score with
+            // the reference's σ.
+            e9(py_sig)
+        };
+        // .4 scores of both tokens at their best bid.
+        for (tok, sg) in [("up", 1i64), ("dn", -1)] {
+            let s = fcev::score(
+                &m,
+                sg * dist,
+                sq,
+                remf,
+                sig,
+                e9(f(&format!("{tok}_mid"))),
+                e9(f(&format!("{tok}_px"))),
+            );
+            max_score = max_score.max((s - e9(f(&format!("{tok}_score")))).abs());
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 1195, "BMK-052 rows");
+    assert!(iv_rows > 1000, "BMK-052 implied-σ rows {iv_rows}");
+    assert!(max_sq <= 1_000, "BMK-052.1 sq/remf {max_sq}");
+    assert!(max_dist <= 200_000, "BMK-052.2 dist {max_dist} (1e-9 bp)");
+    assert!(
+        iv_len_diff * 100 <= rows,
+        "BMK-052.3 sample count differs on {iv_len_diff} rows"
+    );
+    assert!(max_sig_rel <= 5e-4, "BMK-052.3 sigma relative {max_sig_rel}");
+    assert!(max_score <= 2_000_000, "BMK-052.4 score {max_score} (1e-9 c)");
+}
+
+#[test]
+fn bmk_053_rule14_decisions() {
+    use binary_maker::fast::QState;
+    let s = 1_000_000_000i64;
+    let fc = |extra: &[(&str, i64)]| {
+        let mut f = vec![("ref_aux", 3), ("fc_on", 1)];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    // Window 600 s uses pair 2 (slots 4, 5): Up 0.450 / 0.470, Down 0.530 / 0.550; reference and
+    // Chainlink at 100 100.00, the strike TWAP 100 000.00 (+10 bp: Up favoured).
+    let setup = |p: &BinaryMakerParams, twap: bool| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        if twap {
+            h.feed(&ev::mark_at(RC, 9, Px(10_000_000), 600 * s).as_ref());
+        }
+        h.views_mut().at_engine_ns(639 * s + s / 2);
+        h.views_mut().bbo(
+            R,
+            (Px(10_009_999), Qty(1_000_000)),
+            (Px(10_010_001), Qty(1_000_000)),
+        );
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+        h.feed(&ev::index_at(RC, 9, Px(10_010_000), 640 * s).as_ref());
+        slot_book(h.views_mut(), SLOTS[4], 450, 470);
+        slot_book(h.views_mut(), SLOTS[5], 530, 550);
+        h
+    };
+    let book_ev = |h: &mut StrategyHarness<BinaryMaker>, t: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.feed(&ev::book(SLOTS[4], 4).as_ref())
+    };
+    // .1 no strike TWAP: no bid.
+    let mut h = setup(&fc(&[]), false);
+    assert!(placed(&book_ev(&mut h, 641 * s)).is_empty(), "BMK-053.1");
+    // .2 the favoured token is bid at its best bid; the other is not.
+    let mut h = setup(&fc(&[]), true);
+    let out = book_ev(&mut h, 641 * s);
+    assert_eq!(placed(&out), vec![(SLOTS[4], Px(450))], "BMK-053.2");
+    // .3 a post margin above the score: nothing.
+    let mut h = setup(&fc(&[("fc_m_post", 40_000_000_000)]), true);
+    assert!(placed(&book_ev(&mut h, 641 * s)).is_empty(), "BMK-053.3");
+    // .4 resting at 0.450: Chainlink falls to −10 bp → the score is below fc_m_cancel → cancel; a
+    // better bid than ours (0.460) also cancels.
+    for (row, cl, up_bid) in [
+        ("BMK-053.4 score", 9_990_000i64, 450i64),
+        ("BMK-053.4 undercut", 10_010_000, 460),
+    ] {
+        let mut h = setup(&fc(&[]), true);
+        {
+            let q = &mut h.strategy_mut().fast.quotes[4];
+            q.state = QState::Live;
+            q.r = Some(order_ref(21));
+            q.px = 450;
+            q.win = 600;
+        }
+        h.feed(&ev::index_at(RC, 9, Px(cl), 641 * s).as_ref());
+        slot_book(h.views_mut(), SLOTS[4], up_bid, 470);
+        assert_eq!(cancels(&book_ev(&mut h, 642 * s)), vec![21], "{row}");
+    }
+    // .5 pairing (fc_m_pair 0.5 c): 10 Up shares at 0.450 → the Down leg is bid only by the pair
+    // bid, min(⌊100 − 45 − 0.5⌋ = 54 c, best bid 53 c) for the 10-share excess.
+    let mut h = setup(&fc(&[("fc_m_pair", 500_000_000)]), true);
+    let mut gp = GroupPosView::EMPTY;
+    gp.n_legs = 1;
+    gp.legs[0].qty = Qty(10_000_000);
+    gp.legs[0].entry_px = Px(450);
+    h.views_mut().group_pos(A1, gid(4), gp);
+    let out = book_ev(&mut h, 641 * s);
+    let places: Vec<_> = out.places().map(|it| (it.inst, it.px, it.qty)).collect();
+    assert!(
+        places.contains(&(SLOTS[5], Px(530), Qty(10_000_000))),
+        "BMK-053.5 {places:?}"
+    );
+    // .6 off (fc_on 0): rules 1–13 decide (no σ yet: nothing), the model never runs.
+    let mut h = setup(&params_with(&[("ref_aux", 3)]), true);
+    assert!(placed(&book_ev(&mut h, 641 * s)).is_empty(), "BMK-053.6");
+    assert_eq!(h.strategy().fast.fc.iv_sec, i64::MIN, "BMK-053.6");
 }

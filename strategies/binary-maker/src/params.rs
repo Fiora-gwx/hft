@@ -393,6 +393,30 @@ hft_strategy_sdk::define_params! {
         /// reference (recorded only), bit 1 = a Chainlink group (Index = price, Mark = 60 s TWAP;
         /// replaces the InjectWarmup samples); 0 = none (schema v41; v39/v40 belong to another line)
         ref_aux: Count [min = 0, max = 3, default = 0, since = 41, relax = None],
+        /// rule 14 (fill-conditional EV, README "规则" 14): the model alone decides the bids of the
+        /// current window; needs the Chainlink group (ref_aux bit 1); false: rules 1–13
+        fc_on: Bool [default = 0, since = 41, relax = Down],
+        /// rule 14 tail factor s of sigma (1e-9)
+        fc_s: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 41, relax = None],
+        /// rule 14 adverse move per fill lambda, basis points (1e-9)
+        fc_lam: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 100_000_000, since = 41, relax = None],
+        /// rule 14 fixed cost per fill c0, cents (1e-9)
+        fc_c0: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 1_000_000_000, since = 41, relax = None],
+        /// rule 14 price-dependent cost c1 (times |p − 50| / 50), cents (1e-9)
+        fc_c1: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 weight w of the model probability against the token mid (1e-9)
+        fc_w: Rate [min = 0, max = 1_000_000_000, default = 500_000_000, since = 41, relax = None],
+        /// rule 14 post a bid when its score exceeds this, cents (1e-9)
+        fc_m_post: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 cancel a resting bid whose score falls below this, cents (1e-9)
+        fc_m_cancel: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 pairing margin, cents (1e-9): the short leg is bought only by a pair bid at
+        /// most 100 − (long leg's average cost) − fc_m_pair; negative = no pairing
+        fc_m_pair: Rate [min = -1_000_000_000, max = 50_000_000_000, default = -1_000_000_000, since = 41, relax = None],
+        /// rule 14 implied-sigma samples (one per second) whose median is sigma
+        fc_iv_n: Count [min = 5, max = 600, default = 60, since = 41, relax = None],
+        /// rule 14 parameter version (the refit's tag; audit only, no effect)
+        fc_ver: Count [min = 0, max = 4_000_000_000, default = 0, since = 41, relax = None],
     }
 }
 
