@@ -81,7 +81,7 @@ committed_len 之后   全零(热段由内核在缺页时清零;冷副本在封�
     pub flags: u8,                          //  117 [W] RECOVERY_GAP=1(上一段尾部可能因掉电丢失)
     pub _pad0: u16,                         //  118
     pub tsc_hz_milli: u64,                  //  120 [W] TSC 频率 × 1000
-    pub calib_tsc: u64,                     //  128 [W] 校准对:TSC(本运行的启动校准对;决策 UTC 另经 Input UtcAnchor 重锚,见 hft-sequencer 引擎 UTC)
+    pub calib_tsc: u64,                     //  128 [W] 校准对:TSC(建段时最近一条 housekeeping 校准对,第一条之前为启动校准对;决策 UTC 另经 Input UtcAnchor 重锚,见 hft-sequencer 引擎 UTC)
     pub calib_realtime_ns: i64,             //  136 [W] 校准对:CLOCK_REALTIME
     pub calib_phc_ns: i64,                  //  144 [W] 校准对:PHC(无则 0)
     pub calib_err_ns: u32,                  //  152 [W] 校准对误差界(hft-rt `CalibPair.err_ns`)

@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-11-09 | hft-core 新段段头的校准对改取最近一条 housekeeping `ClockStatus` 的校准对(此前为启动校准对):以段头校准对换算记录 UTC 的读者(解码器、研究工具、从中途起步且无节 32 的回放)不再随运行时长漂移;决策用的引擎 UTC(节 32、`UtcAnchor`)不变 | 实盘机 2026-11-09:计数器比标称快 32 ppm,运行 43 h 后段头换算的 UTC 超前 1.9 s(引擎 UTC 偏差 0);CORE-438.2(改写) | apps/hft-core(src/io.rs、tests/housekeeping.rs、README、TESTS)、docs/subsystems/journal-format.md | 待评审(改写用例待批准) |
 | 2026-11-07 | hft-pmcfg `--cpu-plan none\|pin\|spin`(库 `apply_cpu_plan`,缺省 none = 输出不变):4 核实盘机的线程绑核,`spin` 要求内核隔离核 1–3 | owner 2026-11-07 "绑核要变成参数可开关";PMC-010、CORE-453(新增) | tools/hft-pmcfg、apps/hft-core/tests | 待评审(新增用例待批准) |
 | 2026-11-07 | binary-maker schema v38 研究参数 `ref_cb_w`(缺省 0 = 关):公允价参考融合第二参考(Coinbase)的中间价;关闭时与 v37 逐位相同 | 重构计划 §5.3;BMK-024.34、BMK-050(新增) | strategies/binary-maker、fixtures/strategy-schemas | 待评审(新增用例待批准) |
 | 2026-11-07 | hft-venue 赛跑 BBO 连接的领先统计与慢连接轮换(`feed.race_rotate_s`,缺省 0 = 关;hft-core `venues.<v>.feed.race_rotate_s`):每条连接计先到 / 晚到与平均落后,长期落后的连接推 `ConnState{Degraded, RACE_SLOW = 18}`(只追加码值)并先建后断轮换;`InstSeq._pad2` 改为 `bbo_fwd_tsc`(布局不变) | 重构计划 §4.2;VEN-416(新增)、VEN-001.3(字段名) | crates/hft-venue、apps/hft-core、schemas/conn-reason.json | 待评审(新增用例待批准) |
