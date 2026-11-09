@@ -103,6 +103,14 @@ status: impl
 | `fc_m_pair` | Rate | −1(不配对) | 规则 14:配对差额(美分);< 0 不配对 | None |
 | `fc_iv_n` | Count | 60 | 规则 14:隐含 σ 的样本数(每秒一个,5–600) | None |
 | `fc_ver` | Count | 0 | 规则 14 参数版本(重拟合的编号,只用于审计) | None |
+| `lead_w_ms` | DurationMs | 0(关) | 规则 15:永续中间价的回看时长;0 = 关;0–2 000;schema v42 | None |
+| `lead_x_bp` | Rate | 0(关) | 规则 15:触发阈值,\|ret\| 至少这么多(占 1 的比例;1 bp = 100 000) | None |
+| `lead_life_ms` | DurationMs | 3 000 | 规则 15:领先挂单的存活时长,到时未全部成交即撤 | None |
+| `lead_cool_ms` | DurationMs | 2 000 | 规则 15:同方向两次触发的最短间隔 | None |
+| `lead_shares` | Count | 5 | 规则 15:每张领先挂单的份数 | None |
+| `lead_pc_w_ms` / `lead_pc_x_bp` | DurationMs / Rate | 0 / 0(关) | 规则 15 永续撤单:回看时长与阈值 | None |
+| `lead_pc_block_ms` / `lead_pc_cool_ms` | DurationMs | 1 000 / 1 000 | 规则 15 永续撤单:规则 14 在被不利代币上的封锁时长;同方向两次的最短间隔 | None |
+| `lead_only` | Bool | 0 | 规则 15 独占:其他开仓规则都不运行,持仓到结算 | Down |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 
@@ -184,6 +192,17 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - **撤单**:挂着的单在 score(挂单价) < `fc_m_cancel`、买一高于挂单价、特征缺失、`enabled` 关或剩余 ≤ 2 s 时撤;陈旧单(上一窗口、撤单无终态)按规则 8 处理。
 - **配对**(`fc_m_pair` ≥ 0):本腿份数少于另一腿时,本腿只挂配对单:价 = min(⌊100 − 另一腿平均成本 − `fc_m_pair`⌋ 美分,买一取整到美分),量 = 份数差(按 lot 向下取整,小于 `min_qty` 不挂);目标价变化即撤单重挂;本腿此时的普通挂单撤掉(Python 参照允许两张并存,这里一腿只有一张单)。
 - 参数可由 hft-core 的参数文件热加载(`[strategy_params_file]`,只许 `fc_*` 字段);`fc_ver` 只用于审计。
+
+
+**规则 15:领先挂单(schema v42,缺省关)**。研究:仓外 `sim2.py` 的 `perp_triggers`、`Strat.on_lead`、`Strat.on_perp_against`(严格排队 + 80 ms 下单/撤单延迟,4 个样本外日结算 +2.5–4.4 美分/份,1/5/30 s markout 为正)。需要永续辅助组(`ref_aux` 位 0);`lead_w_ms` > 0 且 `lead_x_bp` > 0 开领先挂单,`lead_pc_w_ms` > 0 且 `lead_pc_x_bp` > 0 开永续撤单。实现 `src/lead.rs` 与 `Fast::lead_perp`:
+
+- 每条永续 `Bbo` 把 2 × 中间价按引擎时间记入环(8 192 条);ret = 中间价 / (不晚于 t − W 的最近一条) − 1。触发只在窗口年龄 [5 s, 结束前 2 s] 内计数,冷却按方向分开、每个窗口重新开始。
+- **永续撤单**(先于领先触发判定):|ret(`lead_pc_w_ms`)| ≥ `lead_pc_x_bp`、同方向距上次 ≥ `lead_pc_cool_ms` → 被不利的代币(上涨时 Down,下跌时 Up)的领先挂单撤掉(规则 14 开启时它的普通挂单也撤),规则 14 在该腿 `lead_pc_block_ms` 内不新挂(与研究一致:封锁不作用于领先挂单)。
+- **领先挂单**:|ret(`lead_w_ms`)| ≥ `lead_x_bp`、同方向距上次 ≥ `lead_cool_ms` → 看好的代币(上涨 Up、下跌 Down);该腿没有任何订单、`enabled`、窗口年龄 ≥ 5 s 且距结束 ≥ 10 s、该代币卖一 − 买一 ≥ 2 美分、买一 > 0 且卖一 < 1、本腿净份数 + `lead_shares` ≤ `inv_max_shares` 时,在(买一取整到美分)+ 1 美分挂 `lead_shares` 份 post-only 买单(低于卖一,不穿价)。
+- **生命周期**:挂单后 `lead_life_ms`(引擎时间)未完全成交即撤;距结束 ≤ 2 s、`enabled` 关或时钟不可用时撤;陈旧单按规则 8。每个永续报价与每次判定都检查。
+- 领先挂单占用该腿的订单槽:规则 1–14 不管理它(跳过该腿),它终结后该腿恢复正常。
+- **`lead_only`**:只有规则 15 下单——规则 1–14(含配对、反转、规则 12)都不运行,其余挂着的单撤掉;持仓到结算。
+- 时间常量(研究里的固定值):`LEAD_START_MS` 5 000、`LEAD_END_MS` 2 000、`LEAD_LAST_MS` 10 000。
 
 ### Note 码表与报表字段
 

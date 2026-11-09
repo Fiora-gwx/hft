@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 41, "BMK-024.1");
+    assert_eq!(schema.version(), 42, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1315,6 +1315,7 @@ fn bmk_024_schema_v6() {
             let f = schema.field(i).unwrap();
             (f.name, f.since, f.default)
         })
+        .filter(|f| f.1 == 41)
         .collect();
     let names: Vec<&str> = v41.iter().map(|f| f.0).collect();
     assert_eq!(
@@ -1342,6 +1343,29 @@ fn bmk_024_schema_v6() {
         (0, 0, -1_000_000_000),
         "BMK-024.35"
     );
+    // .36 v42 appends rule 15 (lead quote), off by default (lead_w_ms 0, lead_pc_w_ms 0, lead_only 0).
+    let v42: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 42)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v42,
+        [
+            ("lead_w_ms", 0),
+            ("lead_x_bp", 0),
+            ("lead_life_ms", 3_000),
+            ("lead_cool_ms", 2_000),
+            ("lead_shares", 5),
+            ("lead_pc_w_ms", 0),
+            ("lead_pc_x_bp", 0),
+            ("lead_pc_block_ms", 1_000),
+            ("lead_pc_cool_ms", 1_000),
+            ("lead_only", 0)
+        ],
+        "BMK-024.36"
+    );
+    assert_eq!(n_fields_at(schema, 42), Some(schema.n_fields()), "BMK-024.36");
 }
 
 #[test]
@@ -3483,4 +3507,186 @@ fn bmk_053_rule14_decisions() {
     let mut h = setup(&params_with(&[("ref_aux", 3)]), true);
     assert!(placed(&book_ev(&mut h, 641 * s)).is_empty(), "BMK-053.6");
     assert_eq!(h.strategy().fast.fc.iv_sec, i64::MIN, "BMK-053.6");
+}
+
+#[test]
+fn bmk_054_rule15_lead_quote() {
+    use binary_maker::fast::QState;
+    use binary_maker::lead::LeadLeg;
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let lead = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 3),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 100_000),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    // Window 600 s (pair 2: slots 4 Up, 5 Down): Up 0.450 / 0.470, Down 0.530 / 0.550.
+    let setup = |p: &BinaryMakerParams| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        slot_book(h.views_mut(), SLOTS[4], 450, 470);
+        slot_book(h.views_mut(), SLOTS[5], 530, 550);
+        h
+    };
+    // Perpetual BBO with mid `mid` (px_exp −2: 100 000.00 = 10 000 000; 1 bp = 1 000).
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let places = |out: &hft_testkit::sdk_mock::CtxCapture| -> Vec<(InstId, Px, Qty)> {
+        out.places().map(|it| (it.inst, it.px, it.qty)).collect()
+    };
+    let up = 640 * s;
+    // .1 +1.5 bp over 400 ms (≥ 1 bp over 300 ms): 5 shares one cent inside the Up spread.
+    let mut h = setup(&lead(&[]));
+    assert!(
+        places(&perp(&mut h, up, 10_000_000)).is_empty(),
+        "BMK-054.1 first update"
+    );
+    let out = perp(&mut h, up + 400 * ms, 10_001_500);
+    assert_eq!(
+        places(&out),
+        vec![(SLOTS[4], Px(460), Qty(5_000_000))],
+        "BMK-054.1"
+    );
+    // .2 a fall favours Down (0.530 → 0.540).
+    let mut h = setup(&lead(&[]));
+    perp(&mut h, up, 10_000_000);
+    let out = perp(&mut h, up + 400 * ms, 9_998_500);
+    assert_eq!(
+        places(&out),
+        vec![(SLOTS[5], Px(540), Qty(5_000_000))],
+        "BMK-054.2"
+    );
+    // .3 below the threshold, a one-cent spread, the cap (20 Up shares held) or outside the
+    // window's [5 s, end − 10 s]: nothing.
+    let mut h = setup(&lead(&[]));
+    perp(&mut h, up, 10_000_000);
+    assert!(
+        places(&perp(&mut h, up + 400 * ms, 10_000_900)).is_empty(),
+        "BMK-054.3 0.9 bp"
+    );
+    let mut h = setup(&lead(&[]));
+    slot_book(h.views_mut(), SLOTS[4], 450, 460);
+    perp(&mut h, up, 10_000_000);
+    assert!(
+        places(&perp(&mut h, up + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-054.3 spread"
+    );
+    let mut h = setup(&lead(&[]));
+    let mut gp = GroupPosView::EMPTY;
+    gp.n_legs = 1;
+    gp.legs[0].qty = Qty(20_000_000);
+    gp.legs[0].entry_px = Px(450);
+    h.views_mut().group_pos(A1, gid(4), gp);
+    perp(&mut h, up, 10_000_000);
+    assert!(
+        places(&perp(&mut h, up + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-054.3 cap"
+    );
+    for t in [602 * s, 891 * s] {
+        let mut h = setup(&lead(&[]));
+        perp(&mut h, t - 400 * ms, 10_000_000);
+        assert!(
+            places(&perp(&mut h, t, 10_001_500)).is_empty(),
+            "BMK-054.3 at {t}"
+        );
+    }
+    // .4 cool-down: a second up trigger 1 s later places nothing (even with the leg free), one
+    // 2.1 s after the first places again.
+    let mut h = setup(&lead(&[]));
+    perp(&mut h, up, 10_000_000);
+    assert_eq!(
+        places(&perp(&mut h, up + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-054.4"
+    );
+    let free = |h: &mut StrategyHarness<BinaryMaker>| {
+        let q = &mut h.strategy_mut().fast.quotes[4];
+        q.state = QState::None;
+        q.r = None;
+    };
+    free(&mut h);
+    perp(&mut h, up + 1_100 * ms, 10_001_500);
+    assert!(
+        places(&perp(&mut h, up + 1_400 * ms, 10_003_000)).is_empty(),
+        "BMK-054.4 cool-down"
+    );
+    free(&mut h);
+    perp(&mut h, up + 2_200 * ms, 10_003_000);
+    assert_eq!(
+        places(&perp(&mut h, up + 2_500 * ms, 10_004_500)).len(),
+        1,
+        "BMK-054.4 after"
+    );
+    // .5 lifetime: a live lead bid is cancelled 3 s after its place; a non-lead bid is cancelled
+    // at once under lead_only.
+    let live_lead = |h: &mut StrategyHarness<BinaryMaker>, slot: u32, placed: i64| {
+        let q = &mut h.strategy_mut().fast.quotes[4];
+        q.state = QState::Live;
+        q.r = Some(order_ref(slot));
+        q.px = 460;
+        q.win = 600;
+        h.strategy_mut().fast.lead.legs[4] = LeadLeg {
+            handle: None,
+            r: Some(order_ref(slot)),
+            placed,
+        };
+    };
+    let mut h = setup(&lead(&[]));
+    live_lead(&mut h, 31, up);
+    assert!(
+        cancels(&perp(&mut h, up + 2_900 * ms, 10_000_000)).is_empty(),
+        "BMK-054.5 alive"
+    );
+    assert_eq!(
+        cancels(&perp(&mut h, up + 3_000 * ms, 10_000_000)),
+        vec![31],
+        "BMK-054.5 life"
+    );
+    let mut h = setup(&lead(&[]));
+    {
+        let q = &mut h.strategy_mut().fast.quotes[5];
+        q.state = QState::Live;
+        q.r = Some(order_ref(32));
+        q.px = 530;
+        q.win = 600;
+    }
+    assert_eq!(
+        cancels(&perp(&mut h, up, 10_000_000)),
+        vec![32],
+        "BMK-054.5 lead_only"
+    );
+    // .6 perp cancel: −0.6 bp over 1 s (≥ 0.5 bp) is against Up: its lead bid is cancelled.
+    let mut h = setup(&lead(&[("lead_pc_w_ms", 1_000), ("lead_pc_x_bp", 50_000)]));
+    live_lead(&mut h, 33, up);
+    perp(&mut h, up, 10_000_000);
+    assert_eq!(
+        cancels(&perp(&mut h, up + 1_000 * ms, 9_999_400)),
+        vec![33],
+        "BMK-054.6"
+    );
+    // .7 lead_only: other events place nothing; rule 15 off (defaults on the same table): a
+    // perpetual move places nothing.
+    let mut h = setup(&lead(&[]));
+    h.views_mut().at_engine_ns(up);
+    assert!(
+        placed(&h.feed(&ev::book(SLOTS[4], 4).as_ref())).is_empty(),
+        "BMK-054.7"
+    );
+    let mut h = setup(&params_with(&[("ref_aux", 3)]));
+    perp(&mut h, up, 10_000_000);
+    assert!(
+        places(&perp(&mut h, up + 400 * ms, 10_005_000)).is_empty(),
+        "BMK-054.7 off"
+    );
 }

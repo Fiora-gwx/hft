@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026、BMK-051 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-052、BMK-053、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
+| 规则 | BMK-052、BMK-053、BMK-054、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,10 +382,11 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 41;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 42;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
+| BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -747,3 +748,21 @@ spec: README.md
 | BMK-053.4 | Up 挂在 0.450:Chainlink 跌到 −10 bp;或 Up 买一升到 0.460 | 撤单 |
 | BMK-053.5 | `fc_m_pair` 0.5 美分,Up 持 10 份均价 0.450 | Down 只挂配对单:0.530(min(54 美分, 买一 53 美分)),10 份 |
 | BMK-053.6 | `fc_on` 0 | 不挂;隐含 σ 环从未取样 |
+
+### BMK-054 规则 15 领先挂单
+
+- 规则:[规则](README.md#规则)(规则 15)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3`,`ref_aux` 3、`lead_w_ms` 300、`lead_x_bp` 1 bp、`lead_only` 1、`inv_max_shares` 20;窗口 600 s(第 2 对槽位):Up 0.450/0.470、Down 0.530/0.550;永续中间价 100 000.00
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_054_rule15_lead_quote`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-054.1 | 400 ms 内 +1.5 bp | 第一条永续报价不挂;之后 Up 挂 5 份 @ 0.460 |
+| BMK-054.2 | 400 ms 内 −1.5 bp | Down 挂 5 份 @ 0.540 |
+| BMK-054.3 | +0.9 bp;Up 价差 1 美分;Up 已持 20 份;窗口第 2 s;结束前 9 s | 都不挂 |
+| BMK-054.4 | 第一次触发后 1 s 再涨(该腿已空)/ 2.1 s 后再涨 | 冷却内不挂 / 再挂一张 |
+| BMK-054.5 | 挂着的领先单 2.9 s / 3.0 s;`lead_only` 下 Down 上挂着一张非领先单 | 不撤 / 撤;非领先单立即撤 |
+| BMK-054.6 | 永续撤单 1 000 ms / 0.5 bp,1 s 内 −0.6 bp | Up 的领先单撤掉 |
+| BMK-054.7 | `lead_only` 下的簿事件;规则 15 关(同一 group 表)时永续 +5 bp | 都不挂 |

@@ -18,7 +18,7 @@ spec: README.md
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
 | 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226、SIM-231 |
 | journal 衔接(`glue` 模块) | SIM-230 |
-| 场所行为选项(`VenueModel`) | SIM-232–SIM-239、SIM-240、SIM-242 |
+| 场所行为选项(`VenueModel`) | SIM-232–SIM-239、SIM-240、SIM-242、SIM-246 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -2001,3 +2001,18 @@ spec: README.md
 | SIM-245.2 | 650 ms 后(窗口内只剩最后一条) | `mv` = 0 |
 | SIM-245.3 | `move_bucket`:0.25 bp、0.26 bp 对 [25, 100] | 0、1 |
 
+
+### SIM-246 价差内的买单
+
+- 规则:[场所行为选项](README.md#场所行为选项venuemodel)
+- 级别:table
+- 里程碑:M3
+- 前置:同 SIM-232 的簿(Up 买一 0.45 × 50、卖一 0.47 × 50);买 5 @ 0.46 post-only(价差内,前方无量);`Queue`、`QueueCap`、`QueueStrict` 各跑一遍
+- 实现:`crates/hft-sim/tests/venue_model.rs::sim_246_bid_inside_the_spread`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| SIM-246.1 | 同价卖 3 @ 0.46 | 立即成交 3 |
+| SIM-246.2 | 卖 2 印在旧买一 0.45 | `QueueCap`/`QueueStrict` 成交全部 5;`Queue` 成交 2 |
+| SIM-246.3 | Down 买 4 @ 0.54(互补代币的镜像) | 成交 4 @ 0.46 |
+| SIM-246.4 | 之后公开簿在 0.46 出现 30,再同价卖 5 | 成交 5(后来的公开量不排到前面) |

@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 41, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 42, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -417,6 +417,30 @@ hft_strategy_sdk::define_params! {
         fc_iv_n: Count [min = 5, max = 600, default = 60, since = 41, relax = None],
         /// rule 14 parameter version (the refit's tag; audit only, no effect)
         fc_ver: Count [min = 0, max = 4_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 15 (lead quote, README "规则" 15) look-back of the perpetual mid move; 0 = off;
+        /// needs the perpetual group (ref_aux bit 0)
+        lead_w_ms: DurationMs [min = 0, max = 2_000, default = 0, since = 42, relax = None],
+        /// rule 15 trigger: |perpetual mid return over lead_w_ms| at least this (1e-9 of one;
+        /// 1 bp = 100_000); 0 = off
+        lead_x_bp: Rate [min = 0, max = 100_000_000, default = 0, since = 42, relax = None],
+        /// rule 15 a lead bid not fully filled after this long is cancelled
+        lead_life_ms: DurationMs [min = 100, max = 60_000, default = 3_000, since = 42, relax = None],
+        /// rule 15 minimum time between two triggers in the same direction
+        lead_cool_ms: DurationMs [min = 0, max = 60_000, default = 2_000, since = 42, relax = None],
+        /// rule 15 shares per lead bid
+        lead_shares: Count [min = 1, max = 1_000, default = 5, since = 42, relax = None],
+        /// rule 15 perp cancel look-back; 0 = off
+        lead_pc_w_ms: DurationMs [min = 0, max = 2_000, default = 0, since = 42, relax = None],
+        /// rule 15 perp cancel: a move at least this against a token (1e-9 of one) cancels its lead
+        /// bid; 0 = off
+        lead_pc_x_bp: Rate [min = 0, max = 100_000_000, default = 0, since = 42, relax = None],
+        /// rule 15 perp cancel blocks rule-14 entries on the hurt token for this long
+        lead_pc_block_ms: DurationMs [min = 0, max = 60_000, default = 1_000, since = 42, relax = None],
+        /// rule 15 minimum time between two perp cancels in the same direction
+        lead_pc_cool_ms: DurationMs [min = 0, max = 60_000, default = 1_000, since = 42, relax = None],
+        /// true: rule 15 only — no other opening rule (rules 1–14, pairing, dip) places anything;
+        /// inventory is held to settlement
+        lead_only: Bool [default = 0, since = 42, relax = Down],
     }
 }
 

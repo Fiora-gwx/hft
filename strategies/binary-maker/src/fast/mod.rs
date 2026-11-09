@@ -37,6 +37,12 @@ pub fn settle_tag_of(gix: u16) -> u32 {
 /// the strike averaged over the `SETTLE_TWAP_S` before the window start.
 pub const SETTLE_TWAP_S: i64 = 60;
 
+/// Rule 15: triggers count from this age of the window and until `LEAD_END_MS` before its end; a
+/// lead bid is placed only until `LEAD_LAST_MS` before the end (ms).
+pub const LEAD_START_MS: i64 = 5_000;
+pub const LEAD_END_MS: i64 = 2_000;
+pub const LEAD_LAST_MS: i64 = 10_000;
+
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
 /// Rule 14: every bid is cancelled and none placed this close to the window end (ms).
@@ -733,6 +739,8 @@ pub struct Fast {
     pub fc: crate::fcev::FcState,
     /// Rule 14, per slot leg (quote order): its current order is a pair bid; not in the snapshot.
     pub fc_pair: Vec<bool>,
+    /// Rule 15 state (perpetual mid ring, triggers, lead orders per leg); not in the snapshot.
+    pub lead: crate::lead::LeadState,
     /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
     /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
     /// the fair value reads (0 = off or not ready: the first reference's own mid).
@@ -793,6 +801,7 @@ impl Fast {
             cl_mul: 0,
             fc: crate::fcev::FcState::default(),
             fc_pair: Vec::new(),
+            lead: crate::lead::LeadState::default(),
             fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
@@ -895,6 +904,28 @@ impl Fast {
         self.cb_until.resize(self.quotes.len(), i64::MIN);
         self.fc_pair.clear();
         self.fc_pair.resize(self.quotes.len(), false);
+        self.lead
+            .legs
+            .resize(self.quotes.len(), crate::lead::LeadLeg::default());
+        self.lead.block.resize(self.quotes.len(), i64::MIN);
+    }
+
+    /// Rule 15 on (README "规则" 15).
+    pub fn lead_on(&self) -> bool {
+        let d = self.p.defaults();
+        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0) || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+    }
+
+    /// Slot leg `i`'s current order `q` is its rule-15 lead bid.
+    pub fn is_lead(&self, i: usize, q: &Quote) -> bool {
+        let Some(l) = self.lead.legs.get(i) else {
+            return false;
+        };
+        match q.state {
+            QState::Placing => l.handle == Some(q.handle),
+            QState::Live | QState::Cancelling => l.r.is_some() && l.r == q.r,
+            QState::None => false,
+        }
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -1079,9 +1110,13 @@ impl Fast {
                     }
                     return;
                 }
-                EventRef::Bbo { inst, .. } | EventRef::Book { inst, .. } | EventRef::Trade { inst, .. }
-                    if inst == self.perp =>
-                {
+                EventRef::Bbo { inst, b, .. } if inst == self.perp => {
+                    if self.lead_on() {
+                        self.lead_perp(b.bid_px.0.saturating_add(b.ask_px.0), v, ctx);
+                    }
+                    return;
+                }
+                EventRef::Book { inst, .. } | EventRef::Trade { inst, .. } if inst == self.perp => {
                     return;
                 }
                 // The sidecar's samples are ignored once the native group exists.
@@ -1205,16 +1240,245 @@ impl Fast {
 
     /// Outcomes of the previous event's places.
     fn outcomes(&mut self, ctx: &Ctx<'_>) {
-        for q in self.quotes.iter_mut().filter(|q| q.state == QState::Placing) {
+        for (k, q) in self
+            .quotes
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, q)| q.state == QState::Placing)
+        {
+            let lead = self.lead.legs.get_mut(k).filter(|l| l.handle == Some(q.handle));
             match ctx.outcome(IntentHandle(q.handle)) {
                 Some(IntentOutcome::Placed(r)) => {
                     q.state = QState::Live;
                     q.r = Some(r);
+                    if let Some(l) = lead {
+                        l.handle = None;
+                        l.r = Some(r);
+                    }
                 }
                 _ => {
                     q.state = QState::None;
                     q.r = None;
+                    if let Some(l) = lead {
+                        l.handle = None;
+                    }
                 }
+            }
+        }
+    }
+
+    /// Rule 15 on a perpetual BBO (2 × mid `mid_x2`): the perp-cancel and the lead triggers over
+    /// the ring of perpetual mids, then the lead orders' lifetime (README "规则" 15).
+    fn lead_perp<V: Views>(&mut self, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
+        use crate::lead::ret;
+        let now = v.now();
+        let ens = now.engine_ns;
+        if mid_x2 <= 0 {
+            return;
+        }
+        self.lead.ring.push(ens, mid_x2);
+        let d = *self.p.defaults();
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 || !now.clock_ok {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let start = utc_ms.div_euclid(1_000).div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let age_ms = w * 1_000 - left_ms;
+        self.lead.window(start);
+        // Triggers count only inside [start + 5 s, end − 2 s] (the research's trigger range).
+        let in_range = age_ms >= LEAD_START_MS && left_ms >= LEAD_END_MS;
+        let ms = 1_000_000i64;
+        if in_range
+            && d.lead_pc_w_ms > 0
+            && d.lead_pc_x_bp.0 > 0
+            && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.lead_pc_w_ms) * ms)
+            && let Some(sg) = self.lead.pc.fire(
+                ret(mid_x2, base),
+                d.lead_pc_x_bp.0,
+                ens,
+                i64::from(d.lead_pc_cool_ms) * ms,
+            )
+        {
+            // The token the move is against: its lead bid (and a rule-14 entry bid) is cancelled;
+            // rule-14 entries on it are blocked for lead_pc_block_ms.
+            let hurt = if sg > 0 { up + 1 } else { up };
+            if let Some(b) = self.lead.block.get_mut(hurt) {
+                *b = ens.saturating_add(i64::from(d.lead_pc_block_ms) * ms);
+            }
+            if let Some(q) = self.quotes.get(hurt).copied()
+                && q.state == QState::Live
+                && (self.is_lead(hurt, &q) || (d.fc_on && self.fc_pair.get(hurt) == Some(&false)))
+                && let Some(r) = q.r
+                && ctx.cancel(r).is_ok()
+                && let Some(m) = self.quotes.get_mut(hurt)
+            {
+                m.state = QState::Cancelling;
+                m.last_ens = ens;
+            }
+        }
+        if in_range
+            && d.lead_w_ms > 0
+            && d.lead_x_bp.0 > 0
+            && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.lead_w_ms) * ms)
+            && let Some(sg) = self.lead.lead.fire(
+                ret(mid_x2, base),
+                d.lead_x_bp.0,
+                ens,
+                i64::from(d.lead_cool_ms) * ms,
+            )
+        {
+            let i = if sg > 0 { up } else { up + 1 };
+            if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
+                self.lead_place(i, start, v, ctx);
+            }
+        }
+        self.lead_maint(v, ctx, d.lead_only);
+    }
+
+    /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
+    /// favoured token of window `start`) when the leg has no order, the spread is at least two
+    /// cents and the leg's net shares stay within `inv_max_shares`.
+    fn lead_place<V: Views>(&mut self, i: usize, start: i64, v: &V, ctx: &mut Ctx<'_>) {
+        let d = *self.p.defaults();
+        let Some(q) = self.quotes.get(i).copied() else {
+            return;
+        };
+        if q.state != QState::None {
+            return;
+        }
+        let hot = *v.inst(q.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        let (Some(bid), Some(ask)) = (
+            book.best(Side::Buy).map(|l| l.px.0),
+            book.best(Side::Sell).map(|l| l.px.0),
+        ) else {
+            return;
+        };
+        if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
+            return;
+        }
+        let px = bid.div_euclid(cent) * cent + cent;
+        if px >= ask {
+            return;
+        }
+        let pos = |k: usize| {
+            self.quotes
+                .get(k)
+                .and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
+                .unwrap_or(0)
+        };
+        let qty = i64::from(d.lead_shares).saturating_mul(unit_qty);
+        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+        if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
+            return;
+        }
+        let it = OrderIntent {
+            venue: q.venue,
+            account: self.account,
+            side: Side::Buy,
+            tif: Tif::PostOnly,
+            class: IntentClass::Open,
+            flags: 0,
+            _pad: [0; 2],
+            inst: q.inst,
+            group: q.id,
+            px: Px(px),
+            qty: Qty(qty),
+            link: LegLinkOpt::NONE,
+            tag: tag_of(i as u16),
+            max_rest_ms: d.max_rest_ms,
+        };
+        let ens = v.now().engine_ns;
+        if let Ok(h) = ctx.place(it)
+            && let Some(m) = self.quotes.get_mut(i)
+        {
+            m.state = QState::Placing;
+            m.handle = h.0;
+            m.px = px;
+            m.last_ens = ens;
+            m.win = start;
+            if let Some(l) = self.lead.legs.get_mut(i) {
+                *l = crate::lead::LeadLeg {
+                    handle: Some(h.0),
+                    r: None,
+                    placed: ens,
+                };
+            }
+            if let Some(x) = self.fc_pair.get_mut(i) {
+                *x = false;
+            }
+            if let Some(x) = self.skind.get_mut(i) {
+                *x = false;
+            }
+        }
+    }
+
+    /// Rule 15 order lifetime: a lead bid is cancelled `lead_life_ms` after its place, 2 s before
+    /// the window end or with `enabled` off. `all` (`lead_only`): every leg's stale state is reset
+    /// as in rule 8 and any other resting bid is cancelled.
+    fn lead_maint<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>, all: bool) {
+        let now = v.now();
+        let d = *self.p.defaults();
+        let ens = now.engine_ns;
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let start = utc_ms.div_euclid(1_000).div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let life = i64::from(d.lead_life_ms) * 1_000_000;
+        let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
+        for i in 0..n {
+            let Some(q) = self.quotes.get(i).copied() else {
+                continue;
+            };
+            let lead = self.is_lead(i, &q);
+            if all {
+                let old_window = i / 2 == up / 2 && q.win != start;
+                let stale = match q.state {
+                    QState::Live => old_window,
+                    QState::Cancelling => old_window || ens.saturating_sub(q.last_ens) >= stuck,
+                    QState::None | QState::Placing => false,
+                };
+                if stale {
+                    if let Some(r) = q.r {
+                        let _ = ctx.cancel(r);
+                    }
+                    if let Some(m) = self.quotes.get_mut(i) {
+                        m.state = QState::None;
+                        m.r = None;
+                    }
+                    continue;
+                }
+            }
+            if q.state != QState::Live {
+                continue;
+            }
+            let placed = self.lead.legs.get(i).map_or(i64::MIN / 2, |l| l.placed);
+            let cancel = if lead {
+                !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
+            } else {
+                all
+            };
+            if cancel
+                && let Some(r) = q.r
+                && ctx.cancel(r).is_ok()
+                && let Some(m) = self.quotes.get_mut(i)
+            {
+                m.state = QState::Cancelling;
+                m.last_ens = ens;
             }
         }
     }
@@ -1479,7 +1743,7 @@ impl Fast {
                     m.r = None;
                 }
             }
-            if i / 2 != up / 2 {
+            if i / 2 != up / 2 || self.is_lead(i, &q) {
                 continue;
             }
             let is_up = i % 2 == 0;
@@ -1539,7 +1803,12 @@ impl Fast {
                     }
                 }
                 QState::None => {
-                    if !ok || left_ms <= FC_END_MS || ens.saturating_sub(q.last_ens) < requote || cost_full {
+                    if !ok
+                        || left_ms <= FC_END_MS
+                        || ens.saturating_sub(q.last_ens) < requote
+                        || cost_full
+                        || (!short && self.lead.block.get(i).is_some_and(|b| ens < *b))
+                    {
                         continue;
                     }
                     let (px, qty, pair) = if short {
@@ -1604,6 +1873,13 @@ impl Fast {
     }
 
     fn run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
+        if self.p.defaults().lead_only {
+            self.lead_maint(v, ctx, true);
+            return;
+        }
+        if self.lead_on() {
+            self.lead_maint(v, ctx, false);
+        }
         if self.p.defaults().fc_on {
             self.fc_run(v, ctx);
             return;
@@ -1883,8 +2159,10 @@ impl Fast {
                     m.r = None;
                 }
             }
-            // Rule 12 decides its own bids while it runs.
-            if settling && q.state != QState::None && self.skind.get(i) == Some(&true) {
+            // Rule 12 decides its own bids while it runs; rule 15 manages its lead bids.
+            if (settling && q.state != QState::None && self.skind.get(i) == Some(&true))
+                || self.is_lead(i, &q)
+            {
                 continue;
             }
             let hot = *v.inst(q.inst);
