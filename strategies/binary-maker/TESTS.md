@@ -719,7 +719,7 @@ spec: README.md
 ### BMK-052 规则 14 与 Python 参照逐秒平价
 
 - 规则:[规则](README.md#规则)(规则 14)
-- 级别:golden
+- 级别:table
 - 里程碑:M3
 - 前置:`fixtures/binary-maker-fcev/parity_20261109.jsonl`(公司收数机 2026-11-09 的 4 个 BTC 窗口,1 195 个判定秒;由仓外 `parity_dump.py` 以 `sim2.py` 计算);模型 s 1.25、λ 0.35、c0 1.3、c1 0.5、w 0.5
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_052_fcev_parity_with_the_python_reference`
@@ -734,7 +734,7 @@ spec: README.md
 ### BMK-053 规则 14 的挂单、撤单与配对
 
 - 规则:[规则](README.md#规则)(规则 14)
-- 级别:example
+- 级别:table
 - 里程碑:M3
 - 前置:`specs3`,`ref_aux` 3、`fc_on` 1,其余缺省;窗口 600 s(第 2 对槽位):Up 0.450/0.470、Down 0.530/0.550,参考与 Chainlink 100 100.00,起点 TWAP 100 000.00
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_053_rule14_decisions`

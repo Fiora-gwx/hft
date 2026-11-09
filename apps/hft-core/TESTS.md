@@ -4636,15 +4636,26 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:Cargo feature `polymarket`;`write_polymarket_maker_live`(缺省含 `[venues.bp]` 与 `[venues.cl]`,hft-pmcfg PMC-011);secrets 用 CORE-222 的夹具
-- 实现:`apps/hft-core/tests/config.rs::core_454_perp_and_chainlink_reference_config`、`apps/hft-core/tests/secrets.rs::core_454_md_login_secrets`
+- 实现:`apps/hft-core/tests/config.rs::core_454_perp_and_chainlink_reference_config`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
 | CORE-454.1 | 实盘做市配置 | 加载无错误;`venues.bp` = (`binance-usdm`, 1),无账户、无 `md_login`;`venues.cl` = (`polymarket-price`, 17),无账户、有 `md_login` |
 | CORE-454.2 | 去掉 `venues.cl.md_login`;把它复制到 `venues.bn`;把 `venues.pm.accounts` 复制到 `venues.cl` | 分别含 `MdLoginRequired`、`MdLoginUnsupported`、`ReadOnlyVenue` |
-| CORE-454.3 | `md_login` 的 secret 为独立文件、key 与 passphrase 与账户共用路径;`read_and_unlink` | 全部文件被删除;共用路径只读一次,各路径取到各自内容 |
-| CORE-454.4 | 只有 `md_login` 的读取(`read_and_unlink_md_login`,sim 实例或 `--dry-run`) | `md_login` 文件被删除;账户文件保留、取不到 |
 | CORE-454.5 | `public_market_endpoint("polymarket-price", …)` | `ws-live-v2.polymarket.com` 的行情与 REST 端点允许;旧 RTDS 主机、加后缀的主机、OrderWs 角色拒绝 |
+
+### CORE-455 行情登录凭据文件的读取
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.md_login`)
+- 级别:table
+- 里程碑:M3
+- 前置:CORE-222 的夹具(账户的 key、seed、passphrase 三个文件)
+- 实现:`apps/hft-core/tests/secrets.rs::core_455_md_login_secrets`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-455.1 | `md_login` 的 secret 为独立文件、key 与 passphrase 与账户共用路径;`read_and_unlink` | 全部文件被删除;共用路径只读一次,各路径取到各自内容 |
+| CORE-455.2 | 只有 `md_login` 的读取(`read_and_unlink_md_login`,sim 实例或 `--dry-run`) | `md_login` 文件被删除;账户文件保留、取不到 |
 
 ## 验收
 

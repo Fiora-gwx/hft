@@ -77,7 +77,7 @@ refdata:inst 的符号是小写 `<asset>usd`(如 `btcusd`),资产为该币、计
 | `Index` | `{"op":"subscribe","rid":"s","subscriptions":[{"channel":"price.crypto","filter":{"symbol":"<sym>"}}]}` |
 | `Mark` | `{"op":"subscribe","rid":"s","subscriptions":[{"channel":"price.crypto.twap","filter":{"symbol":"<sym>","window_seconds":60}}]}` |
 
-退订把 `"op"` 换成 `"unsubscribe"`、`rid` 为 `"u"`(服务器是否支持未核实;引擎只在停机时退订)。inst 不属于本 venue 或符号不是 `[a-z0-9]+` → `Cfg`;其他流 → `Unsupported`。应答:`{"op":"subscribed",…}` → `ControlHint::SubAck{ok: true}`;`{"op":"error",…}`(如 `bad_channel`)→ `SubAck{ok: false, code: 1}`。
+退订把 `"op"` 换成 `"unsubscribe"`、`rid` 为 `"u"`(服务器是否支持见[开发备忘](#开发备忘);引擎只在停机时退订)。inst 不属于本 venue 或符号不是 `[a-z0-9]+` → `Cfg`;其他流 → `Unsupported`。应答:`{"op":"subscribed",…}` → `ControlHint::SubAck{ok: true}`;`{"op":"error",…}`(如 `bad_channel`)→ `SubAck{ok: false, code: 1}`。
 
 ### 行情频道 → 事件
 
@@ -144,3 +144,7 @@ refdata:inst 的符号是小写 `<asset>usd`(如 `btcusd`),资产为该币、计
 - 只有一条连接;断线期间的样本靠重连后的历史帧补(约 120 s 以内)。
 - 退订帧未在服务器上核实。
 - 没有 fuzz 目标(输入面小;后续按 venue-coinbase 的形式补)。
+
+### 开发备忘
+
+- 帧格式、认证与历史帧来自 2026-11-09 实盘机实测(`fixtures/polymarket-price/capture/`)与公司收数机 `pmrec/record.py`;服务器没有公开文档。退订帧是否被接受未核实(方法:连一条认证连接,订阅后发 `unsubscribe`,看是否仍收到样本)。

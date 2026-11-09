@@ -149,7 +149,7 @@ spec: README.md
 ### PPX-007 实时样本
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[去重](README.md#去重)
-- 级别:example
+- 级别:table
 - 里程碑:M3
 - 前置:新 `FeedCtx`
 - 实现:`crates/venue-pmprice/tests/main.rs::ppx_007_live_samples`
@@ -165,7 +165,7 @@ spec: README.md
 ### PPX-008 历史帧
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[去重](README.md#去重)
-- 级别:example
+- 级别:table
 - 里程碑:M3
 - 前置:`HIST` 三项(…702、…703、…704 s)
 - 实现:`crates/venue-pmprice/tests/main.rs::ppx_008_history_frame`
@@ -181,7 +181,7 @@ spec: README.md
 ### PPX-009 畸形输入
 
 - 规则:[实现说明](README.md#实现说明)
-- 级别:property
+- 级别:table
 - 里程碑:M3
 - 前置:无
 - 实现:`crates/venue-pmprice/tests/main.rs::ppx_009_malformed`
@@ -197,7 +197,8 @@ spec: README.md
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[去重](README.md#去重)
 - 级别:golden
 - 里程碑:M3
-- 前置:`fixtures/polymarket-price/capture/btcusd_40s.jsonl`(87 帧)
+- 输入:`fixtures/polymarket-price/capture/btcusd_40s.jsonl`(87 帧,接收顺序)
+- 期望文件:`fixtures/polymarket-price/capture/btcusd_40s.expected.jsonl`
 - 实现:`crates/venue-pmprice/tests/main.rs::ppx_010_capture_golden`
 
 | 行 | 检查 | 期望 |
@@ -208,7 +209,7 @@ spec: README.md
 ### PPX-011 契约
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[限速默认值](README.md#限速默认值)
-- 级别:contract
+- 级别:table
 - 里程碑:M3
 - 前置:无
 - 实现:`crates/venue-pmprice/tests/main.rs::ppx_011_contracts`
