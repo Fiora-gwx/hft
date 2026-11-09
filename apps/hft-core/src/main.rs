@@ -63,12 +63,16 @@ fn run() -> Result<u8, Vec<Error>> {
     if !check {
         startup.enable_status().map_err(|e| vec![e])?;
     }
-    let secrets = if check || dry {
+    let secrets = if check {
         hft_core::secrets::SecretFiles::default()
     } else {
         let parsed = hft_core::config::parse(&path)?;
-        if parsed.instance.name == "prod" {
+        let md_login = parsed.venues.values().any(|v| v.md_login.is_some());
+        if !dry && parsed.instance.name == "prod" {
             hft_core::secrets::SecretFiles::read_and_unlink(&parsed)?
+        } else if md_login {
+            // Market-data logins only (no account key in a sim instance or a dry run).
+            hft_core::secrets::SecretFiles::read_and_unlink_md_login(&parsed)?
         } else {
             hft_core::secrets::SecretFiles::default()
         }

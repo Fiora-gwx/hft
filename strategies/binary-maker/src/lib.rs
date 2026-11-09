@@ -41,6 +41,20 @@ pub const LIVE_BASE: [(&str, i64); 9] = [
     ("max_window_cost", 20_000_000),
 ];
 
+/// 1e-8 USD per unit of the Chainlink inst's price (10^(8 + px_exp)); 0 without a Chainlink group
+/// or with a price exponent outside −8..=0.
+fn cl_mul(f: &fast::Fast, rd: &RefView<'_>) -> i64 {
+    if f.clref == hft_strategy_sdk::prelude::INST_NONE {
+        return 0;
+    }
+    let e = rd.try_inst(f.clref).map_or(i8::MIN, |i| i.px_exp);
+    if (-8..=0).contains(&e) {
+        10i64.pow(u32::from(e.unsigned_abs()).abs_diff(8))
+    } else {
+        0
+    }
+}
+
 /// `StrategyDesc.version` (fast-part snapshot layout and decision semantics).
 pub const DESC_VERSION: u16 = 7;
 
@@ -69,16 +83,15 @@ impl Strategy for BinaryMaker {
         inst: StrategyInstance,
         p: &BinaryMakerParams,
         groups: &GroupTable,
-        _rd: &RefView<'_>,
+        rd: &RefView<'_>,
     ) -> Result<Self, ParamError> {
-        Ok(BinaryMaker {
-            inst,
-            fast: fast::Fast::new(inst.account, p, groups),
-        })
+        let mut fast = fast::Fast::new(inst.account, p, groups);
+        fast.cl_mul = cl_mul(&fast, rd);
+        Ok(BinaryMaker { inst, fast })
     }
 
     fn subscriptions(&self, groups: &GroupTable, out: &mut SubsBuilder<'_>) {
-        fast::subscribe(groups, out);
+        fast::subscribe(groups, self.fast.p.defaults().ref_aux, out);
     }
 
     fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
@@ -89,9 +102,10 @@ impl Strategy for BinaryMaker {
         &mut self,
         p: &BinaryMakerParams,
         groups: &GroupTable,
-        _rd: &RefView<'_>,
+        rd: &RefView<'_>,
     ) -> Result<(), ParamError> {
         self.fast.on_params(p, groups);
+        self.fast.cl_mul = cl_mul(&self.fast, rd);
         Ok(())
     }
 

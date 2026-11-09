@@ -1706,6 +1706,7 @@ dependencies = [
  "toml 0.8.23",
  "venue-binance",
  "venue-coinbase",
+ "venue-pmprice",
  "venue-polymarket",
  "zerocopy",
 ]

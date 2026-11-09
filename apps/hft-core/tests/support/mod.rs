@@ -833,6 +833,9 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
                 .map(|(uid, dir)| hft_pmcfg::LiveAccount::shorthand(uid.clone(), dir.clone()))
                 .collect(),
             coinbase: true,
+            perp: true,
+            chainlink: true,
+            cl_keys: None,
         }
     }
 }

@@ -28,6 +28,9 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         cancel_race: true,
         extra_accounts: extra,
         coinbase: true,
+        perp: true,
+        chainlink: true,
+        cl_keys: None,
     }
 }
 
@@ -454,9 +457,25 @@ fn pmc_008_coinbase_reference() {
     let s = |p: &Path| p.display().to_string();
     let hot = p("hot");
     let (with, without) = (p("with"), p("without"));
-    hft_pmcfg::write_polymarket_maker_sim(&with, &hot, None, None, "10.0.0.5", "ens5").unwrap();
-    hft_pmcfg::write_polymarket_maker_sim_opts(&without, &hot, None, None, "10.0.0.5", "ens5", &[], false)
+    // Without the perpetual reference (PMC-011), so that the Coinbase group is the last one.
+    let refs = |coinbase| hft_pmcfg::Refs {
+        coinbase,
+        perp: false,
+        chainlink: None,
+    };
+    hft_pmcfg::write_polymarket_maker_sim_refs(&with, &hot, None, None, "10.0.0.5", "ens5", &[], &refs(true))
         .unwrap();
+    hft_pmcfg::write_polymarket_maker_sim_refs(
+        &without,
+        &hot,
+        None,
+        None,
+        "10.0.0.5",
+        "ens5",
+        &[],
+        &refs(false),
+    )
+    .unwrap();
     let core = |dir: &Path| std::fs::read_to_string(dir.join("core.toml")).unwrap();
     let rd = |dir: &Path| RefData::load(&std::fs::read(dir.join("refdata.bin")).unwrap(), None).unwrap();
     // .1 the venue, its threads and its refdata.
@@ -556,4 +575,162 @@ fn pmc_008_coinbase_reference() {
             "PMC-008.4 {f}"
         );
     }
+}
+
+/// `[venues.bp]` (perpetual, default on) and `[venues.cl]` (Chainlink: live by default with
+/// `KEYS_DIR`, maker only with `--cl-keys`); binary-maker `ref_aux`; the cpu plan of `feed:cl`.
+#[test]
+fn pmc_011_perp_and_chainlink_references() {
+    let d = tempfile::tempdir().unwrap();
+    let p = |s: &str| d.path().join(s);
+    let s = |p: &Path| p.display().to_string();
+    let hot = p("hot");
+    let core = |dir: &Path| std::fs::read_to_string(dir.join("core.toml")).unwrap();
+    let rd = |dir: &Path| RefData::load(&std::fs::read(dir.join("refdata.bin")).unwrap(), None).unwrap();
+    let groups = |dir: &Path| {
+        let b = std::fs::read(dir.join("strategy_params.bin")).unwrap();
+        hft_event::parse_spb1(&b).unwrap().hdr.n_groups
+    };
+    // .1 maker default: perpetual BTCUSDT InstId 9 on venue 1 (feed only), group 9.
+    let m = p("m");
+    hft_pmcfg::write_polymarket_maker_sim(&m, &hot, None, None, "10.0.0.5", "ens5").unwrap();
+    let t = core(&m);
+    assert!(
+        t.contains("[venues.bp]\nprotocol = 'binance-usdm'\nid = 1\nmax_sub_insts = 1\n"),
+        "PMC-011.1"
+    );
+    assert!(
+        t.contains("task = 'feed:bp'") && !t.contains("venues.cl"),
+        "PMC-011.1"
+    );
+    let r = rd(&m);
+    let bp = VenueId::BINANCE_USDM;
+    assert_eq!(r.insts_of_venue(bp), &[hft_types::InstId(9)], "PMC-011.1");
+    assert_eq!(
+        r.inst_meta(hft_types::InstId(9)).market(),
+        hft_types::MarketKind::LinearPerp,
+        "PMC-011.1"
+    );
+    let urls: Vec<&str> = r
+        .endpoints(bp, hft_refdata::EndpointEnv::Prod)
+        .iter()
+        .map(|e| &*e.url)
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "wss://fstream.binance.com",
+            "wss://fstream.binance.com",
+            "https://fapi.binance.com"
+        ],
+        "PMC-011.1"
+    );
+    assert_eq!(groups(&m), 9, "PMC-011.1");
+    // .2 maker with --cl-keys: Chainlink InstId 10 `btcusd` on venue 17 with md_login.
+    let mc = p("mc");
+    let (code, _, err) = tool(&[
+        "--maker",
+        "--cl-keys",
+        &s(&p("clk")),
+        &s(&mc),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(0), "PMC-011.2: {err}");
+    let v: toml::Value = toml::from_str(&core(&mc)).unwrap();
+    let cl = &v["venues"]["cl"];
+    assert_eq!(cl["protocol"].as_str(), Some("polymarket-price"), "PMC-011.2");
+    assert_eq!(
+        cl["md_login"]["secret_path"].as_str(),
+        Some(s(&p("clk").join("secret")).as_str()),
+        "PMC-011.2"
+    );
+    let r = rd(&mc);
+    let clv = VenueId::POLYMARKET_PRICE;
+    assert_eq!(r.insts_of_venue(clv), &[hft_types::InstId(10)], "PMC-011.2");
+    assert_eq!(&*r.inst_meta(hft_types::InstId(10)).symbol, "btcusd", "PMC-011.2");
+    assert_eq!(groups(&mc), 10, "PMC-011.2");
+    // .3 live: both by default, Chainlink logs in with KEYS_DIR's files (the pm-live account's);
+    // --no-perp / --no-chainlink drop them.
+    let lv = p("lv");
+    let l = live(&p("k1"), vec![]);
+    hft_pmcfg::write_polymarket_maker_live(&lv, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
+    let v: toml::Value = toml::from_str(&core(&lv)).unwrap();
+    let pm_secret = v["venues"]["pm"]["accounts"][0]["rest_secret_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        v["venues"]["cl"]["md_login"]["secret_path"].as_str(),
+        Some(pm_secret.as_str()),
+        "PMC-011.3"
+    );
+    assert!(
+        v["venues"]["cl"].get("live_feed").is_none() && v["venues"]["bp"].get("live_feed").is_none(),
+        "PMC-011.3"
+    );
+    assert_eq!(groups(&lv), 10, "PMC-011.3");
+    let ln = p("ln");
+    let (code, _, err) = tool(&[
+        "--live",
+        "12345",
+        &s(&p("k1")),
+        "--no-perp",
+        "--no-chainlink",
+        &s(&ln),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(0), "PMC-011.3: {err}");
+    let t = core(&ln);
+    assert!(!t.contains("venues.bp") && !t.contains("venues.cl"), "PMC-011.3");
+    assert_eq!(groups(&ln), 8, "PMC-011.3");
+    // .4 option errors.
+    let e = s(&p("e"));
+    let hs = s(&hot);
+    let rows: [(&[&str], &str); 4] = [
+        (&["--no-chainlink"], "--no-chainlink needs --live"),
+        (&["--no-perp"], "--no-perp needs --maker or --live"),
+        (&["--cl-keys", "x"], "--cl-keys needs --maker or --live"),
+        (
+            &["--live", "1", "k", "--cl-keys", "x", "--no-chainlink"],
+            "--cl-keys and --no-chainlink are exclusive",
+        ),
+    ];
+    for (args, msg) in rows {
+        let mut a: Vec<&str> = args.to_vec();
+        a.extend([e.as_str(), hs.as_str(), "1", "lo"]);
+        let (code, _, err) = tool(&a);
+        assert_eq!(code, Some(2), "PMC-011.4 {args:?}");
+        assert!(err.contains(msg), "PMC-011.4 {args:?}: {err}");
+    }
+    // .5 cpu plan spin: feed:bp on core 2 (park 20), feed:cl on core 0 (park 1000).
+    let sp = p("sp");
+    let (code, _, err) = tool(&[
+        "--live",
+        "12345",
+        &s(&p("k1")),
+        "--cpu-plan",
+        "spin",
+        &s(&sp),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(0), "PMC-011.5: {err}");
+    let v: toml::Value = toml::from_str(&core(&sp)).unwrap();
+    let th = |task: &str| {
+        v["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["task"].as_str() == Some(task))
+            .map(|t| (t["core"].as_integer(), t["park_us"].as_integer()))
+            .unwrap()
+    };
+    assert_eq!(th("feed:bp"), (Some(2), Some(20)), "PMC-011.5");
+    assert_eq!(th("feed:cl"), (Some(0), Some(1_000)), "PMC-011.5");
+    assert_eq!(th("conn-builder:cl"), (Some(0), Some(100)), "PMC-011.5");
 }

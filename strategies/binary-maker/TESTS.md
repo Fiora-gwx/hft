@@ -17,9 +17,9 @@ spec: README.md
 | 概要 | BMK-003 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| group 形态 | BMK-001, BMK-049 |
+| group 形态 | BMK-001, BMK-049, BMK-051 |
 | 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022, BMK-024, BMK-033 |
-| 订阅 | BMK-003、BMK-009、BMK-026 |
+| 订阅 | BMK-003、BMK-009、BMK-026、BMK-051 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
 | 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
@@ -382,9 +382,10 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 38;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 41;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
+| BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 第一个字段 `ref_aux`,其余为成交条件 EV 模型字段(规则 14),全部 `since` 41、缺省 0 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -699,3 +700,18 @@ spec: README.md
 | BMK-050.4 | 第二参考超过 5 s 未更新 | 未就绪(0) |
 | BMK-050.5 | 策略内:`ref_cb_w` 0.5 / 0,第二参考报价在第一参考之后上涨 | 0.5:`ref_mid_x2` 偏离 Binance 中间价;0:等于 Binance 中间价 |
 
+
+### BMK-051 辅助组(schema v41 `ref_aux`):永续参考与原生 Chainlink
+
+- 规则:[group 形态](README.md#group-形态)、[订阅](README.md#订阅)、[规则](README.md#规则)(Chainlink)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3` = `specs2` + 永续组(`RP`,`BINANCE_USDM`,`LinearPerp`)+ Chainlink 组(`RC`,`POLYMARKET_PRICE`,BTC px_exp −2)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_051_auxiliary_groups`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-051.1 | `ref_aux` 3 + `specs3`;`ref_aux` 0 + `specs3`;`ref_aux` 3 + 最后两组对调 | `Ok`;`GroupShape` 码 1(参考组多于 2);码 5(位 0 的组不是永续) |
+| BMK-051.2 | `subscriptions` | 槽位 `BOOK | TRADE`、`R`/`R2` `BBO`、`RP` `BBO | BOOK | TRADE`、`RC` `INDEX | MARK`;`reference`/`reference2`/`perp`/`clref` = `R`/`R2`/`RP`/`RC`;`cl_mul` = 10^6 |
+| BMK-051.3 | BMK-034 的第 1、4 对参数加 `ref_aux` 3,`specs3`,另以独立随机流穿插永续 BBO/簿/成交与 Chainlink 价格/TWAP 事件 | 辅助事件无输出;轨迹哈希与计数等于不带辅助组的同一轨迹 |
+| BMK-051.4 | 同一组 Chainlink 样本:旁路(`InjectWarmup` local_kind 1)/ 原生 `Index`;原生表上再发旁路样本;原生 `Mark` | 两者的逐秒价格、最新秒与价格、样本数相同;旁路样本被忽略;`twap_at` 取到该 TWAP,之前的秒为 `None` |

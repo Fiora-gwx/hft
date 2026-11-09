@@ -24,6 +24,12 @@ pub const R: InstId = InstId(7);
 /// Second reference inst (stand-in for the native Coinbase reference of the v37 guard).
 pub const R2: InstId = InstId(8);
 pub const VR2: VenueId = VenueId::OKX_SPOT;
+/// v41 auxiliary groups: a perpetual reference `RP` on `VP` and the Chainlink inst `RC` on `VC`
+/// (BTC, px_exp −2: one price unit = 1e6 × 1e-8 USD).
+pub const VP: VenueId = VenueId::BINANCE_USDM;
+pub const RP: InstId = InstId(9);
+pub const VC: VenueId = VenueId::POLYMARKET_PRICE;
+pub const RC: InstId = InstId(10);
 pub const USDC: AssetId = AssetId(1);
 pub const USDT: AssetId = AssetId(2);
 pub const BTC: AssetId = AssetId(3);
@@ -40,10 +46,18 @@ pub fn gid(k: u32) -> GroupId {
 }
 
 fn venue(b: &mut RdbBuilder, id: VenueId, exchange: Exchange) {
+    venue_m(b, id, exchange, MarketKind::Spot);
+}
+
+fn venue_m(b: &mut RdbBuilder, id: VenueId, exchange: Exchange, market: MarketKind) {
     b.venue(VenueSpec {
         id,
         exchange,
-        product: InstKind::Spot,
+        product: if market == MarketKind::LinearPerp {
+            InstKind::Perp
+        } else {
+            InstKind::Spot
+        },
         ws_max_streams_per_conn: 1024,
         ws_max_in_msgs_per_s: 10,
         ws_max_conn_age_s: 86_400,
@@ -57,17 +71,34 @@ fn venue(b: &mut RdbBuilder, id: VenueId, exchange: Exchange) {
         crossed_tolerance_default: 0,
         stale_guard: StaleGuardKind::RecvWindow,
     });
+    let perp = market == MarketKind::LinearPerp;
     b.caps(VenueCaps {
         venue: id,
-        market: MarketKind::Spot,
+        market,
         fee_asset_rule: FeeAssetRule::Quote,
-        reduce_only: false,
-        required_position_mode: PositionMode::NotApplicable,
-        required_margin_mode: MarginMode::NotApplicable,
-        required_multi_asset: None,
+        reduce_only: perp,
+        required_position_mode: if perp {
+            PositionMode::OneWay
+        } else {
+            PositionMode::NotApplicable
+        },
+        required_margin_mode: if perp {
+            MarginMode::Cross
+        } else {
+            MarginMode::NotApplicable
+        },
+        required_multi_asset: if perp { Some(false) } else { None },
         required_spot_borrow: None,
-        funding_settle: FundingSettleKind::NotApplicable,
-        margin_data: MarginData::NotApplicable,
+        funding_settle: if perp {
+            FundingSettleKind::RateOnly
+        } else {
+            FundingSettleKind::NotApplicable
+        },
+        margin_data: if perp {
+            MarginData::Poll { interval_ms: 5_000 }
+        } else {
+            MarginData::NotApplicable
+        },
         own_liquidation_marker: LiqMarker::NotIdentifiable,
         liq_marker_arg: "".into(),
         ignorable_user_events: Vec::new().into(),
@@ -152,9 +183,11 @@ pub fn refdata() -> RefData {
         });
     }
     // Venue rows in ascending id order.
+    venue_m(&mut b, VP, Exchange::Binance, MarketKind::LinearPerp);
     venue(&mut b, VR, Exchange::Binance);
     venue(&mut b, VR2, Exchange::Okx);
     venue(&mut b, VB, Exchange::Polymarket);
+    venue(&mut b, VC, Exchange::Polymarket);
     for (k, i) in SLOTS.iter().enumerate() {
         let side = if k % 2 == 0 { "up" } else { "dn" };
         inst(
@@ -179,6 +212,30 @@ pub fn refdata() -> RefData {
         "0.01",
         "0.00000001",
     );
+    b.inst(InstSpec {
+        id: RP,
+        venue: VP,
+        symbol: "BTCUSDT".into(),
+        status: InstStatus::Trading,
+        kind: InstKind::Perp,
+        asset: BTC,
+        quote: USDT,
+        tick: 10,
+        lot: 100_000,
+        min_qty: Qty(100_000),
+        max_qty: Qty(1_000_000_000_000),
+        min_notional: Notional(1),
+        book_window: 128,
+        l2_depth: 100,
+        crossed_tolerance: 0,
+        tick_str: "0.1".into(),
+        lot_str: "0.001".into(),
+        min_qty_str: "0.001".into(),
+        funding_interval_s: 28_800,
+        max_leverage: 20,
+        ..InstSpec::default()
+    });
+    inst(&mut b, RC, VC, BTC, USDT, "btcusd".into(), "0.01", "0.00000001");
     b.instance(InstanceSpec {
         id: S1,
         kind_id: 7,
@@ -263,6 +320,14 @@ pub fn specs() -> Vec<GroupSpec> {
 pub fn specs2() -> Vec<GroupSpec> {
     let mut v = specs();
     v.push(spec(gid(7), BTC, &[(R2, VR2)]));
+    v
+}
+
+/// `specs2()` plus the v41 auxiliary groups: the perpetual reference (`RP`), then Chainlink (`RC`).
+pub fn specs3() -> Vec<GroupSpec> {
+    let mut v = specs2();
+    v.push(spec(gid(8), BTC, &[(RP, VP)]));
+    v.push(spec(gid(9), BTC, &[(RC, VC)]));
     v
 }
 

@@ -15,9 +15,10 @@ spec: README.md
 | 概要 | PMC-005 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 见子节 |
-| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009、PMC-010 |
+| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009、PMC-010、PMC-011 |
 | 多账户 | PMC-001、PMC-003、PMC-004 |
-| 绑核 | PMC-010 |
+| 参考行情 | PMC-008、PMC-011 |
+| 绑核 | PMC-010、PMC-011 |
 | 库 | PMC-004、PMC-005、PMC-006、PMC-007、PMC-008 |
 | 实现说明 | PMC-005、PMC-006 |
 | 延迟与资源契约 | 不适用:无门槛 |
@@ -159,7 +160,7 @@ spec: README.md
 - 规则:[命令行](README.md#命令行)(`--no-coinbase`)、[库](README.md#库)
 - 级别:unit
 - 里程碑:M6
-- 前置:`write_polymarket_maker_sim` 与 `write_polymarket_maker_sim_opts(.., coinbase = false)` 写到两个目录;`write_polymarket_maker_live`(`PmLive` UID `12345`、目录 k1)`coinbase` 为 true 与 false 各一次;工具以 `--live 12345 k1 --no-coinbase` 再写一次
+- 前置:`write_polymarket_maker_sim_refs` 不带永续参考(PMC-011)、`coinbase` 为 true 与 false 各写一个目录;`write_polymarket_maker_live`(`PmLive` UID `12345`、目录 k1)`coinbase` 为 true 与 false 各一次;工具以 `--live 12345 k1 --no-coinbase` 再写一次
 - 实现:`tools/hft-pmcfg/tests/output.rs::pmc_008_coinbase_reference`
 
 | 行 | 检查 | 期望 |
@@ -181,6 +182,22 @@ spec: README.md
 | PMC-009.1 | 只有位置参数;`--live 12345 k1` | `coinbase = true`(实盘的 `PmLive.coinbase` 同为 true) |
 | PMC-009.2 | `--maker --no-coinbase`;`--no-coinbase --live 12345 k1` | 模式不变,`coinbase = false`(含 `PmLive.coinbase`) |
 | PMC-009.3 | `--no-coinbase` 无模式选项;`--maker --no-coinbase --no-coinbase` | 拒绝:`--no-coinbase needs --maker or --live`;`given twice` |
+
+### PMC-011 永续 `[venues.bp]` 与 Chainlink `[venues.cl]` 参考行情
+
+- 规则:[命令行](README.md#命令行)(`--no-perp`、`--no-chainlink`、`--cl-keys`)、[参考行情](README.md#参考行情)、[绑核](README.md#绑核)
+- 级别:unit
+- 里程碑:M6
+- 前置:`write_polymarket_maker_sim`;工具 `--maker --cl-keys clk`;`write_polymarket_maker_live`(UID `12345`、目录 k1);工具 `--live … --no-perp --no-chainlink`、`--cpu-plan spin`
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_011_perp_and_chainlink_references`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-011.1 | 缺省的挂单模拟 | `[venues.bp]`(`binance-usdm`、`id = 1`)与 `feed:bp` 线程,无 `venues.cl`;venue 1 只有 InstId 9(永续),端点依次为两条 `wss://fstream.binance.com` 与 `https://fapi.binance.com`;9 个 group |
+| PMC-011.2 | `--maker --cl-keys clk` | `[venues.cl]`(`polymarket-price`)的 `md_login.secret_path` = `clk/secret`;venue 17 只有 InstId 10 `btcusd`;10 个 group |
+| PMC-011.3 | 实盘配置;`--no-perp --no-chainlink` | 两者都有,无 `live_feed`,`cl.md_login` 的 secret 与 `pm-live` 账户的 `rest_secret_path` 相同;10 个 group / 都没有、8 个 group |
+| PMC-011.4 | `--no-chainlink` 无 `--live`;`--no-perp`、`--cl-keys` 无模式;`--cl-keys` 与 `--no-chainlink` 同用 | 退出 2,标准错误含相应原因 |
+| PMC-011.5 | 实盘 `--cpu-plan spin` | `feed:bp` 核 2、`park_us` 20;`feed:cl` 核 0、`park_us` 1 000;`conn-builder:cl` 核 0 |
 
 ## 验收
 

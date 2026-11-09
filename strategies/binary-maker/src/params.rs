@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 38, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 41, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -389,6 +389,10 @@ hft_strategy_sdk::define_params! {
         /// the first's units − the first's mid), the unit ratio a running mean (1/64 per quote) of the
         /// two mids; needs the second (Coinbase) reference group; 0 = off (the first reference alone)
         ref_cb_w: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        /// auxiliary groups after the reference groups, in this order: bit 0 = a perpetual
+        /// reference (recorded only), bit 1 = a Chainlink group (Index = price, Mark = 60 s TWAP;
+        /// replaces the InjectWarmup samples); 0 = none (schema v41; v39/v40 belong to another line)
+        ref_aux: Count [min = 0, max = 3, default = 0, since = 41, relax = None],
     }
 }
 
@@ -402,6 +406,8 @@ pub mod shape {
     pub const VENUE: u16 = 3;
     /// A leg's inst is not in refdata.
     pub const INST: u16 = 4;
+    /// The perpetual auxiliary group (`ref_aux` bit 0) is not on a perpetual venue.
+    pub const AUX: u16 = 5;
 }
 
 /// `ParamError::Invalid` codes.
@@ -423,8 +429,11 @@ impl BinaryMakerParams {
                 code: invalid::PRICE_BAND,
             });
         }
-        let refs = crate::fast::reference_count(groups).max(1);
-        if n < 3 || refs > 2 || (n - refs) < 2 || !(n - refs).is_multiple_of(2) {
+        let ref_aux = d.ref_aux;
+        let aux = crate::fast::aux_count(ref_aux);
+        let refs = crate::fast::reference_count(groups, aux).max(1);
+        let n_main = n.saturating_sub(aux);
+        if n_main < 3 || refs > 2 || (n_main - refs) < 2 || !(n_main - refs).is_multiple_of(2) {
             return Err(ParamError::GroupShape {
                 gix: 0,
                 code: shape::COUNT,
@@ -440,10 +449,16 @@ impl BinaryMakerParams {
             if rd.try_inst(l.inst).is_none() {
                 return Err(err(shape::INST));
             }
-            let reference = gix + refs >= n;
+            let reference = gix + refs >= n_main;
             let v = *slot_venue.get_or_insert(l.venue);
             if (l.venue == v) == reference {
                 return Err(err(shape::VENUE));
+            }
+            if gix == n_main
+                && ref_aux & crate::fast::AUX_PERP != 0
+                && rd.caps(l.venue).market != hft_strategy_sdk::prelude::MarketKind::LinearPerp
+            {
+                return Err(err(shape::AUX));
             }
         }
         Ok(())

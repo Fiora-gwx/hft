@@ -2127,6 +2127,8 @@ fn core_453_cpu_plans_load() {
         for t in &c.threads {
             let want = match t.task.as_str() {
                 "sequencer" => 1,
+                // The Chainlink feed (2 samples/s) parks on core 0.
+                "feed:cl" => 0,
                 x if x.starts_with("gw:") => 3,
                 x if x.starts_with("feed:") => 2,
                 _ => 0,
@@ -2137,6 +2139,105 @@ fn core_453_cpu_plans_load() {
             if plan == hft_pmcfg::CpuPlan::Spin && want == 2 {
                 assert_eq!(t.park_us, 20, "{row} {}", t.name);
             }
+            if t.task == "feed:cl" {
+                assert_eq!(t.park_us, 1_000, "{row} {}", t.name);
+            }
         }
+    }
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_454_perp_and_chainlink_reference_config() {
+    use hft_core::venues::public_market_endpoint;
+    use hft_refdata::EndpointRole;
+    let codes = |path: &std::path::Path| -> Vec<String> {
+        hft_core::config::load(path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect()
+    };
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    let path = support::write_polymarket_maker_live(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+    );
+    // .1 the live maker with the perpetual (bp) and Chainlink (cl) feeds loads.
+    assert_eq!(codes(&path), Vec::<String>::new(), "CORE-454.1");
+    let c = hft_core::config::parse(&path).unwrap();
+    let (bp, cl) = (&c.venues["bp"], &c.venues["cl"]);
+    assert_eq!((bp.protocol.as_str(), bp.id), ("binance-usdm", 1), "CORE-454.1");
+    assert!(bp.accounts.is_empty() && bp.md_login.is_none(), "CORE-454.1");
+    assert_eq!(
+        (cl.protocol.as_str(), cl.id),
+        ("polymarket-price", 17),
+        "CORE-454.1"
+    );
+    assert!(cl.accounts.is_empty() && cl.md_login.is_some(), "CORE-454.1");
+    // .2 md_login: required by polymarket-price, refused elsewhere; no accounts on it.
+    let edit = |f: &dyn Fn(&mut toml::Value)| {
+        let mut v: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        f(&mut v);
+        let p2 = d.path().join("edited.toml");
+        std::fs::write(&p2, toml::to_string(&v).unwrap()).unwrap();
+        codes(&p2)
+    };
+    let e = edit(&|v| {
+        v["venues"]["cl"].as_table_mut().unwrap().remove("md_login");
+    });
+    assert!(e.contains(&"MdLoginRequired".to_string()), "CORE-454.2 {e:?}");
+    let e = edit(&|v| {
+        let m = v["venues"]["cl"]["md_login"].clone();
+        v["venues"]["bn"]
+            .as_table_mut()
+            .unwrap()
+            .insert("md_login".into(), m);
+    });
+    assert!(e.contains(&"MdLoginUnsupported".to_string()), "CORE-454.2 {e:?}");
+    let e = edit(&|v| {
+        let a = v["venues"]["pm"]["accounts"].clone();
+        v["venues"]["cl"]
+            .as_table_mut()
+            .unwrap()
+            .insert("accounts".into(), a);
+    });
+    assert!(e.contains(&"ReadOnlyVenue".to_string()), "CORE-454.2 {e:?}");
+    // .5 the public endpoints of polymarket-price: ws-live-v2 only.
+    for (role, url, ok) in [
+        (EndpointRole::MdPublic, "wss://ws-live-v2.polymarket.com", true),
+        (EndpointRole::MdMarket, "wss://ws-live-v2.polymarket.com/ws", true),
+        (EndpointRole::Rest, "https://ws-live-v2.polymarket.com", true),
+        (EndpointRole::MdPublic, "wss://ws-live-data.polymarket.com", false),
+        (
+            EndpointRole::MdPublic,
+            "wss://ws-live-v2.polymarket.com.evil.invalid",
+            false,
+        ),
+        (EndpointRole::OrderWs, "wss://ws-live-v2.polymarket.com", false),
+    ] {
+        assert_eq!(
+            public_market_endpoint("polymarket-price", role, url),
+            ok,
+            "CORE-454.5 {url}"
+        );
     }
 }

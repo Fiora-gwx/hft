@@ -163,6 +163,41 @@ pub struct PmLive {
     /// `[venues.cb]` (Coinbase BTC-USD, InstId 8) is written; false (`--no-coinbase`) = the
     /// configuration without it.
     pub coinbase: bool,
+    /// `[venues.bp]` (Binance USDT-M perpetual BTCUSDT, market data only) is written; false =
+    /// `--no-perp`.
+    pub perp: bool,
+    /// `[venues.cl]` (Chainlink BTC/USD price and 60 s TWAP, `polymarket-price`) is written,
+    /// logging in with `cl_keys` or else `keys_dir`; false = `--no-chainlink`.
+    pub chainlink: bool,
+    /// `--cl-keys DIR`: the `api_key`/`secret`/`passphrase` files of the Chainlink login; `None`
+    /// = `keys_dir` (the same files as `pm-live`'s, read once).
+    pub cl_keys: Option<PathBuf>,
+}
+
+impl PmLive {
+    /// The reference feeds of this live configuration.
+    pub fn refs(&self) -> Refs {
+        Refs {
+            coinbase: self.coinbase,
+            perp: self.perp,
+            chainlink: self
+                .chainlink
+                .then(|| self.cl_keys.clone().unwrap_or_else(|| self.keys_dir.clone())),
+        }
+    }
+}
+
+/// Reference markets of the maker configurations besides the Binance spot reference (README
+/// "参考行情").
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Refs {
+    /// `[venues.cb]`: Coinbase BTC-USD.
+    pub coinbase: bool,
+    /// `[venues.bp]`: Binance USDT-M perpetual BTCUSDT (bookTicker, depth5@100ms, aggTrade).
+    pub perp: bool,
+    /// `[venues.cl]`: Chainlink BTC/USD price and TWAP; the directory of the login files
+    /// (`api_key`, `secret`, `passphrase`; read and unlinked by hft-core at start).
+    pub chainlink: Option<PathBuf>,
 }
 
 impl PmLive {
@@ -257,7 +292,7 @@ pub fn write_polymarket_sim(
         PmStrategy::Observer,
         None,
         &[],
-        false,
+        &Refs::default(),
     )
 }
 
@@ -292,7 +327,7 @@ pub fn write_polymarket_maker_sim_with(
 }
 
 /// `write_polymarket_maker_sim_with`; `coinbase = false` (`--maker --no-coinbase`) omits
-/// `[venues.cb]` and its refdata (the configuration as before Coinbase was added).
+/// `[venues.cb]` and its refdata. With the perpetual reference, without Chainlink.
 #[allow(clippy::too_many_arguments)]
 pub fn write_polymarket_maker_sim_opts(
     root: &Path,
@@ -303,6 +338,27 @@ pub fn write_polymarket_maker_sim_opts(
     bind_device: &str,
     params: &[(String, i64)],
     coinbase: bool,
+) -> Result<PathBuf, String> {
+    let refs = Refs {
+        coinbase,
+        perp: true,
+        chainlink: None,
+    };
+    write_polymarket_maker_sim_refs(root, hot, user, pipeline, src_ip, bind_device, params, &refs)
+}
+
+/// The maker simulation with the reference markets `refs` (`--no-coinbase`, `--no-perp`,
+/// `--cl-keys DIR`).
+#[allow(clippy::too_many_arguments)]
+pub fn write_polymarket_maker_sim_refs(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    params: &[(String, i64)],
+    refs: &Refs,
 ) -> Result<PathBuf, String> {
     write_pm(
         &Target {
@@ -318,7 +374,7 @@ pub fn write_polymarket_maker_sim_opts(
         PmStrategy::Maker,
         None,
         params,
-        coinbase,
+        refs,
     )
 }
 
@@ -407,7 +463,7 @@ pub fn write_polymarket_maker_live_with(
         PmStrategy::Maker,
         Some(live),
         params,
-        live.coinbase,
+        &live.refs(),
     )
 }
 
@@ -443,7 +499,7 @@ pub fn write_polymarket_taker_probe_live(
         PmStrategy::TakerProbe,
         Some(live),
         params,
-        live.coinbase,
+        &live.refs(),
     )
 }
 
@@ -555,7 +611,7 @@ fn write_pm(
     strategy: PmStrategy,
     live: Option<&PmLive>,
     params: &[(String, i64)],
-    coinbase: bool,
+    refs: &Refs,
 ) -> Result<PathBuf, String> {
     use hft_venue_proto::VenueProtocol;
     let (root, src_ip, bind_device) = (t.root, t.src_ip, t.bind_device);
@@ -573,8 +629,13 @@ fn write_pm(
     let v = VenueId::POLYMARKET_CLOB;
     let bn = VenueId::BINANCE_SPOT;
     let cb = VenueId::COINBASE_SPOT;
-    // The second reference market (Coinbase BTC-USD) rides with the maker's Binance reference.
-    let coinbase = maker && coinbase;
+    let bp = VenueId::BINANCE_USDM;
+    let clv = VenueId::POLYMARKET_PRICE;
+    // The further reference markets ride with the maker's Binance reference.
+    let coinbase = maker && refs.coinbase;
+    let perp = maker && refs.perp;
+    let cl_keys = if maker { refs.chainlink.clone() } else { None };
+    let chainlink = cl_keys.is_some();
     let a = AccountId(1);
     let usdc = AssetId(1);
     let desc = Strategies::kinds()
@@ -595,9 +656,30 @@ fn write_pm(
     // Binance spot's fee rule names BNB (fee discount asset).
     let bnb = AssetId(slots.len() as u16 + 4);
     let reference = InstId(slots.len() as u32 + 1);
-    // Coinbase: USD after BNB, BTC-USD after the Binance reference.
+    // USD after BNB (Coinbase and Chainlink quote it); the further references after the Binance
+    // one, in the order Coinbase, perpetual, Chainlink (each only when present).
     let usd = AssetId(slots.len() as u16 + 5);
-    let cb_ref = InstId(slots.len() as u32 + 2);
+    let mut next_inst = slots.len() as u32 + 2;
+    let mut take = |on: bool| {
+        on.then(|| {
+            next_inst += 1;
+            InstId(next_inst - 1)
+        })
+    };
+    let cb_ref = take(coinbase).unwrap_or(InstId(0));
+    let perp_ref = take(perp);
+    let cl_ref = take(chainlink);
+    // Reference groups after the slots: (asset, venue) in group order.
+    let mut ref_groups = vec![(btc, bn)];
+    if coinbase {
+        ref_groups.push((btc, cb));
+    }
+    if perp {
+        ref_groups.push((btc, bp));
+    }
+    if chainlink {
+        ref_groups.push((btc, clv));
+    }
     let token = |i: usize| AssetId(i as u16 + 2);
     let mut b = RdbBuilder::new(1);
     b.asset(AssetSpec {
@@ -642,7 +724,7 @@ fn write_pm(
                 dust: Qty(1),
             });
         }
-        if coinbase {
+        if coinbase || chainlink {
             b.asset(AssetSpec {
                 id: usd,
                 name: "USD".into(),
@@ -655,6 +737,65 @@ fn write_pm(
                 qty_max: Qty(1_000_000_000_000_000),
                 dust: Qty(1),
             });
+        }
+        if perp {
+            // USDT-M perpetual, market data only (venue rows in ascending id order: 1 before 2).
+            b.venue(VenueSpec {
+                id: bp,
+                exchange: Exchange::Binance,
+                product: InstKind::Perp,
+                ws_max_streams_per_conn: 1024,
+                ws_max_in_msgs_per_s: 10,
+                ws_max_conn_age_s: 86400,
+                ws_new_conn_per_5min_ip: 300,
+                app_ping_interval_s: 0,
+                ts_unit: TsUnit::Ms,
+                client_id_max_len: 36,
+                client_id_prefix: "".into(),
+                max_batch: 5,
+                max_inflight_amend: 1,
+                crossed_tolerance_default: 0,
+                stale_guard: StaleGuardKind::RecvWindow,
+            });
+            for (role, url) in [
+                // The protocol appends /public/ws (bookTicker, depth5) and /market/ws (aggTrade).
+                (EndpointRole::MdPublic, "wss://fstream.binance.com"),
+                (EndpointRole::MdMarket, "wss://fstream.binance.com"),
+                (EndpointRole::Rest, "https://fapi.binance.com"),
+            ] {
+                b.endpoint(
+                    bp,
+                    Endpoint {
+                        env: EndpointEnv::Prod,
+                        role,
+                        url: url.into(),
+                        conn_group: 0,
+                    },
+                );
+            }
+            b.caps(venue_binance::Usdm::default_caps(|s| {
+                (s == "USDT").then_some(usdt)
+            }));
+            b.fee(FeeSpec {
+                venue: bp,
+                tier: 0,
+                fee: FeePair {
+                    maker: Rate(200_000),
+                    taker: Rate(500_000),
+                },
+            });
+            for r in venue_binance::Usdm::rate_rules() {
+                b.limit(
+                    bp,
+                    RateLimit {
+                        scope: r.scope,
+                        bucket: r.bucket,
+                        limit: r.limit,
+                        window_ms: r.window_ms,
+                        default_cost: 1,
+                    },
+                );
+            }
         }
         b.venue(VenueSpec {
             id: bn,
@@ -835,6 +976,64 @@ fn write_pm(
             );
         }
     }
+    if chainlink {
+        b.venue(VenueSpec {
+            id: clv,
+            exchange: Exchange::Polymarket,
+            product: InstKind::Spot,
+            ws_max_streams_per_conn: 16,
+            ws_max_in_msgs_per_s: 10,
+            ws_max_conn_age_s: 86_400,
+            ws_new_conn_per_5min_ip: 300,
+            app_ping_interval_s: 5,
+            ts_unit: TsUnit::Ms,
+            client_id_max_len: 32,
+            client_id_prefix: "".into(),
+            max_batch: 1,
+            max_inflight_amend: 1,
+            crossed_tolerance_default: 0,
+            stale_guard: StaleGuardKind::None,
+        });
+        for (role, url) in [
+            (EndpointRole::MdPublic, "wss://ws-live-v2.polymarket.com"),
+            (EndpointRole::MdMarket, "wss://ws-live-v2.polymarket.com"),
+            // No REST use; the assembly requires a public REST endpoint per venue.
+            (EndpointRole::Rest, "https://ws-live-v2.polymarket.com"),
+        ] {
+            b.endpoint(
+                clv,
+                Endpoint {
+                    env: EndpointEnv::Prod,
+                    role,
+                    url: url.into(),
+                    conn_group: 0,
+                },
+            );
+        }
+        b.caps(venue_pmprice::PolymarketPrice::default_caps(|s| {
+            (s == "USD").then_some(usd)
+        }));
+        b.fee(FeeSpec {
+            venue: clv,
+            tier: 0,
+            fee: FeePair {
+                maker: Rate(0),
+                taker: Rate(0),
+            },
+        });
+        for r in venue_pmprice::PolymarketPrice::rate_rules() {
+            b.limit(
+                clv,
+                RateLimit {
+                    scope: r.scope,
+                    bucket: r.bucket,
+                    limit: r.limit,
+                    window_ms: r.window_ms,
+                    default_cost: 1,
+                },
+            );
+        }
+    }
     for (i, s) in slots.iter().enumerate() {
         b.inst(InstSpec {
             id: InstId(i as u32 + 1),
@@ -896,6 +1095,52 @@ fn write_pm(
             min_notional: Notional(1_000_000),
             book_window: 4096,
             tick_str: "0.01".into(),
+            lot_str: "0.00000001".into(),
+            min_qty_str: "0.00000001".into(),
+            ..InstSpec::default()
+        });
+    }
+    if let Some(id) = perp_ref {
+        // Market data only: no account; tick 0.10 USDT, lot 0.001 BTC (exchangeInfo 2026-11).
+        b.inst(InstSpec {
+            id,
+            venue: bp,
+            symbol: "BTCUSDT".into(),
+            kind: InstKind::Perp,
+            asset: btc,
+            quote: usdt,
+            tick: 1_000,
+            lot: 100_000,
+            min_qty: Qty(100_000),
+            max_qty: Qty(100_000_000_000),
+            // Never traded: the maker's dust floor (5 USDT, as the spot reference), not the
+            // exchange's 100 USDT.
+            min_notional: Notional(5_000_000),
+            book_window: 4096,
+            tick_str: "0.10".into(),
+            lot_str: "0.001".into(),
+            min_qty_str: "0.001".into(),
+            funding_interval_s: 28_800,
+            max_leverage: 20,
+            ..InstSpec::default()
+        });
+    }
+    if let Some(id) = cl_ref {
+        // Chainlink BTC/USD (price → IndexPrice, 60 s TWAP → MarkPrice); prices at BTC's px_exp.
+        b.inst(InstSpec {
+            id,
+            venue: clv,
+            symbol: "btcusd".into(),
+            kind: InstKind::Spot,
+            asset: btc,
+            quote: usd,
+            tick: 1,
+            lot: 1,
+            min_qty: Qty(1),
+            max_qty: Qty(100_000_000_000),
+            min_notional: Notional(1_000_000),
+            book_window: 4096,
+            tick_str: "0.0001".into(),
             lot_str: "0.00000001".into(),
             min_qty_str: "0.00000001".into(),
             ..InstSpec::default()
@@ -966,7 +1211,7 @@ fn write_pm(
     let n = if probe {
         1
     } else {
-        slots.len() as u16 + u16::from(maker) + u16::from(coinbase)
+        slots.len() as u16 + if maker { ref_groups.len() as u16 } else { 0 }
     };
     let field =
         |name: &str| (0..schema.n_fields()).position(|i| schema.field(i).is_some_and(|f| f.name == name));
@@ -980,6 +1225,11 @@ fn write_pm(
         for (name, value) in PM_LIVE_PARAMS {
             defaults[field(name).ok_or_else(|| format!("binary-maker has no `{name}`"))?] = value;
         }
+    }
+    if strategy == PmStrategy::Maker {
+        // The auxiliary groups (binary-maker `ref_aux`): bit 0 perpetual, bit 1 Chainlink.
+        defaults[field("ref_aux").ok_or("binary-maker has no `ref_aux`")?] =
+            i64::from(perp) | i64::from(chainlink) << 1;
     }
     for (name, value) in params {
         if let Some(k) = field(name) {
@@ -1023,10 +1273,8 @@ fn write_pm(
     for i in 0..usize::from(n) {
         let (asset, venue) = if i < slots.len() {
             (token(i), v)
-        } else if i == slots.len() {
-            (btc, bn)
         } else {
-            (btc, cb)
+            ref_groups[i - slots.len()]
         };
         let g = GroupSpec {
             id: GroupId::compose(StrategyId(1), i as u32 + 1).ok_or("group id")?,
@@ -1135,8 +1383,8 @@ fn write_pm(
     let mut ledger = LedgerConfig::default();
     ledger.stable_par_fallback.clear();
     ledger.par_assets.push(hft_ledger::AssetName::new("USDC"));
-    // Coinbase quotes BTC in USD: valued at par (no position is ever held on it).
-    if coinbase {
+    // Coinbase and Chainlink quote BTC in USD: valued at par (no position is ever held on them).
+    if coinbase || chainlink {
         ledger.par_assets.push(hft_ledger::AssetName::new("USD"));
     }
     let caps = Capacities {
@@ -1154,6 +1402,12 @@ fn write_pm(
     }
     if coinbase {
         feed_venues.push(cb);
+    }
+    if perp {
+        feed_venues.push(bp);
+    }
+    if chainlink {
+        feed_venues.push(clv);
     }
     let mut engine = engine_base(&rd, &caps, ledger, feed_venues.clone());
     engine.drain_timeout_ms = 3000;
@@ -1267,6 +1521,30 @@ quote_interval_ms = 1000
         },
         maker_fill = if maker { "maker_fill = 'queue'\n" } else { "" },
     );
+    if perp {
+        // Inserted before `[sim]` with the other venue tables (TOML: a table header ends the
+        // previous table, so appending after `[sim]` would be fine too; kept together for reading).
+        let bp_text = format!(
+            "[venues.bp]\nprotocol = 'binance-usdm'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
+             src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n\
+             [venues.bp.feed]\nrace_rotate_s = 600\n",
+            bp.0
+        );
+        text = text.replacen("[sim]\n", &format!("{bp_text}[sim]\n"), 1);
+    }
+    if let Some(dir) = &cl_keys {
+        let k = |f: &str| dir.join(f).display().to_string();
+        let cl_text = format!(
+            "[venues.cl]\nprotocol = 'polymarket-price'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
+             src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n\
+             [venues.cl.md_login]\napi_key_path = {:?}\nsecret_path = {:?}\npassphrase_path = {:?}\n",
+            clv.0,
+            k("api_key"),
+            k("secret"),
+            k("passphrase")
+        );
+        text = text.replacen("[sim]\n", &format!("{cl_text}[sim]\n"), 1);
+    }
     for (name, task, nice) in [
         ("sequencer", "sequencer", 0),
         ("persist", "persist", 10),
@@ -1287,6 +1565,18 @@ quote_interval_ms = 1000
     }
     if coinbase {
         for (name, task, nice) in [("feed-cb", "feed:cb", 0), ("build-cb", "conn-builder:cb", 10)] {
+            text +=
+                &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+        }
+    }
+    if perp {
+        for (name, task, nice) in [("feed-bp", "feed:bp", 0), ("build-bp", "conn-builder:bp", 10)] {
+            text +=
+                &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+        }
+    }
+    if chainlink {
+        for (name, task, nice) in [("feed-cl", "feed:cl", 0), ("build-cl", "conn-builder:cl", 10)] {
             text +=
                 &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
         }
@@ -1332,7 +1622,7 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     let instance = table(config.get_mut("instance"))?;
     instance.insert("name".into(), "prod".into());
     instance.insert("order_env".into(), "prod".into());
-    for name in ["pm", "bn", "cb"] {
+    for name in ["pm", "bn", "cb", "bp", "cl"] {
         if let Some(v) = config["venues"].get_mut(name).and_then(toml::Value::as_table_mut) {
             v.remove("live_feed");
         }
@@ -1409,6 +1699,9 @@ impl CpuPlan {
     }
 }
 
+/// `park_us` of the Chainlink feed thread under `pin`/`spin` (core 0).
+pub const SLOW_FEED_PARK_US: i64 = 1_000;
+
 /// Applies `plan` to the `[[threads]]` of the `core.toml` at `path` (rewritten in place); `None`
 /// leaves the file untouched.
 pub fn apply_cpu_plan(path: &Path, plan: CpuPlan) -> Result<(), String> {
@@ -1428,16 +1721,21 @@ pub fn apply_cpu_plan(path: &Path, plan: CpuPlan) -> Result<(), String> {
             .and_then(toml::Value::as_str)
             .unwrap_or("")
             .to_string();
+        // The Chainlink feed (two samples a second, themselves ~1.2 s late) parks on core 0.
+        let slow_feed = task == "feed:cl";
         let (core, hot) = if task == "sequencer" {
             (1, true)
         } else if task.starts_with("gw:") {
             (3, true)
-        } else if task.starts_with("feed:") {
+        } else if task.starts_with("feed:") && !slow_feed {
             (2, false)
         } else {
             (0, false)
         };
         t.insert("core".into(), toml::Value::Integer(core));
+        if slow_feed {
+            t.insert("park_us".into(), toml::Value::Integer(SLOW_FEED_PARK_US));
+        }
         if plan == CpuPlan::Spin {
             if hot {
                 t.insert("idle".into(), "spin".into());

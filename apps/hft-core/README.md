@@ -932,7 +932,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 网络模式只接受非正式 Live 账户与 testnet 账户端点。公共行情环境由 [可执行配置](config/README.md) 的 `instance.feed_env` 选择，私有链路保持 testnet。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
 
-凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 与 Sim 不读取文件；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
+凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 不读取文件，Sim 实例与 `--dry-run` 只读取 `venues.<v>.md_login` 的文件(行情登录,`read_and_unlink_md_login`;不读任何账户 key)；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
 
 `bitget` 默认启用，可与 Binance 同进程装配。两种 key 分别签名核验；非正式 Unverifiable 账户要求相同 API key，仍需人工确认身份闸门。Ed25519 文件支持原始 32 字节、PKCS#8 DER/PEM。周期余额/持仓只校验；REST 失败发布配置 UNREADABLE 后按 interval 重试。RateOnly 真实结算只与合成历史比较，不重复入现金；窗口与滞后取 LedgerConfig。操作见 [测试网 runbook](RUNBOOK-testnet.md)。
 

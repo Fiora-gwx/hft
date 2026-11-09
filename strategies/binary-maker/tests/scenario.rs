@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 38, "BMK-024.1");
+    assert_eq!(schema.version(), 41, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1307,6 +1307,17 @@ fn bmk_024_schema_v6() {
     assert_eq!(n_fields_at(schema, 38), Some(n34 + 8), "BMK-024.34");
     let f = schema.field(n34 + 7).unwrap();
     assert_eq!((f.name, f.since, f.default), ("ref_cb_w", 38, 0), "BMK-024.34");
+    // .35 v41 (v39/v40 belong to another line): the auxiliary groups, then the fill-conditional
+    // EV model (all 0 = off).
+    assert_eq!(n_fields_at(schema, 40), Some(n34 + 8), "BMK-024.35");
+    let v41: Vec<_> = (n34 + 8..schema.n_fields())
+        .map(|i| {
+            let f = schema.field(i).unwrap();
+            (f.name, f.since, f.default)
+        })
+        .collect();
+    assert_eq!(v41.first(), Some(&("ref_aux", 41, 0)), "BMK-024.35");
+    assert!(v41.iter().all(|f| f.1 == 41 && f.2 == 0), "BMK-024.35 {v41:?}");
 }
 
 #[test]
@@ -1946,9 +1957,57 @@ fn fnv(h: &mut u64, bytes: &[u8]) {
 /// captured operation, the quote states, the score cache and the fair-value anchor after every
 /// event and the final snapshot; and (places, cancels, events with a valid score, fills).
 fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (u64, [u32; 4]) {
+    decision_trace_with(p, p2, seed, false)
+}
+
+/// One auxiliary-group event (perpetual BBO, book or trade; Chainlink price or TWAP) at `t`;
+/// it must produce no output.
+fn feed_aux(h: &mut StrategyHarness<BinaryMaker>, rng: &mut TraceRng, t: i64) {
+    let out = match rng.below(6) {
+        0 => {
+            let m = 10_000_000 + (rng.below(200) - 100) * 10;
+            h.views_mut()
+                .bbo(RP, (Px(m - 5), Qty(1_000_000)), (Px(m + 5), Qty(2_000_000)));
+            let b = h.views_mut().bbo_of(RP);
+            h.feed(&ev::bbo(RP, 8, b).as_ref())
+        }
+        1 => {
+            h.views_mut().book(RP, &[lv(9_999_990, 5)], &[lv(10_000_010, 7)]);
+            h.feed(&ev::book(RP, 8).as_ref())
+        }
+        2 => {
+            let tv = TradeView {
+                px: Px(10_000_000),
+                qty: Qty(100_000),
+                side: Side::Buy,
+                ex_ts_ns: t,
+            };
+            h.feed(&ev::trade(RP, 8, tv).as_ref())
+        }
+        3 => h.feed(&ev::index_at(RC, 9, Px(10_000_000 + rng.below(1_000)), t - 1_200_000_000).as_ref()),
+        4 => h.feed(&ev::mark_at(RC, 9, Px(10_000_000), t - 1_200_000_000).as_ref()),
+        _ => return,
+    };
+    assert!(out.items.is_empty(), "auxiliary event produced {:?}", out.items);
+}
+
+/// `decision_trace`; `aux`: on the table with the v41 auxiliary groups (`ref_aux` = 3 in both
+/// parameter sets) and with auxiliary events interleaved (their own random stream).
+fn decision_trace_with(
+    p: &BinaryMakerParams,
+    p2: &BinaryMakerParams,
+    seed: u64,
+    aux: bool,
+) -> (u64, [u32; 4]) {
     use binary_maker::fast::QState;
-    let mut h = harness(p);
+    let mut h = if aux {
+        StrategyHarness::<BinaryMaker>::new(p, &GroupTable::new(&specs3(), CAPACITY), fixture(), A1)
+            .expect("params")
+    } else {
+        harness(p)
+    };
     let mut rng = TraceRng(seed);
+    let mut arng = TraceRng(seed ^ 0x5eed_5eed);
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     let mut n = [0u32; 4];
     let mut mid: i64 = 10_000_000;
@@ -1962,6 +2021,9 @@ fn decision_trace(p: &BinaryMakerParams, p2: &BinaryMakerParams, seed: u64) -> (
     while t < 2_400 * s {
         t += 20_000_000 + rng.below(280) * 1_000_000;
         h.views_mut().at_engine_ns(t);
+        if aux {
+            feed_aux(&mut h, &mut arng, t);
+        }
         if !switched && t >= 1_100 * s {
             h.on_params(p2).unwrap();
             switched = true;
@@ -2169,6 +2231,128 @@ fn bmk_034_decision_trace_is_stable() {
         (0xa5fc_cf6a_5c2b_8311, [797, 704, 2335, 536]),
     ];
     assert_eq!(got, want, "BMK-034");
+}
+
+fn with_aux(p: &BinaryMakerParams) -> BinaryMakerParams {
+    let schema = BinaryMaker::DESC.schema;
+    let mut raw: Vec<i64> = p.defaults().raw().to_vec();
+    let k = (0..schema.n_fields())
+        .position(|i| schema.field(i).is_some_and(|f| f.name == "ref_aux"))
+        .unwrap();
+    raw[k] = 3;
+    BinaryMakerParams::from_raw(
+        &RawParams {
+            defaults: raw,
+            overrides: Vec::new(),
+        },
+        7,
+    )
+}
+
+#[test]
+fn bmk_051_auxiliary_groups() {
+    use binary_maker::params::shape;
+    let rd = refdata();
+    let rv = fixture();
+    let aux = with_aux(&params(|_| {}));
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    // .1 group shape: the auxiliary groups need ref_aux; the perpetual one must be a perpetual.
+    assert_eq!(aux.check(&g3, &rv.view()), Ok(()), "BMK-051.1");
+    let code = |p: &BinaryMakerParams, g: &GroupTable| match p.check(g, &rv.view()) {
+        Err(ParamError::GroupShape { code, .. }) => code,
+        r => panic!("{r:?}"),
+    };
+    assert_eq!(code(&params(|_| {}), &g3), shape::COUNT, "BMK-051.1 ref_aux 0");
+    let mut swapped = specs3();
+    let n = swapped.len();
+    swapped.swap(n - 1, n - 2);
+    let gs = GroupTable::new(&swapped, CAPACITY);
+    assert_eq!(code(&aux, &gs), shape::AUX, "BMK-051.1 order");
+    // .2 subscriptions: slots book + trades, the two references BBO, the perpetual BBO + book +
+    // trades, Chainlink index + mark.
+    let h = StrategyHarness::<BinaryMaker>::new(&aux, &g3, fixture(), A1).expect("params");
+    let room = vec![16u16; 32];
+    let lim = SubsLimits {
+        rd: &rd,
+        feeds: VenueSet::EMPTY.with(VB).with(VR).with(VR2).with(VP).with(VC),
+        room: &room,
+    };
+    let mut sb = SubsBuilder::new(lim, 16);
+    h.strategy().subscriptions(&g3, &mut sb);
+    let got: Vec<_> = sb.entries().iter().map(|e| (e.inst, e.gix, e.ev)).collect();
+    let mut want: Vec<_> = SLOTS
+        .iter()
+        .enumerate()
+        .map(|(k, i)| (*i, k as u16, EvMask(EvMask::BOOK.0 | EvMask::TRADE.0)))
+        .collect();
+    want.push((R, 6, EvMask::BBO));
+    want.push((R2, 7, EvMask::BBO));
+    want.push((RP, 8, EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0)));
+    want.push((RC, 9, EvMask(EvMask::INDEX.0 | EvMask::MARK.0)));
+    assert_eq!(got, want, "BMK-051.2");
+    let f = &h.strategy().fast;
+    assert_eq!(
+        (f.reference, f.reference2, f.perp, f.clref),
+        (R, R2, RP, RC),
+        "BMK-051.2"
+    );
+    assert_eq!(f.cl_mul, 1_000_000, "BMK-051.2 px_exp −2");
+    // .3 decisions with the auxiliary groups and their events equal the BMK-034 traces.
+    let base = params(|_| {});
+    let fv = params_with(&[
+        ("fv_limit", 1),
+        ("nochase_ms", 500),
+        ("streak_k", 2),
+        ("max_window_cost", 30_000_000),
+    ]);
+    let lag = comp_params(&[
+        ("load_gate_ns", 150_000_000),
+        ("mdslow_gate_ns", 90_000_000),
+        ("comp_imb1_sd", 674_103_869),
+    ]);
+    for (k, (a, b, seed)) in [(&base, &fv, 1u64), (&lag, &base, 4)].into_iter().enumerate() {
+        let plain = decision_trace(a, b, seed);
+        let with = decision_trace_with(&with_aux(a), &with_aux(b), seed, true);
+        assert_eq!(with, plain, "BMK-051.3 pair {k}");
+    }
+    // .4 native Chainlink samples equal the sidecar's: same price per second and latest sample;
+    // the sidecar's samples are ignored once the native group exists; the TWAP is stored.
+    let mut side = harness(&base);
+    let mut nat = StrategyHarness::<BinaryMaker>::new(&aux, &g3, fixture(), A1).expect("params");
+    for (k, px_e8) in [
+        (0i64, 7_480_012_000_000i64),
+        (1, 7_480_112_000_000),
+        (3, 7_479_900_000_000),
+    ] {
+        let ts_ms = 1_794_227_700_000 + k * 1_000;
+        let mut pl = vec![1u8];
+        pl.extend_from_slice(&ts_ms.to_le_bytes());
+        pl.extend_from_slice(&px_e8.to_le_bytes());
+        side.feed(&ev::warmup(1, k as u32, true, &pl).as_ref());
+        nat.feed(&ev::index_at(RC, 9, Px(px_e8 / 1_000_000), ts_ms * 1_000_000).as_ref());
+        // A sidecar sample on the native table: ignored.
+        let mut junk = vec![1u8];
+        junk.extend_from_slice(&(ts_ms + 500).to_le_bytes());
+        junk.extend_from_slice(&1i64.to_le_bytes());
+        nat.feed(&ev::warmup(1, 9, true, &junk).as_ref());
+    }
+    let (a, b) = (&side.strategy().fast.cl, &nat.strategy().fast.cl);
+    assert_eq!(
+        (a.last_s, a.last_px, a.n),
+        (b.last_s, b.last_px, b.n),
+        "BMK-051.4"
+    );
+    for s in 1_794_227_700..1_794_227_704 {
+        assert_eq!(a.sec.exact(s), b.sec.exact(s), "BMK-051.4 second {s}");
+    }
+    nat.feed(&ev::mark_at(RC, 9, Px(7_480_050), 1_794_227_700_000_000_000).as_ref());
+    let c = &nat.strategy().fast.cl;
+    assert_eq!(
+        c.twap_at(1_794_227_702),
+        Some(7_480_050_000_000),
+        "BMK-051.4 TWAP"
+    );
+    assert_eq!(c.twap_at(1_794_227_699), None, "BMK-051.4 TWAP before");
 }
 
 #[test]

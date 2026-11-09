@@ -179,8 +179,9 @@ impl RefFuse {
     }
 }
 
-/// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
-/// second and the latest sample; not in the snapshot.
+/// Chainlink BTC/USD samples: price (1e-8 USD) per Chainlink second and the latest sample, from
+/// the native Chainlink reference group (`ref_aux` bit 1: `Index` = price, `Mark` = 60 s TWAP) or,
+/// without one, from `InjectWarmup` (local kind 1, price only); not in the snapshot.
 #[derive(Clone, Debug, Default)]
 pub struct ClFeed {
     pub sec: Box<features::RefSecs>,
@@ -188,9 +189,45 @@ pub struct ClFeed {
     pub last_s: i64,
     pub last_px: i64,
     pub n: u64,
+    /// The official 60 s TWAP (1e-8 USD) per Chainlink second (native group only).
+    pub twap: Box<features::RefSecs>,
+    /// Chainlink second of the latest TWAP sample (`i64::MIN` before the first; `Default` = 0).
+    pub twap_s: i64,
+    pub n_twap: u64,
 }
 
 impl ClFeed {
+    /// One price sample: Chainlink time (ms) and price (1e-8 USD); a sample older than the latest
+    /// only fills its own second; non-positive prices are ignored.
+    pub fn on_sample(&mut self, ts_ms: i64, px: i64) {
+        if px <= 0 {
+            return;
+        }
+        let s = ts_ms.div_euclid(1_000);
+        self.sec.put(s, px);
+        if self.n == 0 || s >= self.last_s {
+            self.last_s = s;
+            self.last_px = px;
+        }
+        self.n = self.n.saturating_add(1);
+    }
+    /// One TWAP sample (same units).
+    pub fn on_twap(&mut self, ts_ms: i64, px: i64) {
+        if px <= 0 {
+            return;
+        }
+        let s = ts_ms.div_euclid(1_000);
+        self.twap.put(s, px);
+        if self.n_twap == 0 || s >= self.twap_s {
+            self.twap_s = s;
+        }
+        self.n_twap = self.n_twap.saturating_add(1);
+    }
+    /// The TWAP of the latest sample at or before UTC second `sec`, looking back at most
+    /// `CL_FRESH_S` seconds.
+    pub fn twap_at(&self, sec: i64) -> Option<i64> {
+        (0..=CL_FRESH_S).find_map(|k| self.twap.exact(sec - k))
+    }
     /// Payload v1 (17 bytes, little endian): version u8 = 1, Chainlink timestamp ms i64, price
     /// 1e-8 USD i64. Other versions, short payloads and non-positive prices are ignored; a sample
     /// older than the latest only fills its own second.
@@ -207,16 +244,7 @@ impl ClFeed {
         let (Some(ts), Some(px)) = (field(1), field(9)) else {
             return;
         };
-        if px <= 0 {
-            return;
-        }
-        let s = ts.div_euclid(1_000);
-        self.sec.put(s, px);
-        if self.n == 0 || s >= self.last_s {
-            self.last_s = s;
-            self.last_px = px;
-        }
-        self.n = self.n.saturating_add(1);
+        self.on_sample(ts, px);
     }
     /// The latest price if it is at most `CL_FRESH_S` older than UTC second `sec`.
     pub fn now(&self, sec: i64) -> Option<i64> {
@@ -224,10 +252,21 @@ impl ClFeed {
     }
 }
 
-/// Reference groups at the end of the table: the trailing groups not on the first group's (slot)
-/// venue, at most two counted (the fair-value reference, then the fast Coinbase reference).
-pub fn reference_count(groups: &GroupTable) -> u16 {
-    let n = usize::from(groups.len());
+/// `ref_aux` bit 0: a perpetual reference group (recorded, not read by the rules).
+pub const AUX_PERP: u32 = 1;
+/// `ref_aux` bit 1: a Chainlink group (`Index` = price, `Mark` = 60 s TWAP).
+pub const AUX_CL: u32 = 2;
+
+/// Auxiliary groups of `ref_aux` (bits 0 and 1), placed in that order after the reference groups.
+pub fn aux_count(ref_aux: u32) -> u16 {
+    u16::from(ref_aux & AUX_PERP != 0) + u16::from(ref_aux & AUX_CL != 0)
+}
+
+/// Reference groups at the end of the table before the last `aux` (auxiliary) groups: the
+/// trailing groups not on the first group's (slot) venue, at most three counted (two allowed:
+/// the fair-value reference, then the fast Coinbase reference).
+pub fn reference_count(groups: &GroupTable, aux: u16) -> u16 {
+    let n = usize::from(groups.len()).saturating_sub(usize::from(aux));
     let slot_venue = groups
         .iter()
         .next()
@@ -248,13 +287,27 @@ pub fn reference_count(groups: &GroupTable) -> u16 {
 }
 
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
-/// ignores them) and the BBO of the reference legs (the last one or two groups).
-pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
+/// ignores them), the BBO of the reference legs (the one or two groups before the auxiliary
+/// ones), BBO, book and trades of the perpetual group and price and TWAP of the Chainlink group
+/// (`ref_aux`).
+pub fn subscribe(groups: &GroupTable, ref_aux: u32, out: &mut SubsBuilder<'_>) {
     let n = groups.len();
-    let refs = reference_count(groups).max(1);
+    let aux = aux_count(ref_aux);
+    let refs = reference_count(groups, aux).max(1);
+    let perp_gix = if ref_aux & AUX_PERP != 0 {
+        n.wrapping_sub(aux)
+    } else {
+        u16::MAX
+    };
     for (gix, g) in groups.iter() {
         let Some(l) = g.legs.first() else { continue };
-        let mask = if gix + refs >= n {
+        let mask = if gix + aux >= n {
+            if gix == perp_gix {
+                EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0)
+            } else {
+                EvMask(EvMask::INDEX.0 | EvMask::MARK.0)
+            }
+        } else if gix + refs + aux >= n {
             EvMask::BBO
         } else {
             EvMask(EvMask::BOOK.0 | EvMask::TRADE.0)
@@ -664,6 +717,13 @@ pub struct Fast {
     /// The second reference group's inst (native Coinbase BBO for the v37 guard); `INST_NONE`
     /// without one (then the guard reads the sidecar's InjectWarmup samples).
     pub reference2: InstId,
+    /// v41 auxiliary groups (`ref_aux`): the perpetual reference (recorded only) and the native
+    /// Chainlink group; `INST_NONE` without them. Their events never run the rules.
+    pub perp: InstId,
+    pub clref: InstId,
+    /// Chainlink price units (the Chainlink inst's px) per 1e-8 USD, as a multiplier (10^(8 + px_exp));
+    /// 0 = unknown (no native samples are used).
+    pub cl_mul: i64,
     /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
     /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
     /// the fair value reads (0 = off or not ready: the first reference's own mid).
@@ -719,6 +779,9 @@ impl Fast {
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
             reference2: INST_NONE,
+            perp: INST_NONE,
+            clref: INST_NONE,
+            cl_mul: 0,
             fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
@@ -759,12 +822,24 @@ impl Fast {
         let old_kind = std::mem::take(&mut self.skind);
         let mut kind = Vec::with_capacity(usize::from(groups.len()));
         let n = groups.len();
-        let refs = reference_count(groups).max(1);
+        let ref_aux = p.defaults().ref_aux;
+        let aux = aux_count(ref_aux);
+        let refs = reference_count(groups, aux).max(1);
         self.reference2 = INST_NONE;
+        self.perp = INST_NONE;
+        self.clref = INST_NONE;
         for (gix, g) in groups.iter() {
             let Some(l) = g.legs.first() else { continue };
-            if gix + refs >= n {
-                if gix + refs == n {
+            if gix + aux >= n {
+                if ref_aux & AUX_PERP != 0 && gix + aux == n {
+                    self.perp = l.inst;
+                } else {
+                    self.clref = l.inst;
+                }
+                continue;
+            }
+            if gix + refs + aux >= n {
+                if gix + refs + aux == n {
                     self.reference = l.inst;
                 } else {
                     self.reference2 = l.inst;
@@ -969,6 +1044,42 @@ impl Fast {
 
     pub fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
         self.outcomes(ctx);
+        // v41 auxiliary groups: Chainlink samples are stored, perpetual events only recorded;
+        // neither runs the features or the rules (decisions as without them).
+        if self.clref != INST_NONE || self.perp != INST_NONE {
+            match *ev {
+                EventRef::Index {
+                    inst, px, ex_ts_ns, ..
+                } if inst == self.clref => {
+                    if self.cl_mul > 0 {
+                        self.cl
+                            .on_sample(ex_ts_ns.div_euclid(1_000_000), px.0.saturating_mul(self.cl_mul));
+                    }
+                    return;
+                }
+                EventRef::Mark {
+                    inst, px, ex_ts_ns, ..
+                } if inst == self.clref => {
+                    if self.cl_mul > 0 {
+                        self.cl
+                            .on_twap(ex_ts_ns.div_euclid(1_000_000), px.0.saturating_mul(self.cl_mul));
+                    }
+                    return;
+                }
+                EventRef::Bbo { inst, .. } | EventRef::Book { inst, .. } | EventRef::Trade { inst, .. }
+                    if inst == self.perp =>
+                {
+                    return;
+                }
+                // The sidecar's samples are ignored once the native group exists.
+                EventRef::Warmup { local_kind, .. }
+                    if local_kind == CL_WARMUP_KIND && self.clref != INST_NONE =>
+                {
+                    return;
+                }
+                _ => {}
+            }
+        }
         let cfg = self.plan_cfg();
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
