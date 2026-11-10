@@ -1187,10 +1187,22 @@ fn pm_presign(v: &Venue) -> Result<Option<venue_polymarket::Presign>, Error> {
     let Some(p) = &v.presign else {
         return Ok(None);
     };
-    p.step_e6()
-        .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
+    pm_presign_of(p)
         .map(Some)
         .ok_or_else(|| Error::config("BadValue", "venues.<v>.presign"))
+}
+
+/// `p` as venue-polymarket's `Presign`, with the price grid when `grid_qty` is present; `None`
+/// when a value is out of range.
+#[cfg(feature = "polymarket")]
+fn pm_presign_of(p: &crate::config::PresignOpts) -> Option<venue_polymarket::Presign> {
+    let base = p
+        .step_e6()
+        .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))?;
+    if p.grid_qty.is_none() {
+        return Some(base);
+    }
+    base.with_grid(p.grid_qty_e6()?)
 }
 
 /// Load-time check of `venues.<name>.presign` (README "配置文件字段"): only `polymarket-clob`
@@ -1203,11 +1215,11 @@ pub fn presign_error(name: &str, v: &Venue) -> Option<Error> {
     }
     #[cfg(feature = "polymarket")]
     {
-        if p.step_e6()
-            .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
-            .is_none()
-        {
-            return bad("below + above < 8, step > 0 with at most 6 decimals, max_age_ms 1000-240000");
+        if pm_presign_of(p).is_none() {
+            return bad(
+                "below + above < 8, step > 0 with at most 6 decimals, max_age_ms 1000-240000; \
+                 grid_qty > 0 with at most 6 decimals and a step that divides 1 into 2-129 steps",
+            );
         }
     }
     #[cfg(not(feature = "polymarket"))]

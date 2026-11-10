@@ -1860,6 +1860,7 @@ fn core_445_venue_presign() {
             above: 1,
             step: s.into(),
             max_age_ms: 30_000,
+            grid_qty: None,
         }
         .step_e6()
     };
@@ -1971,6 +1972,43 @@ fn core_445_venue_presign() {
             (2, 2, Some(10_000), 60_000),
             "CORE-445.4"
         );
+        assert_eq!(
+            (p.grid_qty.as_deref(), p.grid_qty_e6()),
+            (None, None),
+            "CORE-445.4"
+        );
+        // .5 the price grid: `grid_qty` is decimal shares text; the step must divide 1 into
+        // 2..=129 steps.
+        let grid = |step: &str, qty: &str| format!("{}grid_qty = \"{qty}\"\n", table(3, 1, step, 30_000));
+        for (step, qty, e6) in [("0.01", "5", 5_000_000), ("0.5", "0.25", 250_000)] {
+            with(grid(step, qty));
+            let l = match hft_core::config::load(&pm, false) {
+                Ok(l) => l,
+                Err(e) => panic!("CORE-445.5 {step} {qty}: {e:?}"),
+            };
+            let p = l.cfg.venues["pm"].presign.clone().unwrap();
+            assert_eq!(
+                (p.grid_qty.as_deref(), p.grid_qty_e6()),
+                (Some(qty), Some(e6)),
+                "CORE-445.5"
+            );
+        }
+        for (step, qty) in [
+            ("0.01", "0"),
+            ("0.01", "5.0000001"),
+            ("0.01", "-5"),
+            ("0.01", ""),
+            ("0.03", "5"),
+            ("0.005", "5"),
+            ("1", "5"),
+        ] {
+            with(grid(step, qty));
+            let e = hft_core::config::load(&pm, false).unwrap_err();
+            assert!(
+                e.iter().any(|e| e.code == "BadValue"),
+                "CORE-445.5 {step} {qty}: {e:?}"
+            );
+        }
     }
 }
 

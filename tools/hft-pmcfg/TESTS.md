@@ -15,11 +15,11 @@ spec: README.md
 | 概要 | PMC-005 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 见子节 |
-| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009、PMC-010、PMC-011 |
+| 命令行 | PMC-001、PMC-002、PMC-005、PMC-007、PMC-008、PMC-009、PMC-010、PMC-011、PMC-012、PMC-013 |
 | 多账户 | PMC-001、PMC-003、PMC-004 |
 | 参考行情 | PMC-008、PMC-011 |
 | 绑核 | PMC-010、PMC-011 |
-| 库 | PMC-004、PMC-005、PMC-006、PMC-007、PMC-008 |
+| 库 | PMC-004、PMC-005、PMC-006、PMC-007、PMC-008、PMC-013 |
 | 实现说明 | PMC-005、PMC-006 |
 | 延迟与资源契约 | 不适用:无门槛 |
 | 测试与验收 | 不适用:非规范 |
@@ -198,6 +198,36 @@ spec: README.md
 | PMC-011.3 | 实盘配置;`--no-perp --no-chainlink` | 两者都有,无 `live_feed`,`cl.md_login` 的 secret 与 `pm-live` 账户的 `rest_secret_path` 相同;10 个 group / 都没有、8 个 group |
 | PMC-011.4 | `--no-chainlink` 无 `--live`;`--no-perp`、`--cl-keys` 无模式;`--cl-keys` 与 `--no-chainlink` 同用 | 退出 2,标准错误含相应原因 |
 | PMC-011.5 | 实盘 `--cpu-plan spin` | `feed:bp` 核 2、`park_us` 20;`feed:cl` 核 0、`park_us` 1 000;`conn-builder:cl` 核 0 |
+
+### PMC-012 `--presign-grid` 的解析
+
+- 规则:[命令行](README.md#命令行)(`--presign-grid`)
+- 级别:table
+- 里程碑:M6
+- 前置:位置参数 `out hot 10.0.0.5 ens5`;`L` = `--live 12345 k1` 加位置参数
+- 实现:`tools/hft-pmcfg/tests/cli.rs::pmc_012_presign_grid_flag`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| PMC-012.1 | L | `presign = true`、`presign_grid = None` |
+| PMC-012.2 | L 加 `--presign-grid 5` / `0.5` / `12.345678`;`--taker-probe --presign-grid 5` + L | `presign_grid` = 所给文本(`presign` 仍为 true);LiveProbe 同样 |
+| PMC-012.3 | L 加 `--presign-grid` `0`、`0.0`、`abc`、`+5`、`-5`、`.5`、`5.0000001`、`4295` | 拒绝:含 `--presign-grid: SHARES must be` |
+| PMC-012.4 | `--presign-grid 5` 无 `--live`(无模式、`--maker`);L 加 `--no-presign --presign-grid 5`;给两次;缺 SHARES | 拒绝:`--presign-grid needs --live`;`--presign-grid and --no-presign are exclusive`;`given twice`;`--presign-grid: missing SHARES` |
+
+### PMC-013 `presign_grid` 的输出:`venues.pm.presign` 加 `grid_qty`
+
+- 规则:[命令行](README.md#命令行)(`--presign-grid`)、[库](README.md#库)
+- 级别:unit
+- 里程碑:M6
+- 前置:`write_polymarket_maker_live`(UID `12345`、目录 k1);已构建的 `hft-pmcfg` 二进制
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_013_presign_grid_output`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-013.1 | 缺省的实盘配置 | `venues.pm.presign` 等于 `PM_LIVE_PRESIGN`,无 `grid_qty` |
+| PMC-013.2 | `presign_grid = Some("5")` | 同一张表另加 `grid_qty = "5"`;其余五个文件与缺省逐字节相同 |
+| PMC-013.3 | 工具 `--live 12345 k1 --presign-grid 5` | 退出 0;六个文件与 .2 的库输出逐字节相同 |
+| PMC-013.4 | `presign = false` 而 `presign_grid = Some("5")`;`presign_grid` 为 `0`、`abc`、`5.0000001`、`-5`;`presign_grid_e6` 对 `5`、`0.5`、`0`、`x`、`4295` | 库拒绝(含 `presign_grid needs presign`;含 `presign_grid`),不写输出目录;5 000 000、500 000、其余 `None` |
 
 ## 验收
 

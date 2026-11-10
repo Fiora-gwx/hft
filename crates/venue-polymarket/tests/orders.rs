@@ -1415,6 +1415,173 @@ fn pmk_035_presigned_orders() {
     assert_eq!(idle_all(&mut c, NOW_MS), 2, "PMK-035.8");
 }
 
+/// Idle steps, one per millisecond after `*ms`, until 40 in a row sign nothing (a pass over the
+/// whole price grid takes fewer); returns how many signed an order.
+fn grid_idle(ctx: &mut GwCtx, ms: &mut i64) -> usize {
+    let (mut signed, mut quiet) = (0, 0);
+    while quiet < 40 {
+        *ms += 1;
+        if idle_at(ctx, *ms) {
+            signed += 1;
+            quiet = 0;
+        } else {
+            quiet += 1;
+        }
+    }
+    signed
+}
+
+#[test]
+fn pmk_042_presign_grid() {
+    use venue_polymarket::{GRID_PRICES, Presign};
+    const T: u64 = NOW_MS as u64;
+    let base = Presign::new(1, 1, 10_000, 30_000).unwrap();
+    let grid = base.with_grid(5_000_000).unwrap();
+    let place = |side, px, qty| cmd(GwOp::Place, UP, side, px, qty, Tif::PostOnly);
+    let buy = |px| place(Side::Buy, px, 5_000_000);
+    let up_only = || {
+        let mut c = GwCtx::default();
+        c.set_presign(grid);
+        Pm::bind_order_wire(&mut c, UP, &parse_u256(T_UP).unwrap()).unwrap();
+        c
+    };
+    // .1 configuration bounds: a size > 0 and a step that divides 1 into 2..=129 steps.
+    assert_eq!((base.grid_qty_e6, grid.grid_qty_e6), (0, 5_000_000), "PMK-042.1");
+    assert_eq!(GRID_PRICES, 128, "PMK-042.1");
+    let steps = |step| {
+        Presign::new(1, 1, step, 30_000)
+            .unwrap()
+            .with_grid(5_000_000)
+            .is_some()
+    };
+    assert!(base.with_grid(0).is_none(), "PMK-042.1");
+    assert_eq!(
+        [10_000, 500_000, 8_000, 1_000_000, 5_000, 7_000, 3_000_000].map(steps),
+        [true, true, true, false, false, false, false],
+        "PMK-042.1"
+    );
+    // .2 without the grid (and without an anchor) bound insts give the idle step nothing to do.
+    let mut c = ctx();
+    c.set_presign(base);
+    let mut ms = NOW_MS;
+    assert_eq!((grid_idle(&mut c, &mut ms), c.presigned()), (0, 0), "PMK-042.2");
+    // .3 the grid signs the 99 prices 0.01 … 0.99 of a bound inst, one per millisecond (the
+    // timestamp is the clock's), then has nothing to do.
+    let mut c = up_only();
+    assert!(idle_at(&mut c, NOW_MS + 1), "PMK-042.3");
+    assert!(!idle_at(&mut c, NOW_MS + 1), "PMK-042.3: one per millisecond");
+    let mut ms = NOW_MS + 1;
+    assert_eq!(grid_idle(&mut c, &mut ms), 98, "PMK-042.3");
+    assert_eq!(c.presigned(), 99, "PMK-042.3");
+    assert_eq!(ms, NOW_MS + 99 + 40, "PMK-042.3");
+    assert!(!idle_at(&mut c, ms + 1) && !idle_at(&mut c, ms + 1), "PMK-042.3");
+    let full = c.clone();
+    // .4 a buy of the grid size at any grid price uses its pre-signed order (price k × 0.01 was
+    // signed at T + k) …
+    let mut all = full.clone();
+    for k in 1..=99u64 {
+        let (ts, salt, ok) = body_order(&encode_at(&mut all, &buy(k as i64 * 10), &tgt(0), ms + 1));
+        assert!(ok, "PMK-042.4 {k}");
+        assert_eq!((ts, salt & 0xF_FFFF), (T + k, 0), "PMK-042.4 {k}");
+    }
+    assert_eq!(all.presigned(), 0, "PMK-042.4");
+    // A second buy at a used price is signed at the place; the idle steps sign the 99 prices
+    // again and nothing else (a place the grid covers sets no anchor).
+    let (ts, salt, ok) = body_order(&encode_at(&mut all, &buy(420), &tgt(0), ms + 1));
+    assert!(ok, "PMK-042.4");
+    assert_eq!((ts, salt & 0xF_FFFF), (ms as u64 + 1, 7), "PMK-042.4");
+    let mut at = ms + 1;
+    assert_eq!(
+        (grid_idle(&mut all, &mut at), all.presigned()),
+        (99, 99),
+        "PMK-042.4"
+    );
+    // … once: the next idle step signs that price again, and the place set no anchor.
+    let pre = encode_at(&mut c, &buy(420), &tgt(0), ms + 1);
+    let salt = ((T + 42) & ((1 << 33) - 1)) << 20;
+    assert_eq!(body_order(&pre), (T + 42, salt, true), "PMK-042.4");
+    assert_eq!(c.presigned(), 98, "PMK-042.4");
+    let r = encode_mut(&mut c, &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(0)).unwrap();
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"orderID\":\"{}\"}}", signed_hash(&pre)),
+        "PMK-042.4"
+    );
+    ms += 1;
+    assert_eq!((grid_idle(&mut c, &mut ms), c.presigned()), (1, 99), "PMK-042.4");
+    let resigned = T + 99 + 40 + 2;
+    let (ts, _, ok) = body_order(&encode_at(&mut c, &buy(420), &tgt(0), ms + 1));
+    assert!(ok && ts == resigned, "PMK-042.4 {ts}");
+    // .5 another size, a sell and a price off the grid are signed at the place; they anchor as
+    // without the grid (three prices around the place).
+    for (i, (side, px, qty)) in [
+        (Side::Buy, 420, 6_000_000),
+        (Side::Sell, 420, 5_000_000),
+        (Side::Buy, 425, 5_000_000),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut c = full.clone();
+        let (ts, salt, ok) = body_order(&encode_at(&mut c, &place(side, px, qty), &tgt(0), ms + 1));
+        assert!(ok, "PMK-042.5 {i}");
+        assert_eq!((ts, salt & 0xF_FFFF), (ms as u64 + 1, 7), "PMK-042.5 {i}");
+        let mut at = ms + 1;
+        assert_eq!(
+            (grid_idle(&mut c, &mut at), c.presigned()),
+            (3, 102),
+            "PMK-042.5 {i}"
+        );
+    }
+    // .6 ageing: an entry is signed again from 3/4 of `max_age_ms` (0.01, signed at T + 1, is the
+    // first); past `max_age_ms` it is not used.
+    let mut c = full.clone();
+    assert!(!idle_at(&mut c, NOW_MS + 1 + 22_499), "PMK-042.6");
+    assert!(idle_at(&mut c, NOW_MS + 1 + 22_500), "PMK-042.6");
+    let mut c = full.clone();
+    let (ts, _, ok) = body_order(&encode_at(&mut c, &buy(420), &tgt(0), NOW_MS + 42 + 30_000));
+    assert!(ok && ts == T + 42, "PMK-042.6");
+    let mut c = full.clone();
+    let (ts, _, ok) = body_order(&encode_at(&mut c, &buy(420), &tgt(0), NOW_MS + 42 + 30_001));
+    assert!(ok && ts == T + 42 + 30_001, "PMK-042.6");
+    assert_eq!(
+        c.presigned(),
+        99,
+        "PMK-042.6: the stale entry stays until it is signed again"
+    );
+    // .7 rebinding the inst empties its row; the grid is signed again for the new token. An
+    // unbound inst has no grid.
+    let mut c = full.clone();
+    let other = "12345678901234567890";
+    Pm::bind_order_wire(&mut c, UP, &parse_u256(other).unwrap()).unwrap();
+    assert_eq!(c.presigned(), 0, "PMK-042.7");
+    let mut at = ms;
+    assert_eq!((grid_idle(&mut c, &mut at), c.presigned()), (99, 99), "PMK-042.7");
+    let r = encode_at(&mut c, &buy(420), &tgt(0), at + 1);
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let (ts, salt, ok) = body_order(&r);
+    assert!(
+        ok && ts == ms as u64 + 42 && salt & 0xF_FFFF == 0,
+        "PMK-042.7 {ts}"
+    );
+    assert_eq!(b["order"]["tokenId"], other, "PMK-042.7");
+    Pm::bind_order_wire(&mut c, UP, &[0; 32]).unwrap();
+    assert_eq!((c.presigned(), grid_idle(&mut c, &mut at)), (0, 0), "PMK-042.7");
+    // .8 insts bound before pre-signing is enabled are in the grid too.
+    let mut c = ctx();
+    c.set_presign(grid);
+    let mut at = NOW_MS;
+    assert_eq!(
+        (grid_idle(&mut c, &mut at), c.presigned()),
+        (198, 198),
+        "PMK-042.8"
+    );
+    let dn = cmd(GwOp::Place, DN, Side::Buy, 370, 5_000_000, Tif::PostOnly);
+    let (ts, salt, ok) = body_order(&encode_at(&mut c, &dn, &tgt(0), at + 1));
+    assert!(ok && ts < at as u64 && salt & 0xF_FFFF == 0, "PMK-042.8 {ts}");
+    assert_eq!(c.presigned(), 197, "PMK-042.8");
+}
+
 #[test]
 fn pmk_037_cancels_have_their_own_rate_rule() {
     use hft_refdata::{LimitBucket, LimitScope};

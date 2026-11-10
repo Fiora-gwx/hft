@@ -1,4 +1,4 @@
-//! Command-line parsing (TESTS.md PMC-001–PMC-003).
+//! Command-line parsing (TESTS.md PMC-001–PMC-003, PMC-009, PMC-010, PMC-012).
 use std::path::PathBuf;
 
 use hft_pmcfg::cli::{Mode, parse};
@@ -370,4 +370,62 @@ fn pmc_010_cpu_plan_flag() {
     assert!(e.contains("none|pin|spin"), "PMC-010.3: {e}");
     let e = parse(&args(&format!("--cpu-plan pin --cpu-plan spin {POS}"))).unwrap_err();
     assert!(e.contains("given twice"), "PMC-010.3: {e}");
+}
+
+#[test]
+fn pmc_012_presign_grid_flag() {
+    let live = |flags: &str| parse(&args(&format!("--live 12345 k1 {flags} {POS}")));
+    // .1 default: no price grid.
+    let Mode::Live(l) = live("").unwrap().mode else {
+        panic!("PMC-012.1")
+    };
+    assert_eq!((l.presign, l.presign_grid), (true, None), "PMC-012.1");
+    // .2 --presign-grid SHARES keeps the text; also with --taker-probe.
+    for shares in ["5", "0.5", "12.345678"] {
+        let Mode::Live(l) = live(&format!("--presign-grid {shares}")).unwrap().mode else {
+            panic!("PMC-012.2")
+        };
+        assert_eq!(
+            (l.presign, l.presign_grid.as_deref()),
+            (true, Some(shares)),
+            "PMC-012.2"
+        );
+    }
+    let Mode::LiveProbe(l) = live("--taker-probe --presign-grid 5").unwrap().mode else {
+        panic!("PMC-012.2")
+    };
+    assert_eq!(l.presign_grid.as_deref(), Some("5"), "PMC-012.2");
+    // .3 refused: not a decimal > 0 with at most 6 places (digits only, within u32 1e-6 shares).
+    for shares in ["0", "0.0", "abc", "+5", "-5", ".5", "5.0000001", "4295"] {
+        let e = live(&format!("--presign-grid {shares}")).unwrap_err();
+        assert!(
+            e.contains("--presign-grid: SHARES must be"),
+            "PMC-012.3 {shares}: {e}"
+        );
+    }
+    // .4 refused: without --live, with --no-presign, twice, without a value.
+    for (line, want) in [
+        (format!("--presign-grid 5 {POS}"), "--presign-grid needs --live"),
+        (
+            format!("--maker --presign-grid 5 {POS}"),
+            "--presign-grid needs --live",
+        ),
+        (
+            format!("--live 12345 k1 --no-presign --presign-grid 5 {POS}"),
+            "--presign-grid and --no-presign are exclusive",
+        ),
+        (
+            format!("--live 12345 k1 --presign-grid 5 --presign-grid 6 {POS}"),
+            "given twice",
+        ),
+        (
+            format!("--live 12345 k1 {POS} --presign-grid"),
+            "--presign-grid: missing SHARES",
+        ),
+    ] {
+        match parse(&args(&line)) {
+            Ok(c) => panic!("PMC-012.4: accepted {c:?}"),
+            Err(e) => assert!(e.contains(want), "PMC-012.4 {line}: {e}"),
+        }
+    }
 }
