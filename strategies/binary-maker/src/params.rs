@@ -443,7 +443,7 @@ hft_strategy_sdk::define_params! {
         lead_only: Bool [default = 0, since = 42, relax = Down],
         /// rule 15 trigger sources (bits): 1 = the perpetual reference, 2 = the fair-value (spot)
         /// reference; each source and direction has its own cool-down
-        lead_src: Count [min = 0, max = 3, default = 1, since = 43, relax = None],
+        lead_src: Count [min = 0, max = 7, default = 1, since = 43, relax = None],
         /// rule 15 bid price: 0 = best bid + 1 cent; 1 = the model price (mid + lead_k × Delta ×
         /// |move| − lead_m, between 1 and lead_maxtick cents above the bid, below the ask)
         lead_price: Count [min = 0, max = 1, default = 0, since = 43, relax = None],

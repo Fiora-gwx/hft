@@ -46,6 +46,8 @@ pub const LEAD_LAST_MS: i64 = 10_000;
 /// Rule 15 trigger sources (`lead_src` bits): the perpetual and the fair-value (spot) reference.
 pub const LEAD_SRC_PERP: u32 = 1;
 pub const LEAD_SRC_SPOT: u32 = 2;
+/// Research: the second (Coinbase) reference as a rule-15 trigger source.
+pub const LEAD_SRC_CB: u32 = 4;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -1161,6 +1163,9 @@ impl Fast {
             EventRef::Bbo { inst, b, .. } if inst == self.reference2 && inst != INST_NONE => {
                 let (ens, mid_x2) = (v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
                 self.cb.on_bbo(ens, mid_x2);
+                if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_CB != 0 {
+                    self.lead_quote(LEAD_SRC_CB, mid_x2, v, ctx);
+                }
                 let w = self.p.defaults().ref_cb_w.0;
                 if w > 0 {
                     self.fuse.on_second(mid_x2, ens, self.feat.top.mid_x2, w);
@@ -1294,10 +1299,10 @@ impl Fast {
             return;
         }
         let perp = src == LEAD_SRC_PERP;
-        if perp {
-            self.lead.ring.push(ens, mid_x2);
-        } else {
-            self.lead.spot.push(ens, mid_x2);
+        match src {
+            LEAD_SRC_PERP => self.lead.ring.push(ens, mid_x2),
+            LEAD_SRC_CB => self.lead.cb.push(ens, mid_x2),
+            _ => self.lead.spot.push(ens, mid_x2),
         }
         let d = *self.p.defaults();
         let n = self.quotes.len();
@@ -1353,14 +1358,18 @@ impl Fast {
                 m.last_ens = ens;
             }
         }
-        let ring = if perp { &self.lead.ring } else { &self.lead.spot };
+        let ring = match src {
+            LEAD_SRC_PERP => &self.lead.ring,
+            LEAD_SRC_CB => &self.lead.cb,
+            _ => &self.lead.spot,
+        };
         let move_ = ring
             .at_or_before(ens - i64::from(d.lead_w_ms) * ms)
             .map(|base| ret(mid_x2, base));
-        let trigger = if perp {
-            &mut self.lead.lead
-        } else {
-            &mut self.lead.lead_spot
+        let trigger = match src {
+            LEAD_SRC_PERP => &mut self.lead.lead,
+            LEAD_SRC_CB => &mut self.lead.lead_cb,
+            _ => &mut self.lead.lead_spot,
         };
         if in_range
             && d.lead_src & src != 0

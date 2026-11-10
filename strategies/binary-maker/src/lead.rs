@@ -139,6 +139,9 @@ pub struct LeadState {
     /// The fair-value (spot) reference's mids and its own lead trigger (`lead_src` bit 1).
     pub spot: PerpRing,
     pub lead_spot: Trigger,
+    /// The second (Coinbase) reference's mids and its own lead trigger (`lead_src` bit 2; research).
+    pub cb: PerpRing,
+    pub lead_cb: Trigger,
     pub win: i64,
     /// Per slot leg (quote order).
     pub legs: Vec<LeadLeg>,
@@ -156,6 +159,7 @@ impl LeadState {
             self.lead = Trigger::default();
             self.pc = Trigger::default();
             self.lead_spot = Trigger::default();
+            self.lead_cb = Trigger::default();
             for a in &mut self.armed {
                 *a = None;
             }
