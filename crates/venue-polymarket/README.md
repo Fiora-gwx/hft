@@ -64,9 +64,13 @@ impl GwCtx {
     pub fn set_presign(&mut self, p: Presign);   // 启动期;不调用 = 关(默认)
     pub fn presigned(&self) -> usize;            // 当前持有的预签名订单数
 }
-pub struct Presign { pub below: u8, pub above: u8, pub step_e6: u32, pub max_age_ms: u32 }
-impl Presign { pub fn new(below: u8, above: u8, step_e6: u32, max_age_ms: u32) -> Option<Presign>; }
+pub struct Presign { pub below: u8, pub above: u8, pub step_e6: u32, pub max_age_ms: u32, pub grid_qty_e6: u32 }
+impl Presign {
+    pub fn new(below: u8, above: u8, step_e6: u32, max_age_ms: u32) -> Option<Presign>;   // 价格网格关
+    pub fn with_grid(self, qty_e6: u32) -> Option<Presign>;                                // 开价格网格(见"预签名")
+}
 pub const PRESIGN_PRICES: usize = 8;
+pub const GRID_PRICES: usize = 128;
 ```
 
 ### 端点
@@ -253,8 +257,15 @@ hft-venue `gw.cancel_race = true` 时,按订单哈希的撤单(`DELETE /order`)�
 - **签什么**:每个 inst 以它最近一次 `Place` 的方向、数量与价格为锚,签锚价 −`below`…+`above` 个 `step` 的各价位(`below + 1 + above ≤ PRESIGN_PRICES`;价格须在 (0, 1) 内,`step_e6` 是 1e-6 USDC,须是该 inst 价格单位的整数倍)。签名结构里没有 `expiration` 与 `postOnly`,两者在下单时写入请求体(GTD 寿命从下单时算)。每账户至多 256 张预签名订单(开启时分配一次),满了替换最旧的一张;最多 64 个 inst 有锚。
 - **用哪张**:`Place` 的 inst、代币、方向、价格与数量都相同,且签名后不超过 `max_age_ms` 的那张;用过即删除(每张只用一次,哈希一经下单或撤单即作废,见[先撤后到](#下单))。没有匹配的照常当场签名。`salt` 低 20 位为 0(签名时不知道槽号);`timestamp` 是签名时刻,与当场签名的订单共用同一递增序列,所以全账户唯一。
 - **刷新**:一张签名后达到 `max_age_ms` 的 3/4 即重签(同价位的旧单被替换);`max_age_ms` 取 1 000–240 000 ms。签名时刻作为 `timestamp`;交易所是否对过旧的 `timestamp` 拒单未实测,`max_age_ms` 取值以实测为准。
-- **作废**:inst 改绑代币或解绑(`BindWire`)时清掉该 inst 的锚与预签名订单。
+- **作废**:inst 改绑代币或解绑(`BindWire`)时清掉该 inst 的锚与预签名订单(含它的价格网格)。
 - **空闲工作**:每次 `gw_idle` 至多签一张(约 85–95 µs,与当场签名相同)。全部新鲜时返回 `false`,不占用 gw;在途命令最多因此等一张签名的时间,不比当场签名更差。
+
+**价格网格**(`Presign::with_grid(qty_e6)`,hft-core 的 `venues.<v>.presign.grid_qty`;默认关)。锚只覆盖上一单附近的价位;价格事先不知道、所在 inst 近期没有下过单的固定数量买单用价格网格:
+
+- **签什么**:该账户每个已绑定代币的 inst(`BindWire`;开启之前已绑定的也算)在 `step` 的每个整数倍价位 k × `step`(k = 1 … 1/`step` − 1,即 (0, 1) 内的全部网格价;`step` 0.01 → 99 个)上各常备一张数量为 `qty_e6`(1e-6 份)的买单。`with_grid` 要求 `qty_e6 > 0`、`step_e6` 整除 1 000 000 且每个 inst 的价位数 1/`step` − 1 在 1–`GRID_PRICES`(128)之内,否则返回 `None`。至多 16 个 inst 有网格(开启时一次分配 16 × 价位数张,99 个价位约 1 MB);更多的 inst、以及 `step` 或数量不是其价格、数量单位整数倍的 inst 没有网格。
+- **用哪张**:`Place` 是买单、数量等于网格数量、价格是 `step` 的整数倍时,按(inst,价格 / `step`)直接取那一张,不扫描;代币相同且签名后不超过 `max_age_ms` 即使用,用过即空。未命中(还没签好、已过期)与其余订单(别的数量、卖单、不在网格上的价格)照常:先找锚的预签名订单,没有则当场签名。网格覆盖的订单不设锚(同一张单不签两份);FAK/FOK 单不用网格。`timestamp`、`salt` 的规则与锚的预签名订单相同。
+- **刷新与作废**:签名后达到 `max_age_ms` 的 3/4 即重签;用掉的价位在下一次空闲重签;inst 改绑时清空它的全部价位并为新代币重签,解绑时让出它的网格。
+- **空闲工作**:锚的订单在先;没有锚的工作时,`gw_idle` 从轮转游标起至多看 64 个价位的签名时刻,给第一张空的或到期的签名(仍是一次调用至多一张)。网格订单的 `timestamp` 取时钟的当前毫秒、不超前于时钟,所以每毫秒至多签一张:一个 inst 改绑后约 0.1 s 签齐 99 个价位,其间还没签好的价位当场签名。看完一整轮都没有可签的,记下最早的到期时刻,此前的 `gw_idle` 只做一次比较就返回 `false`。稳态开销:`max_age_ms` 60 000 时每张每 45 s 重签一次,6 个 inst × 99 个价位约 13 张/s,约占 gw 时间的 0.12%;`Place` 最多等一张签名。
 
 ### 用户流事件表
 
@@ -323,7 +334,7 @@ hft-venue `gw.cancel_race = true` 时,按订单哈希的撤单(`DELETE /order`)�
 | `src/bind.rs` | 绑定表与合成序号(固定容量,构造时分配一次) |
 | `src/md.rs` | 分类、`peek`、三种消息的解码 |
 | `src/session.rs` | 路由、端点、订阅帧、心跳、用户频道登录帧 |
-| `src/presign.rs` | 预签名订单的存放、锚与空闲签名([预签名](#预签名)) |
+| `src/presign.rs` | 预签名订单的存放、锚、价格网格与空闲签名([预签名](#预签名)) |
 | `src/caps.rs` | `VenueCaps`、限速、过期与死手默认值 |
 | `src/sign.rs` | EIP-712 订单与 L1 认证摘要、secp256k1 签名、L2 HMAC、地址([签名](#签名)) |
 
@@ -341,8 +352,8 @@ hft-venue `gw.cancel_race = true` 时,按订单哈希的撤单(`DELETE /order`)�
 |---|---|---|---|
 | `encode_rest_ctx(Place)`,当场签名 | ≤ 150 µs | ≤ 300 µs | `pm/encode_place_signed` |
 | `encode_rest_ctx(Cancel)`(按哈希;不派生钱包地址) | ≤ 3 µs | ≤ 10 µs | `pm/encode_cancel` |
-| `encode_rest_ctx(Place)`,有匹配的预签名订单 | ≤ 10 µs | ≤ 30 µs | `pm/encode_place_presigned` |
-| `gw_idle` 签一张预签名订单 | ≤ 150 µs | ≤ 300 µs | `pm/presign_step` |
+| `encode_rest_ctx(Place)`,有匹配的预签名订单(锚的或价格网格的) | ≤ 10 µs | ≤ 30 µs | `pm/encode_place_presigned` |
+| `gw_idle` 签一张预签名订单(锚的或价格网格的) | ≤ 150 µs | ≤ 300 µs | `pm/presign_step` |
 
 其余无基准门槛(optional,尚未进入上线门槛)。解码不分配;去重表在 `FeedCtx::with_capacity` 时分配两张 512 KiB 的表,换代时清一张;`book` 解码用两段 1000 档的 `Level` 栈数组(各 16 KiB)。2026-10-19 录制的 400 帧样本全部解码通过,重建簿的最优价与交易所给出的 `best_bid`/`best_ask` 一致([PMK-011](TESTS.md#pmk-011-实采窗口重建的最优价与交易所一致))。
 

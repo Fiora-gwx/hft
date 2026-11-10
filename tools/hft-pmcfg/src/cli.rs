@@ -9,7 +9,7 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
          [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] \
          [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
@@ -118,6 +118,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut account_cap = None;
     let mut group_cap = None;
     let mut no_presign = false;
+    let mut presign_grid: Option<String> = None;
     let mut no_cancel_race = false;
     let mut no_coinbase = false;
     let mut no_perp = false;
@@ -218,6 +219,14 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_presign, "--no-presign")?;
                 no_presign = true;
             }
+            "--presign-grid" => {
+                once(presign_grid.is_some(), "--presign-grid")?;
+                let v = next("--presign-grid", "SHARES")?;
+                if crate::presign_grid_e6(&v).is_none() {
+                    return Err("--presign-grid: SHARES must be a decimal > 0 (at most 6 places)".into());
+                }
+                presign_grid = Some(v);
+            }
             "--no-cancel-race" => {
                 once(no_cancel_race, "--no-cancel-race")?;
                 no_cancel_race = true;
@@ -265,6 +274,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let needs_live = [
         (probe, "--taker-probe"),
         (no_presign, "--no-presign"),
+        (presign_grid.is_some(), "--presign-grid"),
         (no_cancel_race, "--no-cancel-race"),
         (no_chainlink, "--no-chainlink"),
         (!extra.is_empty(), "--live-account/--account"),
@@ -297,6 +307,9 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     if cl_keys.is_some() && no_chainlink {
         return Err("--cl-keys and --no-chainlink are exclusive".into());
     }
+    if presign_grid.is_some() && no_presign {
+        return Err("--presign-grid and --no-presign are exclusive".into());
+    }
     if extra.len() > MAX_EXTRA_ACCOUNTS {
         return Err(format!(
             "--live-account/--account: at most {} accounts per venue",
@@ -320,6 +333,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 account_cap,
                 group_cap,
                 presign: !no_presign,
+                presign_grid,
                 cancel_race: !no_cancel_race,
                 extra_accounts: extra,
                 coinbase: !no_coinbase,

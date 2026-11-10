@@ -39,6 +39,24 @@ above=2
 step=\"0.01\"
 max_age_ms=60000";
 
+/// `PmLive.presign_grid` in 1e-6 shares: digits with at most 6 decimal places, > 0, and a size
+/// venue-polymarket's price grid accepts with `PM_LIVE_PRESIGN`'s step (0.01).
+pub fn presign_grid_e6(shares: &str) -> Option<u32> {
+    let (int, frac) = shares.split_once('.').unwrap_or((shares, ""));
+    if int.is_empty() || frac.len() > 6 || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let frac: u32 = format!("{frac:0<6}").parse().ok()?;
+    let e6 = int
+        .parse::<u32>()
+        .ok()?
+        .checked_mul(1_000_000)?
+        .checked_add(frac)?;
+    venue_polymarket::Presign::new(2, 2, 10_000, 60_000)?
+        .with_grid(e6)
+        .map(|p| p.grid_qty_e6)
+}
+
 /// Live `daily_loss_abs` without `PmLive.daily_loss_abs` (15 USDC).
 pub const PM_LIVE_DAILY_LOSS: i64 = 15_000_000;
 
@@ -153,6 +171,10 @@ pub struct PmLive {
     pub group_cap: Option<i64>,
     /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
     pub presign: bool,
+    /// `--presign-grid SHARES`: `venues.pm.presign.grid_qty` (venue-polymarket "预签名" price
+    /// grid: a buy of this many shares pre-signed at every 0.01), decimal text > 0 with at most 6
+    /// places; needs `presign`. `None` = not written (no grid).
+    pub presign_grid: Option<String>,
     /// `venues.pm.gw.cancel_race` (hft-venue "撤单赛跑"; owner decision 2026-11-06: on in live);
     /// false (`--no-cancel-race`) = off.
     pub cancel_race: bool,
@@ -217,6 +239,16 @@ impl PmLive {
     /// At most `MAX_EXTRA_ACCOUNTS` further accounts; labels non-empty, of `[A-Za-z0-9._-]`, not
     /// starting with `sim-` (a Live account) and unique; UIDs non-empty and unique.
     pub fn check(&self) -> Result<(), String> {
+        if let Some(q) = &self.presign_grid {
+            if !self.presign {
+                return Err("presign_grid needs presign".into());
+            }
+            if presign_grid_e6(q).is_none() {
+                return Err(format!(
+                    "presign_grid `{q}`: shares must be a decimal > 0 (at most 6 places)"
+                ));
+            }
+        }
         if self.extra_accounts.len() > MAX_EXTRA_ACCOUNTS {
             return Err(format!(
                 "at most {} accounts per venue ({MAX_EXTRA_ACCOUNTS} besides {PM_LIVE_LABEL})",
@@ -1658,7 +1690,11 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
         ))?,
     );
     if l.presign {
-        pm.insert("presign".into(), parse(PM_LIVE_PRESIGN)?);
+        let mut presign = parse(PM_LIVE_PRESIGN)?;
+        if let Some(q) = &l.presign_grid {
+            table(Some(&mut presign))?.insert("grid_qty".into(), q.as_str().into());
+        }
+        pm.insert("presign".into(), presign);
     }
     if l.cancel_race {
         pm.insert("gw".into(), parse("cancel_race = true")?);

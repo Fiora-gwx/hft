@@ -259,6 +259,11 @@ impl FeedCtx {
             .and_then(|e| e.token.get(..usize::from(e.len)))
     }
 
+    /// Every inst bound to a token now.
+    pub(crate) fn bound(&self) -> impl Iterator<Item = InstId> + '_ {
+        self.entries.iter().filter(|e| e.len != 0).map(|e| e.inst)
+    }
+
     /// Entry index and inst bound to `token` (hot path of the decoder).
     pub(crate) fn lookup(&self, token: &[u8]) -> Option<(usize, InstId)> {
         let i = self.find(token)?;

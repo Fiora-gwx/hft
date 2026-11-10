@@ -33,7 +33,8 @@ status: impl
 
 ```text
 hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
-          [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--live-account UID KEYS_DIR ...]
+          [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES]
+          [--live-account UID KEYS_DIR ...]
           [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR]
           [--cpu-plan none|pin|spin] [--param NAME=RAW ...]
           OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]
@@ -48,6 +49,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `--live UID KEYS_DIR` | 实盘做市(`order_env = "prod"`):Live 账户 `pm-live`(账户 1,venue UID `UID`),凭据文件 `KEYS_DIR/{api_key,secret,passphrase}`;参数、限额与 `--day-loss-carry`/`--daily-loss`/`--daily-loss-resumes` 的语义归  [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
 | `--taker-probe` | 只用于 `--live`:实盘吃单探针——与 `--live` 相同的 venue、槽位、账户、凭据、限额、预签名、OMS 与 REST 设置,只是策略实例换成 [pm-taker-probe](../../strategies/pm-taker-probe/README.md)(实例名 `pm-taker-probe`,一个 group = 槽位 `btc-up-0`(InstId 1),可开仓,参数为其 schema 默认值,`enabled = 0`)、价格带的 `rr_max_cross` 为 0.5(`PM_PROBE_RR_MAX_CROSS`:卖回在最优买价,半个价差可达价格的数个百分点;做市为 0.01);`--param` 改按 pm-taker-probe 的 schema 检查 |
 | `--no-presign` | 只用于 `--live`:不写 `venues.pm.presign`(缺省写 (2, 2, `0.01`, 60 000),[hft-core 配置键](../../apps/hft-core/README.md)) |
+| `--presign-grid SHARES` | 只用于 `--live`,与 `--no-presign` 互斥:在 `venues.pm.presign` 里加 `grid_qty = "SHARES"`(预签名价格网格:每个已绑定 inst 在 0.01 的每个整数倍价位常备一张 `SHARES` 份的买单,语义归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名));`SHARES` 为 > 0、至多 6 位小数的十进制数(只含数字与小数点,整数部分不可省);缺省不写(网格关) |
 | `--live-account UID KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `pm-live-<账户号>`,角色 `any`(见[多账户](#多账户)) |
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
 | `--no-coinbase` | 只用于 `--maker` 或 `--live`:不写第二个参考行情 `[venues.cb]`(缺省写:`coinbase-spot`、`id = 16`、`max_sub_insts = 1`、模拟时 `live_feed = true`,线程 `feed-cb`/`build-cb`,`[venues.cb.feed] race_rotate_s = 600`(赛跑 BBO 连接每 10 分钟评估一次,长期落后的轮换,hft-venue §3a);refdata 加 `USD` 资产(Stable,ledger 按面值计价)、Coinbase venue(端点 `wss://ws-feed.exchange.coinbase.com`、`https://api.exchange.coinbase.com`,caps 与限速取 [venue-coinbase](../../crates/venue-coinbase/README.md) 默认)与 inst `BTC-USD` = InstId 8(与 Binance 参考同一 BTC 资产,tick 0.01、lot 1e-8);ECF1 的 feeds 加该 venue;binary-maker 多一个第 8 个 group(InstId 8、不开仓、不绑账户)作为第二参考——v37 `cb_*` 保护读它的 BBO,`cb_win_ms` = 0(缺省)时不影响决定)。带此选项的输出与加入 Coinbase 之前相同,只多 `[venues.bn.feed] race_rotate_s = 600`(2026-11-07 起 Binance 赛跑连接同样轮换慢连接) |
@@ -92,6 +94,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 ```rust
 pub struct PmLive { pub uid: String, pub keys_dir: PathBuf, pub day_loss_carry: Option<(u32, i64)>,
     pub daily_loss_abs: Option<i64>, pub daily_loss_max_resumes: Option<u8>, pub presign: bool,
+    pub presign_grid: Option<String>,   // --presign-grid:份数文本;None = 不写 grid_qty;Some 需 presign = true
     pub extra_accounts: Vec<LiveAccount>, pub coinbase: bool,   // coinbase = false:--no-coinbase
     pub perp: bool, pub chainlink: bool, pub cl_keys: Option<PathBuf> }   // --no-perp、--no-chainlink、--cl-keys
 impl PmLive { pub fn refs(&self) -> Refs; }
@@ -106,6 +109,7 @@ pub fn write_polymarket_maker_live_with(.., live: &PmLive, params: &[(String, i6
 pub fn write_polymarket_taker_probe_live(.., live: &PmLive, params: &[(String, i64)]) -> Result<PathBuf, String>;
 pub enum PmStrategy { Observer, Maker, TakerProbe }   // kind_name(): book-observer | binary-maker | pm-taker-probe
 pub fn parse_param(s: &str) -> Result<(String, i64), String>;
+pub fn presign_grid_e6(shares: &str) -> Option<u32>;   // --presign-grid 的份数文本 → 1e-6 份;无效 → None
 pub fn check_maker_params(params: &[(String, i64)]) -> Result<(), String>;   // = check_params(Maker, ..)
 pub fn check_params(s: PmStrategy, params: &[(String, i64)]) -> Result<(), String>;
 pub fn engine_base(rd: &RefData, caps: &Capacities, ledger: LedgerConfig, venues: Vec<VenueId>) -> EngineSetup;

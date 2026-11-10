@@ -32,7 +32,7 @@ pub mod sign;
 
 pub use bind::{BindErr, FeedCtx, TOKEN_MAX};
 pub use orders::{GTD_S, Templates};
-pub use presign::{PRESIGN_PRICES, Presign};
+pub use presign::{GRID_PRICES, PRESIGN_PRICES, Presign};
 pub use reports::GwCtx;
 
 use hft_event::{GwCmd, GwOp};
