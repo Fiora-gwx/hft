@@ -116,6 +116,10 @@ status: impl
 | `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
 | `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
 | `lead_k` | Rate | 1 | 规则 15 模型价的重定价系数 k | None |
+| `lead_p_min` | Rate | 0(关) | 规则 15:挂单价低于它(占 1 的比例)不挂;schema v44 | None |
+| `lead_arm_ms` | DurationMs | 0(关) | 规则 15:触发时挂不了(价差 1 美分或该腿有单)的触发保留这么久,一旦能挂就挂;0–5 000;schema v45 | None |
+| `lead_exp_min` | Rate | 0(关) | 规则 15 模型价:预期重定价 E(美分)低于它不挂 | None |
+| `lead_hi_exp` / `lead_hi_shares` | Rate / Count | 0(关)/ 5 | 规则 15 模型价:E(美分)≥ `lead_hi_exp` 的领先单挂 `lead_hi_shares` 份 | None |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。`fv_limit` 至 `pred_w_ser` 为 schema v5 加入(`since` 5,v4 参数体取默认值,即 `fv_limit` 关闭)。`comp_skip` 至 `mdslow_gate_ns` 为 schema v6 加入(`since` 6,v5 参数体取默认值:`comp_skip`、`comp_dir`、`load_gate_ns`、`mdslow_gate_ns` 为 0,规则 10、11 关闭,决定与 v6 相同)。均值与标准差都是 1e-9 定点:`comp_imb1_mu` 6 035、`comp_imb1_sd` 674 103 869、`comp_imb5` 3 815 / 382 699 882、`comp_mom30` −1 799 / 165 941 588、`comp_mom60` −5 917 / 224 952 723、`comp_bret15` −28 103 / 919 829 667、`comp_bret60` −24 869 / 968 755 915、`comp_flow30` −49 610 / 6 260 786 978、`comp_bdrop1` 1 550 071 / 3 031 529 770。
 
@@ -206,6 +210,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - **领先挂单**:|ret(`lead_w_ms`)| ≥ `lead_x_bp`、同方向距上次 ≥ `lead_cool_ms` → 看好的代币(上涨 Up、下跌 Down);该腿没有任何订单、`enabled`、窗口年龄 ≥ 5 s 且距结束 ≥ 10 s、该代币卖一 − 买一 ≥ 2 美分、买一 > 0 且卖一 < 1、本腿净份数 + `lead_shares` ≤ `inv_max_shares` 时,在(买一取整到美分)+ 1 美分挂 `lead_shares` 份 post-only 买单(低于卖一,不穿价)。
 - **生命周期**:挂单后 `lead_life_ms`(引擎时间)未完全成交即撤;距结束 ≤ 2 s、`enabled` 关或时钟不可用时撤;陈旧单按规则 8。每个永续报价与每次判定都检查。
 - 领先挂单占用该腿的订单槽:规则 1–14 不管理它(跳过该腿),它终结后该腿恢复正常。
+- **待挂触发与按预期重定价定量(schema v45,缺省关,与 v44 逐位相同)**:`lead_arm_ms` > 0 时,触发那一刻只因该腿已有订单或价差只有 1 美分而挂不了的触发,连同它的 |move| 与当时该代币的买一 + 卖一保留 `lead_arm_ms`(每腿一个,新的覆盖旧的,换窗口清空);此后每条触发源报价(永续或现货)都重试当前窗口的两条腿:腿上没有订单且价差 ≥ 2 美分时按领先挂单的全部条件再判一次,模型价的中间价用触发时的那个(⌊触发时中间价 + E − `lead_m`⌋,其余按当时的买一卖一),挂出或被其他条件(最低价、E 下限、净份数)拒掉即用完,只是还挂不了就继续等到期。`lead_exp_min` > 0:E = `lead_k` × Δ × |move bp| 低于它不挂(没有模型特征时也不挂);`lead_hi_exp` > 0:E ≥ 它时份数为 `lead_hi_shares`(没有特征时用 `lead_shares`),净份数上限按实际份数判。研究(仓外 `sim3.py`/`sim3s.py`,2026-11-02..09 的收数机数据,严格排队、穿价成交按成交量封顶、入簿 100 ms):待挂 1 000 ms 使下单数约 ×5、成交份数 ×3.4、每份 +2 美分(原规则 +3.3),30 s markout 合计 ×2.2;E ≥ 4 美分的单占原规则 markout 的约 3/4,把它们加到 20 份(其余 5 份)结算 +114 USD/天(原 +53),8/8 天为正。
 - **`lead_only`**:只有规则 15 下单——规则 1–14(含配对、反转、规则 12)都不运行,其余挂着的单撤掉;持仓到结算。
 - **触发源与模型价(schema v43)**:`lead_src` 的位 0 = 永续(缺省)、位 1 = 公允价参考(现货 BTCUSDT 的 BBO 中间价,自己的环);两个源用同样的 W/X,冷却按(源, 方向)各自独立,任一源触发都走同一个挂单判定(每个代币仍只有一张领先单);永续撤单只看永续。`lead_price` 1:挂单价 = max(买一 + 1 美分, min(买一 + `lead_maxtick` 美分, ⌊代币中间价 + E − `lead_m`⌋, 卖一 − 1 美分)),E = `lead_k` × Δ × |move bp|,Δ = 100·φ(d)/(max(σ, 0.03)·sq)·remf、d = dist/(max(σ, 0.03)·sq)(规则 14 的同一组特征,不乘 `fc_s`;dist 按代币方向);特征不可用(无 Chainlink 组、无起点 TWAP、无新鲜价格)时为买一 + 1 美分。`lead_price` 1 时每秒取一个隐含 σ 样本(与规则 14 同一个环)。`lead_src` 1、`lead_price` 0(缺省)与 v42 逐位相同。与 Python 参照 `Strat.on_lead`(`lead_src`/`lead_price`/`lead_m`/`lead_maxtick`/`lead_k`)的挂单价逐笔相同(BMK-055.2)。
 - 时间常量(研究里的固定值):`LEAD_START_MS` 5 000、`LEAD_END_MS` 2 000、`LEAD_LAST_MS` 10 000。

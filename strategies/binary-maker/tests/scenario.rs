@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 44, "BMK-024.1");
+    assert_eq!(schema.version(), 45, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1399,7 +1399,24 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
-    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 1), "BMK-024.38");
+    // .39 v45 appends rule 15's armed trigger and its size by the expected repricing (all off).
+    let v45: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 45)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v45,
+        [
+            ("lead_arm_ms", 0),
+            ("lead_exp_min", 0),
+            ("lead_hi_exp", 0),
+            ("lead_hi_shares", 5)
+        ],
+        "BMK-024.39"
+    );
+    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 4), "BMK-024.39");
+    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 5), "BMK-024.38");
 }
 
 #[test]
@@ -3866,5 +3883,144 @@ fn bmk_055_rule15_sources_and_model_price() {
         placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)),
         vec![(SLOTS[4], Px(460))],
         "BMK-055.5 at"
+    );
+}
+
+#[test]
+fn bmk_056_rule15_armed_trigger_and_size() {
+    use binary_maker::lead::{exp_px, lead_size, model_px, model_px_at};
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let c = 1_000_000_000i64;
+    // .1 the expected repricing and the price from the trigger's mid (raw px, cent = 10):
+    // Δ 2 c/bp × 1.5 bp × k 1 = 3 c = 30 raw; with the mid of the trigger (47.5) the cap is 50 also
+    // when the book has moved to 0.470 / 0.510 → min(47 + 3, 50, 50) = 50; `model_px` = the same
+    // with the current mid.
+    assert_eq!(exp_px(10, 2 * c, 150_000, c), 30, "BMK-056.1 E");
+    assert_eq!(
+        model_px_at(470, 510, 950, 10, 2 * c, 150_000, c, c / 2, 3),
+        500,
+        "BMK-056.1 trigger mid"
+    );
+    assert_eq!(
+        model_px_at(450, 500, 950, 10, 2 * c, 150_000, c, c / 2, 3),
+        model_px(450, 500, 10, 2 * c, 150_000, c, c / 2, 3),
+        "BMK-056.1 same mid"
+    );
+    // .2 the size: off → lead_shares; below lead_exp_min → none; from lead_hi_exp on →
+    // lead_hi_shares; without features a minimum gives none and lead_hi_exp the plain size.
+    assert_eq!(lead_size(Some(30), 10, 0, 0, 5, 20), Some(5), "BMK-056.2 off");
+    assert_eq!(
+        lead_size(Some(19), 10, 2 * c, 0, 5, 20),
+        None,
+        "BMK-056.2 below min"
+    );
+    assert_eq!(
+        lead_size(Some(20), 10, 2 * c, 4 * c, 5, 20),
+        Some(5),
+        "BMK-056.2 at min"
+    );
+    assert_eq!(
+        lead_size(Some(39), 10, 0, 4 * c, 5, 20),
+        Some(5),
+        "BMK-056.2 below hi"
+    );
+    assert_eq!(lead_size(Some(40), 10, 0, 4 * c, 5, 20), Some(20), "BMK-056.2 hi");
+    assert_eq!(
+        lead_size(None, 10, 2 * c, 4 * c, 5, 20),
+        None,
+        "BMK-056.2 no features, min"
+    );
+    assert_eq!(
+        lead_size(None, 10, 0, 4 * c, 5, 20),
+        Some(5),
+        "BMK-056.2 no features, hi"
+    );
+    // .3–.6 the armed trigger. Up 0.450 / 0.460 (one cent) at the trigger.
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let lead = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 3),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 100_000),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    let setup = |p: &BinaryMakerParams| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        slot_book(h.views_mut(), SLOTS[4], 450, 460);
+        slot_book(h.views_mut(), SLOTS[5], 540, 550);
+        h
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let t0 = 640 * s;
+    // .3 off (v44): the trigger finds a one-cent spread and is lost; the spread opening later
+    // places nothing.
+    let mut h = setup(&lead(&[]));
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-056.3"
+    );
+    slot_book(h.views_mut(), SLOTS[4], 450, 480);
+    assert!(
+        placed(&perp(&mut h, t0 + 500 * ms, 10_001_500)).is_empty(),
+        "BMK-056.3 off"
+    );
+    // .4 lead_arm_ms 1000: the same trigger stays armed; the next perpetual quote after the
+    // spread opened places the bid (no new trigger: the move is inside the cool-down).
+    let mut h = setup(&lead(&[("lead_arm_ms", 1_000)]));
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-056.4 armed"
+    );
+    assert!(
+        placed(&perp(&mut h, t0 + 450 * ms, 10_001_500)).is_empty(),
+        "BMK-056.4 still one cent"
+    );
+    slot_book(h.views_mut(), SLOTS[4], 450, 480);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 500 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-056.4 placed"
+    );
+    // Placed once: the arming is used up (the leg is freed by hand, the spread is still open).
+    {
+        let q = &mut h.strategy_mut().fast.quotes[4];
+        q.state = binary_maker::fast::QState::None;
+        q.r = None;
+    }
+    assert!(
+        placed(&perp(&mut h, t0 + 600 * ms, 10_001_500)).is_empty(),
+        "BMK-056.4 once"
+    );
+    // .5 the arming ends after lead_arm_ms: the spread opening 1.1 s after the trigger places
+    // nothing.
+    let mut h = setup(&lead(&[("lead_arm_ms", 1_000)]));
+    perp(&mut h, t0, 10_000_000);
+    perp(&mut h, t0 + 400 * ms, 10_001_500);
+    perp(&mut h, t0 + 900 * ms, 10_001_500);
+    slot_book(h.views_mut(), SLOTS[4], 450, 480);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_500 * ms, 10_001_500)).is_empty(),
+        "BMK-056.5"
+    );
+    // .6 a minimum expected repricing without model features (lead_price 0): no bid.
+    let mut h = setup(&lead(&[("lead_exp_min", 1_000_000_000)]));
+    slot_book(h.views_mut(), SLOTS[4], 450, 480);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-056.6"
     );
 }

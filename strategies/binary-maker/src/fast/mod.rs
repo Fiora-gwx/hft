@@ -14,6 +14,7 @@ use hft_feature::{ONE, Own, cdf, inv_cdf, isqrt};
 use hft_strategy_sdk::prelude::*;
 
 use crate::features::{self, BidSide, MakerFeatures, PlanCfg, ScoreIn};
+use crate::lead::LeadTry;
 use crate::params::BinaryMakerParams;
 
 /// The settlement averages the reference over the last 60 s of the window: the variance left
@@ -911,6 +912,8 @@ impl Fast {
             .legs
             .resize(self.quotes.len(), crate::lead::LeadLeg::default());
         self.lead.block.resize(self.quotes.len(), i64::MIN);
+        self.lead.armed.clear();
+        self.lead.armed.resize(self.quotes.len(), None);
     }
 
     /// Rule 15 on (README "规则" 15).
@@ -1373,31 +1376,92 @@ impl Fast {
                 } else {
                     None
                 };
-                self.lead_place(i, start, r.abs(), feat, v, ctx);
+                // lead_arm_ms: a trigger that cannot place now (one-cent spread, or the leg has
+                // an order) stays armed with its move and the token mid of this moment.
+                if let LeadTry::Wait(mid_x2) = self.lead_place(i, start, r.abs(), feat, None, v, ctx)
+                    && d.lead_arm_ms > 0
+                    && let Some(a) = self.lead.armed.get_mut(i)
+                {
+                    *a = Some(crate::lead::Armed {
+                        until: ens.saturating_add(i64::from(d.lead_arm_ms) * ms),
+                        move_abs: r.abs(),
+                        mid_x2,
+                    });
+                }
+            }
+        }
+        // Armed triggers: every reference quote retries the current window's two legs.
+        if d.lead_arm_ms > 0 {
+            for i in [up, up + 1] {
+                let Some(a) = self.lead.armed.get(i).copied().flatten() else {
+                    continue;
+                };
+                let live = d.enabled && ens <= a.until && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS;
+                if live && !self.lead_open(i, v) {
+                    continue;
+                }
+                let mut keep = false;
+                if live {
+                    let feat = if model {
+                        self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)
+                    } else {
+                        None
+                    };
+                    keep = matches!(
+                        self.lead_place(i, start, a.move_abs, feat, Some(a.mid_x2), v, ctx),
+                        LeadTry::Wait(_)
+                    );
+                }
+                if !keep && let Some(x) = self.lead.armed.get_mut(i) {
+                    *x = None;
+                }
             }
         }
         self.lead_maint(v, ctx, d.lead_only);
     }
 
+    /// Slot leg `i` has no order and its token's spread is at least two cents (the cheap part of
+    /// `lead_place`'s conditions, for the armed retry).
+    fn lead_open<V: Views>(&self, i: usize, v: &V) -> bool {
+        let Some(q) = self.quotes.get(i) else {
+            return false;
+        };
+        if q.state != QState::None {
+            return false;
+        }
+        let hot = *v.inst(q.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        match (
+            book.best(Side::Buy).map(|l| l.px.0),
+            book.best(Side::Sell).map(|l| l.px.0),
+        ) {
+            (Some(bid), Some(ask)) => bid > 0 && ask < unit_px && ask - bid >= 2 * cent,
+            _ => false,
+        }
+    }
+
     /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
     /// favoured token of window `start`) when the leg has no order, the spread is at least two
-    /// cents and the leg's net shares stay within `inv_max_shares`.
+    /// cents and the leg's net shares stay within `inv_max_shares`. `mid0` = the token's bid + ask
+    /// at the trigger for an armed retry (`None`: now). `Wait` (with the current bid + ask) when
+    /// only the leg's order or a one-cent spread stands in the way.
+    #[allow(clippy::too_many_arguments)]
     fn lead_place<V: Views>(
         &mut self,
         i: usize,
         start: i64,
         move_abs: i64,
         feat: Option<(i64, i64, i64, i64)>,
+        mid0: Option<i64>,
         v: &V,
         ctx: &mut Ctx<'_>,
-    ) {
+    ) -> LeadTry {
         let d = *self.p.defaults();
         let Some(q) = self.quotes.get(i).copied() else {
-            return;
+            return LeadTry::No;
         };
-        if q.state != QState::None {
-            return;
-        }
         let hot = *v.inst(q.inst);
         let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
         let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
@@ -1407,48 +1471,65 @@ impl Fast {
             book.best(Side::Buy).map(|l| l.px.0),
             book.best(Side::Sell).map(|l| l.px.0),
         ) else {
-            return;
+            return LeadTry::No;
         };
-        if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
-            return;
+        if bid <= 0 || ask >= unit_px {
+            return LeadTry::No;
+        }
+        if q.state != QState::None || ask - bid < 2 * cent {
+            return LeadTry::Wait(bid.saturating_add(ask));
         }
         // lead_price 1: the model price; without features (or 0) one cent above the bid.
-        let px = match (d.lead_price, feat) {
+        let (px, exp) = match (d.lead_price, feat) {
             (1, Some((dist_up, sq, remf, sig))) => {
                 let dist = if i.is_multiple_of(2) { dist_up } else { -dist_up };
-                crate::lead::model_px(
+                let delta = crate::fcev::delta(dist, sq, remf, sig);
+                let px = crate::lead::model_px_at(
                     bid,
                     ask,
+                    mid0.unwrap_or(bid.saturating_add(ask)),
                     cent,
-                    crate::fcev::delta(dist, sq, remf, sig),
+                    delta,
                     move_abs,
                     d.lead_k.0,
                     d.lead_m.0,
                     i64::from(d.lead_maxtick),
-                )
+                );
+                (px, Some(crate::lead::exp_px(cent, delta, move_abs, d.lead_k.0)))
             }
-            (1, None) => bid + cent,
-            _ => bid.div_euclid(cent) * cent + cent,
+            (1, None) => (bid + cent, None),
+            _ => (bid.div_euclid(cent) * cent + cent, None),
         };
         if px >= ask || px <= bid {
-            return;
+            return LeadTry::No;
         }
         // lead_p_min: no lead bid below the minimum price (fraction of one, 1e-9 of `unit_px`).
         if d.lead_p_min.0 > 0
             && i128::from(px) * 1_000_000_000 < i128::from(d.lead_p_min.0) * i128::from(unit_px)
         {
-            return;
+            return LeadTry::No;
         }
+        // lead_exp_min / lead_hi_exp: the size by the expected repricing (none below the minimum).
+        let Some(shares) = crate::lead::lead_size(
+            exp,
+            cent,
+            d.lead_exp_min.0,
+            d.lead_hi_exp.0,
+            d.lead_shares,
+            d.lead_hi_shares,
+        ) else {
+            return LeadTry::No;
+        };
         let pos = |k: usize| {
             self.quotes
                 .get(k)
                 .and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
                 .unwrap_or(0)
         };
-        let qty = i64::from(d.lead_shares).saturating_mul(unit_qty);
+        let qty = i64::from(shares).saturating_mul(unit_qty);
         let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
         if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
-            return;
+            return LeadTry::No;
         }
         let it = OrderIntent {
             venue: q.venue,
@@ -1488,7 +1569,9 @@ impl Fast {
             if let Some(x) = self.skind.get_mut(i) {
                 *x = false;
             }
+            return LeadTry::Placed;
         }
+        LeadTry::No
     }
 
     /// Rule 15 order lifetime: a lead bid is cancelled `lead_life_ms` after its place, 2 s before
