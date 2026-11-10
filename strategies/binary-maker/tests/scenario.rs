@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 43, "BMK-024.1");
+    assert_eq!(schema.version(), 44, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1367,7 +1367,7 @@ fn bmk_024_schema_v6() {
     );
     let n43 = (0..schema.n_fields())
         .filter_map(|i| schema.field(i))
-        .filter(|f| f.since == 43)
+        .filter(|f| f.since >= 43)
         .count() as u16;
     assert_eq!(
         n_fields_at(schema, 42),
@@ -1392,6 +1392,14 @@ fn bmk_024_schema_v6() {
         ],
         "BMK-024.37"
     );
+    // .38 v44 appends rule 15's minimum price (0 = off keeps v43).
+    let v44: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 44)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
+    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 1), "BMK-024.38");
 }
 
 #[test]
@@ -3844,5 +3852,19 @@ fn bmk_055_rule15_sources_and_model_price() {
         placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)),
         vec![(SLOTS[4], Px(460))],
         "BMK-055.4"
+    );
+    // .5 lead_p_min: no lead bid below the minimum price (the bid above would be 0.46).
+    let mut h = setup(&lead(&[("lead_p_min", 500_000_000)]));
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-055.5 below"
+    );
+    let mut h = setup(&lead(&[("lead_p_min", 460_000_000)]));
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-055.5 at"
     );
 }

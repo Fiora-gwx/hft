@@ -382,12 +382,13 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 43;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 44;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
 | BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
 | BMK-024.37 | schema v43 的字段 | 依次 `lead_src` 1、`lead_price` 0、`lead_m` 0.5 c、`lead_maxtick` 3、`lead_k` 1,`since` 43;`n_fields_at(42)` = 总数 − 5 |
+| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 1 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -782,3 +783,4 @@ spec: README.md
 | BMK-055.2 | 116 张领先单的 sim2 特征、ret、买一卖一 | 挂单价与 sim2 逐笔相同 |
 | BMK-055.3 | `lead_src` 2 的现货 +1.5 bp;`lead_src` 1 的现货 +1.5 bp;`lead_src` 3 永续触发后 0.5 s 现货同向 +1.5 bp | Up 0.460;不挂;现货仍触发(冷却按源独立) |
 | BMK-055.4 | `lead_price` 1,没有 Chainlink 起点 TWAP | 买一 + 1 美分(0.460) |
+| BMK-055.5 | `lead_p_min` 0.50 / 0.46,模型价 0.46 | 0.50:不挂;0.46:挂 0.46 |

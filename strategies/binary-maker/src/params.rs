@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 43, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 44, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -453,6 +453,8 @@ hft_strategy_sdk::define_params! {
         lead_maxtick: Count [min = 1, max = 50, default = 3, since = 43, relax = None],
         /// rule 15 model price: repricing factor k of the expected move (1e-9)
         lead_k: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 43, relax = None],
+        /// rule 15 places no lead bid below this price (fraction of one, 1e-9; 0 = off)
+        lead_p_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 44, relax = None],
     }
 }
 

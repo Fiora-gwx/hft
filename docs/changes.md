@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-11-10 | binary-maker 规则 15 最低价 `lead_p_min`(schema v44,缺省 0 = 关,与 v43 逐位相同):挂单价低于它不挂 | 回放:买价 < 0.10 的领先单结算为负、胜率 ≤ 5%;BMK-055.5、BMK-024.38 | strategies/binary-maker | 待评审(策略规则) |
 | 2026-11-10 | binary-maker 规则 15 扩展(schema v43,缺省与 v42 逐位相同):触发源 `lead_src`(位 0 永续、位 1 现货参考,冷却按源与方向独立);模型挂单价 `lead_price` 1 = max(买一 + 1, min(买一 + `lead_maxtick`, ⌊中间价 + `lead_k`·Δ·|move| − `lead_m`⌋, 卖一 − 1))(美分,Δ 用规则 14 的特征、不乘 s;特征不可用时买一 + 1) | 研究候选 PS1_mod05_pc_life1(7 天严格模拟 80 ms +58 USD/天);BMK-055(新增)、BMK-024.37 | strategies/binary-maker、fixtures/binary-maker-fcev | 待评审(策略规则) |
 | 2026-11-10 | binary-maker 规则 15 领先挂单(schema v42,全部缺省关):永续 BBO 的中间价在 `lead_w_ms` 内变动 ≥ `lead_x_bp` 时,在看好代币的买一 + 1 美分挂 `lead_shares` 份 post-only 买单(价差 ≥ 2 美分、窗口 [5 s, 结束前 10 s]、净份数上限),`lead_life_ms` 未全部成交即撤;可选永续撤单(`lead_pc_*`);`lead_only` 只运行规则 15、持仓到结算;关闭时与 v41 逐位相同 | owner 2026-11-10:方向 A 先上模拟盘;研究 `sim2.py` 4 个样本外日为正;BMK-054、SIM-246(新增)、BMK-024.36 | strategies/binary-maker、crates/hft-sim tests | 待评审(新增策略规则) |
 | 2026-11-09 | binary-maker 规则 14 成交条件 EV(schema v41 `fc_on` 缺省关,另 `fc_s`/`fc_lam`/`fc_c0`/`fc_c1`/`fc_w`/`fc_m_post`/`fc_m_cancel`/`fc_m_pair`/`fc_iv_n`/`fc_ver`):开启时模型独自决定当前窗口两腿的买单(买一挂、分数低于撤单阈值或被抢先撤、可选配对单),需要原生 Chainlink 组;定点实现(`src/fcev.rs`,φ 表 + hft-feature Φ/Φ⁻¹/ln/isqrt),与 Python 参照 `sim2.py` 逐秒平价;关闭时与 v38 逐位相同 | 成交条件期望模型 Spec 2026-11-09;owner 要求接入实盘策略、缺省关;BMK-052、BMK-053(新增)、BMK-024.35,基准 `tick_fc` | strategies/binary-maker、fixtures/binary-maker-fcev | 待评审(新增策略规则) |

@@ -1433,6 +1433,12 @@ impl Fast {
         if px >= ask || px <= bid {
             return;
         }
+        // lead_p_min: no lead bid below the minimum price (fraction of one, 1e-9 of `unit_px`).
+        if d.lead_p_min.0 > 0
+            && i128::from(px) * 1_000_000_000 < i128::from(d.lead_p_min.0) * i128::from(unit_px)
+        {
+            return;
+        }
         let pos = |k: usize| {
             self.quotes
                 .get(k)
