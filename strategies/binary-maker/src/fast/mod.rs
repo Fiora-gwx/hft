@@ -45,6 +45,10 @@ pub const LEAD_LAST_MS: i64 = 10_000;
 /// Rule 15 trigger sources (`lead_src` bits): the perpetual and the fair-value (spot) reference.
 pub const LEAD_SRC_PERP: u32 = 1;
 pub const LEAD_SRC_SPOT: u32 = 2;
+/// Rule 16 `head_mode` bits: head bids, the gate of rule 15, cancel when the head turns.
+pub const HEAD_ENTRY: u32 = 1;
+pub const HEAD_GATE: u32 = 2;
+pub const HEAD_CANCEL: u32 = 4;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -744,6 +748,8 @@ pub struct Fast {
     pub fc_pair: Vec<bool>,
     /// Rule 15 state (perpetual mid ring, triggers, lead orders per leg); not in the snapshot.
     pub lead: crate::lead::LeadState,
+    /// Rule 16 state (reference and Up-mid histories, the last evaluation); not in the snapshot.
+    pub head: crate::head::HeadState,
     /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
     /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
     /// the fair value reads (0 = off or not ready: the first reference's own mid).
@@ -805,6 +811,7 @@ impl Fast {
             fc: crate::fcev::FcState::default(),
             fc_pair: Vec::new(),
             lead: crate::lead::LeadState::default(),
+            head: crate::head::HeadState::default(),
             fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
@@ -911,12 +918,16 @@ impl Fast {
             .legs
             .resize(self.quotes.len(), crate::lead::LeadLeg::default());
         self.lead.block.resize(self.quotes.len(), i64::MIN);
+        self.head.placed.clear();
+        self.head.placed.resize(self.quotes.len(), i64::MIN / 2);
     }
 
     /// Rule 15 on (README "规则" 15).
     pub fn lead_on(&self) -> bool {
         let d = self.p.defaults();
-        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0) || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0)
+            || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+            || d.head_mode != 0
     }
 
     /// Slot leg `i`'s current order `q` is its rule-15 lead bid.
@@ -1135,7 +1146,9 @@ impl Fast {
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => {
-                if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_SPOT != 0 {
+                if self.lead_on()
+                    && (self.p.defaults().lead_src & LEAD_SRC_SPOT != 0 || self.p.defaults().head_mode != 0)
+                {
                     let mid_x2 = self.feat.top.mid_x2;
                     self.lead_quote(LEAD_SRC_SPOT, mid_x2, v, ctx);
                 }
@@ -1176,6 +1189,9 @@ impl Fast {
                 }
             }
             EventRef::Book { inst, .. } => {
+                if self.p.defaults().head_mode != 0 {
+                    self.head_book(inst, v, ctx);
+                }
                 if self.p.defaults().ofi_win_ms > 0 {
                     let ens = v.now().engine_ns;
                     let b = v.book(inst);
@@ -1297,6 +1313,9 @@ impl Fast {
             self.lead.spot.push(ens, mid_x2);
         }
         let d = *self.p.defaults();
+        if d.head_mode != 0 {
+            self.head.on_ref(perp, ens, mid_x2);
+        }
         let n = self.quotes.len();
         let pairs = (n / 2) as i64;
         let w = i64::from(d.window_s);
@@ -1309,12 +1328,13 @@ impl Fast {
         let left_ms = (start + w) * 1_000 - utc_ms;
         let age_ms = w * 1_000 - left_ms;
         self.lead.window(start);
+        self.head.window(start);
         // Triggers count only inside [start + 5 s, end − 2 s] (the research's trigger range).
         let in_range = age_ms >= LEAD_START_MS && left_ms >= LEAD_END_MS;
         let ms = 1_000_000i64;
         // Model price (lead_price 1): the rule-14 features, with one implied-σ sample per second.
         let model = d.lead_price == 1;
-        if model {
+        if model || d.head_mode != 0 {
             self.fc.window(start);
             let sec = utc_ms.div_euclid(1_000);
             if self.fc.iv_due(sec) {
@@ -1367,7 +1387,12 @@ impl Fast {
             && let Some(sg) = trigger.fire(r, d.lead_x_bp.0, ens, i64::from(d.lead_cool_ms) * ms)
         {
             let i = if sg > 0 { up } else { up + 1 };
-            if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
+            // Rule 16 gate: the head, evaluated now, must be at least head_gate for this token.
+            let pass = d.head_mode & HEAD_GATE == 0
+                || self
+                    .head_eval(v, start, w, utc_ms, left_ms, age_ms, up)
+                    .is_some_and(|h| (if sg > 0 { h } else { -h }).saturating_mul(1_000) >= d.head_gate.0);
+            if pass && d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
                 let feat = if model {
                     self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)
                 } else {
@@ -1376,7 +1401,219 @@ impl Fast {
                 self.lead_place(i, start, r.abs(), feat, v, ctx);
             }
         }
+        self.head_tick(v, ctx, start, w, utc_ms, left_ms, age_ms, up);
         self.lead_maint(v, ctx, d.lead_only);
+    }
+
+    /// Rule 16 on a book event of `inst`: the current window's Up mid history, then the head.
+    fn head_book<V: Views>(&mut self, inst: InstId, v: &V, ctx: &mut Ctx<'_>) {
+        let now = v.now();
+        let d = *self.p.defaults();
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 || !now.clock_ok {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let start = utc_ms.div_euclid(1_000).div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let age_ms = w * 1_000 - left_ms;
+        self.head.window(start);
+        let up_inst = self.quotes.get(up).map(|q| q.inst);
+        let dn_inst = self.quotes.get(up + 1).map(|q| q.inst);
+        if up_inst == Some(inst) {
+            let b = v.book(inst);
+            if let (Some(x), Some(y)) = (b.best(Side::Buy), b.best(Side::Sell)) {
+                self.head.on_mid(now.engine_ns, x.px.0.saturating_add(y.px.0));
+            }
+        }
+        if up_inst == Some(inst) || dn_inst == Some(inst) {
+            self.head_tick(v, ctx, start, w, utc_ms, left_ms, age_ms, up);
+        }
+    }
+
+    /// Rule 16: evaluates the head now (Up orientation, 1e-6 cents). `None` without the rule-14
+    /// features, the Up book top or a reference look-back.
+    #[allow(clippy::too_many_arguments)]
+    fn head_eval<V: Views>(
+        &mut self,
+        v: &V,
+        start: i64,
+        w: i64,
+        utc_ms: i64,
+        left_ms: i64,
+        age_ms: i64,
+        up: usize,
+    ) -> Option<i64> {
+        let ens = v.now().engine_ns;
+        self.head.last_eval = ens;
+        self.head.last = None;
+        let q = self.quotes.get(up).copied()?;
+        let hot = *v.inst(q.inst);
+        let book = v.book(q.inst);
+        let (b, a) = (book.best(Side::Buy)?, book.best(Side::Sell)?);
+        let top = crate::head::Top {
+            bid: b.px.0,
+            bid_q: b.qty.0,
+            ask: a.px.0,
+            ask_q: a.qty.0,
+            unit_px: 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs())),
+            unit_qty: 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs())),
+        };
+        self.fc.window(start);
+        let fc = self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)?;
+        let x = self.head.features(ens, age_ms, top, fc)?;
+        let h = crate::head::predict(&x);
+        self.head.last = Some(h);
+        Some(h)
+    }
+
+    /// Rule 16 on a reference quote or a book event of the current window, at most once per
+    /// `head_eval_ms`: lead bids of a token whose head fell below `head_off` are cancelled (bit
+    /// 4); a token whose head is at least `head_on` gets a head bid (bit 1).
+    #[allow(clippy::too_many_arguments)]
+    fn head_tick<V: Views>(
+        &mut self,
+        v: &V,
+        ctx: &mut Ctx<'_>,
+        start: i64,
+        w: i64,
+        utc_ms: i64,
+        left_ms: i64,
+        age_ms: i64,
+        up: usize,
+    ) {
+        let d = *self.p.defaults();
+        if d.head_mode & (HEAD_ENTRY | HEAD_CANCEL) == 0 {
+            return;
+        }
+        let ens = v.now().engine_ns;
+        if ens.saturating_sub(self.head.last_eval) < i64::from(d.head_eval_ms) * 1_000_000 {
+            return;
+        }
+        let Some(h) = self.head_eval(v, start, w, utc_ms, left_ms, age_ms, up) else {
+            return;
+        };
+        let live = d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS;
+        let cool = i64::from(d.head_cool_ms) * 1_000_000;
+        for (i, ht) in [(up, h), (up + 1, -h)] {
+            // The parameters are 1e-9 cents, the head 1e-6.
+            let ht9 = ht.saturating_mul(1_000);
+            if d.head_mode & HEAD_CANCEL != 0
+                && ht9 < d.head_off.0
+                && let Some(q) = self.quotes.get(i).copied()
+                && q.state == QState::Live
+                && self.is_lead(i, &q)
+                && let Some(r) = q.r
+                && ctx.cancel(r).is_ok()
+                && let Some(m) = self.quotes.get_mut(i)
+            {
+                m.state = QState::Cancelling;
+                m.last_ens = ens;
+            }
+            if d.head_mode & HEAD_ENTRY != 0
+                && live
+                && ht9 >= d.head_on.0
+                && ens.saturating_sub(self.head.placed.get(i).copied().unwrap_or(i64::MIN / 2)) >= cool
+                && self.head_place(i, start, ht, v, ctx)
+                && let Some(p) = self.head.placed.get_mut(i)
+            {
+                *p = ens;
+            }
+        }
+    }
+
+    /// Rule 16: a post-only bid of `lead_shares` inside the spread of slot leg `i` for a head of
+    /// `ht` (1e-6 cents): max(bid + 1, min(bid + lead_maxtick, ⌊mid + ht − lead_m⌋, ask − 1))
+    /// cents, under rule 15's conditions (no order on the leg, spread ≥ 2 cents, lead_p_min, net
+    /// shares within inv_max_shares); it lives `head_life_ms`. True when placed.
+    fn head_place<V: Views>(&mut self, i: usize, start: i64, ht: i64, v: &V, ctx: &mut Ctx<'_>) -> bool {
+        let d = *self.p.defaults();
+        let Some(q) = self.quotes.get(i).copied() else {
+            return false;
+        };
+        if q.state != QState::None {
+            return false;
+        }
+        let hot = *v.inst(q.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        let (Some(bid), Some(ask)) = (
+            book.best(Side::Buy).map(|l| l.px.0),
+            book.best(Side::Sell).map(|l| l.px.0),
+        ) else {
+            return false;
+        };
+        if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
+            return false;
+        }
+        let e = (i128::from(ht.max(0)) * i128::from(cent) / i128::from(crate::head::SCALE)) as i64;
+        let px = crate::head::inside_px(bid, ask, cent, e, d.lead_m.0, i64::from(d.lead_maxtick));
+        if px >= ask || px <= bid {
+            return false;
+        }
+        if d.lead_p_min.0 > 0
+            && i128::from(px) * 1_000_000_000 < i128::from(d.lead_p_min.0) * i128::from(unit_px)
+        {
+            return false;
+        }
+        let pos = |k: usize| {
+            self.quotes
+                .get(k)
+                .and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
+                .unwrap_or(0)
+        };
+        let qty = i64::from(d.lead_shares).saturating_mul(unit_qty);
+        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+        if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
+            return false;
+        }
+        let it = OrderIntent {
+            venue: q.venue,
+            account: self.account,
+            side: Side::Buy,
+            tif: Tif::PostOnly,
+            class: IntentClass::Open,
+            flags: 0,
+            _pad: [0; 2],
+            inst: q.inst,
+            group: q.id,
+            px: Px(px),
+            qty: Qty(qty),
+            link: LegLinkOpt::NONE,
+            tag: tag_of(i as u16),
+            max_rest_ms: d.max_rest_ms,
+        };
+        let ens = v.now().engine_ns;
+        if let Ok(h) = ctx.place(it)
+            && let Some(m) = self.quotes.get_mut(i)
+        {
+            m.state = QState::Placing;
+            m.handle = h.0;
+            m.px = px;
+            m.last_ens = ens;
+            m.win = start;
+            if let Some(l) = self.lead.legs.get_mut(i) {
+                *l = crate::lead::LeadLeg {
+                    handle: Some(h.0),
+                    r: None,
+                    placed: ens,
+                    life: i64::from(d.head_life_ms) * 1_000_000,
+                };
+            }
+            if let Some(x) = self.fc_pair.get_mut(i) {
+                *x = false;
+            }
+            if let Some(x) = self.skind.get_mut(i) {
+                *x = false;
+            }
+            return true;
+        }
+        false
     }
 
     /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
@@ -1480,6 +1717,7 @@ impl Fast {
                     handle: Some(h.0),
                     r: None,
                     placed: ens,
+                    life: 0,
                 };
             }
             if let Some(x) = self.fc_pair.get_mut(i) {
@@ -1536,7 +1774,9 @@ impl Fast {
             if q.state != QState::Live {
                 continue;
             }
-            let placed = self.lead.legs.get(i).map_or(i64::MIN / 2, |l| l.placed);
+            let (placed, life) = self.lead.legs.get(i).map_or((i64::MIN / 2, life), |l| {
+                (l.placed, if l.life > 0 { l.life } else { life })
+            });
             let cancel = if lead {
                 !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
             } else {

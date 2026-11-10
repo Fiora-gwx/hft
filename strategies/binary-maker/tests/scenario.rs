@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 44, "BMK-024.1");
+    assert_eq!(schema.version(), 45, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1399,7 +1399,27 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
-    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 1), "BMK-024.38");
+    // .39 v45 appends rule 16, the short-horizon head (head_mode 0 = off keeps v44).
+    let v45: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 45)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v45,
+        [
+            ("head_mode", 0),
+            ("head_on", 2_000_000_000),
+            ("head_gate", 500_000_000),
+            ("head_off", 0),
+            ("head_life_ms", 1_000),
+            ("head_cool_ms", 1_000),
+            ("head_eval_ms", 25)
+        ],
+        "BMK-024.39"
+    );
+    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 7), "BMK-024.39");
+    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 8), "BMK-024.38");
 }
 
 #[test]
@@ -3674,6 +3694,7 @@ fn bmk_054_rule15_lead_quote() {
             handle: None,
             r: Some(order_ref(slot)),
             placed,
+            life: 0,
         };
     };
     let mut h = setup(&lead(&[]));
@@ -3867,4 +3888,295 @@ fn bmk_055_rule15_sources_and_model_price() {
         vec![(SLOTS[4], Px(460))],
         "BMK-055.5 at"
     );
+}
+
+/// The numbers of a JSON array field `"key": [..]` of one line.
+fn json_arr(line: &str, key: &str) -> Vec<f64> {
+    let pat = format!("\"{key}\": [");
+    let at = line.find(&pat).unwrap_or_else(|| panic!("no {key}")) + pat.len();
+    let rest = &line[at..];
+    let end = rest.find(']').unwrap();
+    rest[..end]
+        .split(',')
+        .map(|x| x.trim().parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn bmk_056_rule16_head() {
+    use binary_maker::fast::{HEAD_CANCEL, HEAD_ENTRY, HEAD_GATE, QState};
+    use binary_maker::head::{self, HeadState, NF, Ring, SCALE, Top, inside_px, ix, predict};
+    use binary_maker::lead::LeadLeg;
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/binary-maker-head");
+    // .1 the ring: latest value at or before a time; (max, min) from a time on with the entry in
+    // effect at that time; a thinned ring keeps one value per gap.
+    let mut r = Ring::new(8, 0);
+    for (t, v) in [(10, 100), (20, 90), (30, 120), (40, 110)] {
+        r.push(t, v);
+    }
+    assert_eq!(
+        (
+            r.at_or_before(9),
+            r.at_or_before(10),
+            r.at_or_before(35),
+            r.last()
+        ),
+        (None, Some(100), Some(120), Some(110)),
+        "BMK-056.1 look-up"
+    );
+    assert_eq!(
+        r.range_from(25),
+        Some((120, 90)),
+        "BMK-056.1 range incl. the entry in effect"
+    );
+    assert_eq!(r.range_from(5), Some((120, 90)), "BMK-056.1 range, all");
+    assert_eq!(r.range_from(41), Some((110, 110)), "BMK-056.1 range, last only");
+    let mut g = Ring::new(8, 10);
+    for t in [0, 4, 9, 10, 15, 21] {
+        g.push(t, t);
+    }
+    assert_eq!(
+        (g.len(), g.at_or_before(20), g.last()),
+        (3, Some(10), Some(21)),
+        "BMK-056.1 thinned"
+    );
+    // .2 the bid price inside the spread (raw px, cent = 10): 0.450 / 0.500, expected rise 3 c,
+    // m 0.5 c → min(48, ⌊47.5 + 3 − 0.5⌋ = 50, 49) = 48; rise 0 → 47; never below bid + 1.
+    let c = 1_000_000_000i64;
+    assert_eq!(inside_px(450, 500, 10, 30, c / 2, 3), 480, "BMK-056.2 maxtick");
+    assert_eq!(inside_px(450, 500, 10, 0, c / 2, 3), 470, "BMK-056.2 no rise");
+    assert_eq!(inside_px(450, 470, 10, 30, c / 2, 3), 460, "BMK-056.2 ask - 1");
+    assert_eq!(
+        inside_px(450, 500, 10, 0, 10 * c, 3),
+        460,
+        "BMK-056.2 floor bid + 1"
+    );
+    // .3 the generated model against LightGBM: 1 500 feature vectors (1e-6 fixed point).
+    let text = std::fs::read_to_string(dir.join("pred.jsonl")).unwrap();
+    let (mut n, mut worst) = (0, 0.0f64);
+    for line in text.lines() {
+        let x: Vec<i64> = json_arr(line, "x").iter().map(|v| *v as i64).collect();
+        let mut a = [0i64; NF];
+        a.copy_from_slice(&x);
+        let d = (predict(&a) as f64 / SCALE as f64 - json_num(line, "y")).abs();
+        worst = worst.max(d);
+        n += 1;
+    }
+    assert_eq!(n, 1_500, "BMK-056.3 rows");
+    assert!(worst < 1e-3, "BMK-056.3 worst difference {worst} c");
+    // .4 the features against the Python reference on one recorder window (211 evaluations): the
+    // Up mid changes and the reference quotes the look-backs need are replayed in time order.
+    let text = std::fs::read_to_string(dir.join("feat.jsonl")).unwrap();
+    let mut st = HeadState::default();
+    let (mut q, mut no_bid, mut head_bad, mut head_sum) = (0, 0, 0, 0.0f64);
+    let mut feat_bad = Vec::new();
+    for line in text.lines() {
+        let t = json_num(line, "t") as i64;
+        // Times are 19 digits: parse the integer exactly.
+        let t = {
+            let at = line.find("\"t\": ").unwrap() + 5;
+            let rest = &line[at..];
+            let end = rest.find([',', '}']).unwrap();
+            rest[..end].trim().parse::<i64>().unwrap_or(t)
+        };
+        if line.contains("\"k\": \"m\"") {
+            st.on_mid(t, json_num(line, "mid_x2") as i64);
+        } else if line.contains("\"k\": \"r\"") {
+            st.on_ref(
+                line.contains("\"s\": \"perp\""),
+                t,
+                json_num(line, "mid_x2") as i64,
+            );
+        } else {
+            let fc = json_arr(line, "fc");
+            let top = Top {
+                bid: json_num(line, "bb") as i64,
+                bid_q: (json_num(line, "bq") * 1e6).round() as i64,
+                ask: json_num(line, "ba") as i64,
+                ask_q: (json_num(line, "aq") * 1e6).round() as i64,
+                unit_px: 1_000,
+                unit_qty: 1_000_000,
+            };
+            let got = st.features(
+                t,
+                json_num(line, "age_ms") as i64,
+                top,
+                (fc[0] as i64, fc[1] as i64, fc[2] as i64, fc[3] as i64),
+            );
+            q += 1;
+            // No bid on the Up token (the window's Up collapsed to 0): no head.
+            if top.bid <= 0 {
+                assert!(got.is_none(), "BMK-056.4 no bid at {t}");
+                no_bid += 1;
+                continue;
+            }
+            let x = got.unwrap_or_else(|| panic!("BMK-056.4 no features at {t}"));
+            let want = json_arr(line, "x");
+            for (k, (got, w)) in x.iter().zip(&want).enumerate() {
+                let w6 = w * 1e6;
+                let tol = match k {
+                    ix::AGE => 1_000.0,
+                    ix::SIG => 10.0,
+                    ix::D_TOK => 200.0 + 2e-4 * w6.abs(),
+                    ix::DELTA | ix::E300 | ix::E1000 => 3_000.0 + 3e-3 * w6.abs(),
+                    k if k == ix::PERP + 4 || k == ix::SPOT + 4 => 60_000.0,
+                    k if (ix::PERP..ix::E300).contains(&k) => 50.0,
+                    _ => 10.0,
+                };
+                if (*got as f64 - w6).abs() > tol {
+                    feat_bad.push((q, k, *got, w6));
+                }
+            }
+            let d = (predict(&x) as f64 / 1e6 - json_num(line, "head")).abs();
+            head_sum += d;
+            if d > 0.15 {
+                head_bad += 1;
+            }
+        }
+    }
+    assert_eq!(q, 211, "BMK-056.4 evaluations");
+    assert!(
+        feat_bad.is_empty(),
+        "BMK-056.4 features (query, index, got, want): {:?}",
+        &feat_bad[..feat_bad.len().min(8)]
+    );
+    let n = (q - no_bid) as f64;
+    assert!(no_bid < q / 2, "BMK-056.4 {no_bid} of {q} without a bid");
+    assert!(
+        head_bad <= 4 && head_sum / n < 0.03,
+        "BMK-056.4 head: {head_bad} above 0.15 c, mean {}",
+        head_sum / n
+    );
+    // .5–.8 the strategy. Window 600 s (slots 4 Up, 5 Down): Up 0.450 / 0.480, Down 0.520 / 0.550;
+    // Chainlink strike and price as in BMK-053; perpetual and spot quotes from 605 s on.
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let hp = |extra: &[(&str, i64)]| {
+        let mut f = vec![("ref_aux", 3), ("lead_only", 1), ("inv_max_shares", 20)];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let spot = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        ref_quote(h.views_mut(), mid);
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref())
+    };
+    let setup = |p: &BinaryMakerParams, twap: bool| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        if twap {
+            h.feed(&ev::mark_at(RC, 9, Px(10_000_000), 600 * s).as_ref());
+        }
+        slot_book(h.views_mut(), SLOTS[4], 450, 480);
+        slot_book(h.views_mut(), SLOTS[5], 520, 550);
+        perp(&mut h, 605 * s, 10_010_000);
+        spot(&mut h, 605 * s, 10_010_000);
+        spot(&mut h, 639 * s + s / 2, 10_010_000);
+        h.feed(&ev::index_at(RC, 9, Px(10_010_000), 640 * s).as_ref());
+        h
+    };
+    let t0 = 641 * s;
+    // .5 off (head_mode 0): no evaluation, nothing placed; on without the Chainlink strike: no
+    // head, nothing placed.
+    let mut h = setup(&hp(&[]), true);
+    assert!(placed(&perp(&mut h, t0, 10_010_000)).is_empty(), "BMK-056.5 off");
+    assert_eq!(h.strategy().fast.head.last, None, "BMK-056.5 off: not evaluated");
+    let mut h = setup(
+        &hp(&[("head_mode", i64::from(HEAD_ENTRY)), ("head_on", 0)]),
+        false,
+    );
+    assert!(
+        placed(&perp(&mut h, t0, 10_010_000)).is_empty(),
+        "BMK-056.5 no features"
+    );
+    // .6 entry (threshold 0): the token the head favours gets a 5-share bid inside its spread at
+    // max(bid + 1, min(bid + 3, ⌊mid + head − 0.5⌋, ask − 1)); a second quote inside head_cool_ms
+    // (the leg freed by hand) places nothing; after it, again.
+    let mut h = setup(&hp(&[("head_mode", i64::from(HEAD_ENTRY)), ("head_on", 0)]), true);
+    let out = perp(&mut h, t0, 10_010_000);
+    let hv = h.strategy().fast.head.last.expect("BMK-056.6 head");
+    let (leg, bid, ask, ht) = if hv >= 0 {
+        (4, 450, 480, hv)
+    } else {
+        (5, 520, 550, -hv)
+    };
+    let px = inside_px(bid, ask, 10, ht * 10 / SCALE, c / 2, 3);
+    let got: Vec<_> = out.places().map(|it| (it.inst, it.px, it.qty)).collect();
+    assert_eq!(
+        got,
+        vec![(SLOTS[leg], Px(px), Qty(5_000_000))],
+        "BMK-056.6 head {hv}"
+    );
+    assert!(
+        h.strategy().fast.lead.legs[leg].life == 1_000 * ms,
+        "BMK-056.6 life"
+    );
+    let free = |h: &mut StrategyHarness<BinaryMaker>| {
+        for k in [4, 5] {
+            let q = &mut h.strategy_mut().fast.quotes[k];
+            q.state = QState::None;
+            q.r = None;
+        }
+    };
+    free(&mut h);
+    assert!(
+        placed(&perp(&mut h, t0 + 500 * ms, 10_010_000)).is_empty(),
+        "BMK-056.6 cool-down"
+    );
+    free(&mut h);
+    h.feed(&ev::index_at(RC, 9, Px(10_010_000), 642 * s).as_ref());
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_010_000)).len(),
+        1,
+        "BMK-056.6 after the cool-down"
+    );
+    // .7 cancel (bit 4): a live lead bid whose token's head is below head_off is cancelled (here
+    // head_off = 50 c: always); without the bit it stays.
+    for (mode, want) in [(i64::from(HEAD_CANCEL), vec![31u32]), (0, vec![])] {
+        let mut h = setup(&hp(&[("head_mode", mode), ("head_off", 50 * c)]), true);
+        {
+            let q = &mut h.strategy_mut().fast.quotes[4];
+            q.state = QState::Live;
+            q.r = Some(order_ref(31));
+            q.px = 460;
+            q.win = 600;
+        }
+        h.strategy_mut().fast.lead.legs[4] = LeadLeg {
+            handle: None,
+            r: Some(order_ref(31)),
+            placed: t0 - 100 * ms,
+            life: 0,
+        };
+        assert_eq!(
+            cancels(&perp(&mut h, t0, 10_010_000)),
+            want,
+            "BMK-056.7 mode {mode}"
+        );
+    }
+    // .8 gate (bit 2): a rule-15 trigger (+1.5 bp over 400 ms) places only when the head for the
+    // token is at least head_gate: −50 c passes, +50 c blocks.
+    for (gate, n) in [(-50 * c, 1usize), (50 * c, 0)] {
+        let p = hp(&[
+            ("head_mode", i64::from(HEAD_GATE)),
+            ("head_gate", gate),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 100_000),
+        ]);
+        let mut h = setup(&p, true);
+        perp(&mut h, t0, 10_010_000);
+        assert_eq!(
+            placed(&perp(&mut h, t0 + 400 * ms, 10_011_500)).len(),
+            n,
+            "BMK-056.8 gate {gate}"
+        );
+    }
+    let _ = head::RET_MS;
 }

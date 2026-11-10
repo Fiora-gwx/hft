@@ -17,6 +17,8 @@ pub mod desc;
 pub mod fast;
 pub mod fcev;
 pub mod features;
+pub mod head;
+pub mod head_model;
 pub mod lead;
 pub mod params;
 

@@ -106,6 +106,8 @@ pub struct LeadLeg {
     pub r: Option<OrderRef>,
     /// Engine time of the place.
     pub placed: i64,
+    /// Life of this bid in ns (rule 16's head bids); 0 = `lead_life_ms`.
+    pub life: i64,
 }
 
 /// Rule 15 state; not in the snapshot.

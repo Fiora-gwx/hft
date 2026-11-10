@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026、BMK-051 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-052、BMK-053、BMK-054、BMK-055、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
+| 规则 | BMK-052、BMK-053、BMK-054、BMK-055、BMK-056、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,13 +382,14 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 44;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 45;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
 | BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
 | BMK-024.37 | schema v43 的字段 | 依次 `lead_src` 1、`lead_price` 0、`lead_m` 0.5 c、`lead_maxtick` 3、`lead_k` 1,`since` 43;`n_fields_at(42)` = 总数 − 5 |
-| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 1 |
+| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 8 |
+| BMK-024.39 | schema v45 的字段 | 依次 `head_mode` 0、`head_on` 2 c、`head_gate` 0.5 c、`head_off` 0、`head_life_ms` 1 000、`head_cool_ms` 1 000、`head_eval_ms` 25,`since` 45;`n_fields_at(44)` = 总数 − 7 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -784,3 +785,23 @@ spec: README.md
 | BMK-055.3 | `lead_src` 2 的现货 +1.5 bp;`lead_src` 1 的现货 +1.5 bp;`lead_src` 3 永续触发后 0.5 s 现货同向 +1.5 bp | Up 0.460;不挂;现货仍触发(冷却按源独立) |
 | BMK-055.4 | `lead_price` 1,没有 Chainlink 起点 TWAP | 买一 + 1 美分(0.460) |
 | BMK-055.5 | `lead_p_min` 0.50 / 0.46,模型价 0.46 | 0.50:不挂;0.46:挂 0.46 |
+
+### BMK-056 规则 16:短周期预测头(schema v45)
+
+- 规则:[规则](README.md#规则)(规则 16)
+- 级别:table
+- 里程碑:M3
+- 前置:`fixtures/binary-maker-head/pred.jsonl`(1 500 个 1e-6 定点特征向量与 LightGBM 的预测值)、`feat.jsonl`(公司收数机 2026-11-09 的一个窗口:Up 中间价变化、回看需要的永续 / 现货报价、211 个评估点的簿顶、规则 14 特征与 Python 参照 `sim4.py` 的特征和预测值);两者由仓外 `gen_head_model.py` 与 `head_model.rs` 一起生成。.5–.8 同 BMK-053 的 Chainlink 设置,Up 0.450/0.480、Down 0.520/0.550,永续与现货报价从 605 s 起
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_056_rule16_head`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-056.1 | 环:四条 (10,100)(20,90)(30,120)(40,110);稀疏环(间隔 10)推入 0、4、9、10、15、21 | 不晚于 9 / 10 / 35 的最近值:无 / 100 / 120;从 25 起含当时生效的一条:最大 120、最小 90;稀疏环留 3 条 |
+| BMK-056.2 | `inside_px`:0.450/0.500,预期上涨 3 c / 0;0.450/0.470;m 10 c | 0.480 / 0.470 / 0.460 / 0.460 |
+| BMK-056.3 | 1 500 个特征向量 | 与 LightGBM 的差 < 0.001 美分 |
+| BMK-056.4 | 一个录制窗口按时间重放,211 个评估点 | Up 没有买一的评估点没有特征;其余每个特征在容差内(价格、数量、1 s 内的回看精确;30 s 回看 0.06 bp;Δ 类 0.3%);预测值与 Python 的差 > 0.15 美分的不超过 4 个、平均 < 0.03 美分 |
+| BMK-056.5 | `head_mode` 0;`head_mode` 1 但没有起点 TWAP | 不评估、不挂;不挂 |
+| BMK-056.6 | `head_mode` 1、`head_on` 0 | 预测值为正的那个代币在价差内挂 5 份,价格 = `inside_px`,存活 1 000 ms;500 ms 后(该腿已空)不挂;1.1 s 后再挂 |
+| BMK-056.7 | `head_mode` 4 / 0,`head_off` 50 c,Up 上挂着一张领先单 | 撤 / 不撤 |
+| BMK-056.8 | `head_mode` 2,规则 15 触发,`head_gate` −50 c / +50 c | 挂 / 不挂 |
+
