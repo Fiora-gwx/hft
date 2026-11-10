@@ -1566,7 +1566,10 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
                     .books
                     .l2(l.inst)
                     .is_none_or(|b| b.state() == hft_book::BookState::Live);
-                if b.seq == 0 || !b.conn_up || !book_ok {
+                // A price-only leg (Index/Mark stream, no Bbo: the Chainlink reference) is quoted once
+                // its first Mark arrived.
+                let price_only = b.seq == 0 && e.market.row(l.inst).is_some_and(|r| r.mark_ens != 0);
+                if !price_only && (b.seq == 0 || !b.conn_up || !book_ok) {
                     ok = false;
                 }
             }
