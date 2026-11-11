@@ -197,6 +197,9 @@ pub struct PmLive {
     /// `--cl-keys DIR`: the `api_key`/`secret`/`passphrase` files of the Chainlink login; `None`
     /// = `keys_dir` (the same files as `pm-live`'s, read once).
     pub cl_keys: Option<PathBuf>,
+    /// `--cb-perp`: `[venues.cp]` (the Coinbase perpetual-style future `PM_CB_PERP_SYMBOL`,
+    /// `coinbase-adv`, market data only) is written and binary-maker's `ref_aux` gets bit 2.
+    pub cb_perp: bool,
 }
 
 impl PmLive {
@@ -208,6 +211,7 @@ impl PmLive {
             chainlink: self
                 .chainlink
                 .then(|| self.cl_keys.clone().unwrap_or_else(|| self.keys_dir.clone())),
+            cb_perp: self.cb_perp,
         }
     }
 }
@@ -223,7 +227,13 @@ pub struct Refs {
     /// `[venues.cl]`: Chainlink BTC/USD price and TWAP; the directory of the login files
     /// (`api_key`, `secret`, `passphrase`; read and unlinked by hft-core at start).
     pub chainlink: Option<PathBuf>,
+    /// `[venues.cp]`: the Coinbase perpetual-style future (level-2 best quotes).
+    pub cb_perp: bool,
 }
+
+/// The Coinbase Derivatives perpetual-style BTC future on Advanced Trade (tick 5 USD, one
+/// contract = 0.01 BTC; `--cb-perp`).
+pub const PM_CB_PERP_SYMBOL: &str = "BIP-20DEC30-CDE";
 
 impl PmLive {
     /// Labels of accounts 1, 2, … (`pm-live`, then each extra account's label or `pm-live-<id>`).
@@ -378,6 +388,7 @@ pub fn write_polymarket_maker_sim_opts(
         coinbase,
         perp: true,
         chainlink: None,
+        cb_perp: false,
     };
     write_polymarket_maker_sim_refs(root, hot, user, pipeline, src_ip, bind_device, params, &refs)
 }
@@ -666,11 +677,13 @@ fn write_pm(
     let cb = VenueId::COINBASE_SPOT;
     let bp = VenueId::BINANCE_USDM;
     let clv = VenueId::POLYMARKET_PRICE;
+    let cbp = VenueId::COINBASE_ADV;
     // The further reference markets ride with the maker's Binance reference.
     let coinbase = maker && refs.coinbase;
     let perp = maker && refs.perp;
     let cl_keys = if maker { refs.chainlink.clone() } else { None };
     let chainlink = cl_keys.is_some();
+    let cb_perp = maker && refs.cb_perp;
     let a = AccountId(1);
     let usdc = AssetId(1);
     let desc = Strategies::kinds()
@@ -692,7 +705,8 @@ fn write_pm(
     let bnb = AssetId(slots.len() as u16 + 4);
     let reference = InstId(slots.len() as u32 + 1);
     // USD after BNB (Coinbase and Chainlink quote it); the further references after the Binance
-    // one, in the order Coinbase, perpetual, Chainlink (each only when present).
+    // one, in the order Coinbase, perpetual, Chainlink, Coinbase perpetual (each only when
+    // present).
     let usd = AssetId(slots.len() as u16 + 5);
     let mut next_inst = slots.len() as u32 + 2;
     let mut take = |on: bool| {
@@ -704,6 +718,7 @@ fn write_pm(
     let cb_ref = take(coinbase).unwrap_or(InstId(0));
     let perp_ref = take(perp);
     let cl_ref = take(chainlink);
+    let cbp_ref = take(cb_perp);
     // Reference groups after the slots: (asset, venue) in group order.
     let mut ref_groups = vec![(btc, bn)];
     if coinbase {
@@ -714,6 +729,9 @@ fn write_pm(
     }
     if chainlink {
         ref_groups.push((btc, clv));
+    }
+    if cb_perp {
+        ref_groups.push((btc, cbp));
     }
     let token = |i: usize| AssetId(i as u16 + 2);
     let mut b = RdbBuilder::new(1);
@@ -759,7 +777,7 @@ fn write_pm(
                 dust: Qty(1),
             });
         }
-        if coinbase || chainlink {
+        if coinbase || chainlink || cb_perp {
             b.asset(AssetSpec {
                 id: usd,
                 name: "USD".into(),
@@ -1069,6 +1087,65 @@ fn write_pm(
             );
         }
     }
+    if cb_perp {
+        // Coinbase Advanced Trade, market data only (venue rows in ascending id order: 18 last).
+        b.venue(VenueSpec {
+            id: cbp,
+            exchange: Exchange::Coinbase,
+            product: InstKind::Perp,
+            ws_max_streams_per_conn: 2,
+            ws_max_in_msgs_per_s: 8,
+            ws_max_conn_age_s: 86_400,
+            ws_new_conn_per_5min_ip: 300,
+            app_ping_interval_s: 0,
+            ts_unit: TsUnit::Us,
+            client_id_max_len: 36,
+            client_id_prefix: "".into(),
+            max_batch: 1,
+            max_inflight_amend: 1,
+            crossed_tolerance_default: 0,
+            stale_guard: StaleGuardKind::None,
+        });
+        for (role, url) in [
+            (EndpointRole::MdPublic, "wss://advanced-trade-ws.coinbase.com"),
+            (EndpointRole::MdMarket, "wss://advanced-trade-ws.coinbase.com"),
+            // No REST use; the assembly requires a public REST endpoint per venue.
+            (EndpointRole::Rest, "https://api.coinbase.com"),
+        ] {
+            b.endpoint(
+                cbp,
+                Endpoint {
+                    env: EndpointEnv::Prod,
+                    role,
+                    url: url.into(),
+                    conn_group: 0,
+                },
+            );
+        }
+        b.caps(venue_coinbase::CoinbaseAdv::default_caps(|s| {
+            (s == "USD").then_some(usd)
+        }));
+        b.fee(FeeSpec {
+            venue: cbp,
+            tier: 0,
+            fee: FeePair {
+                maker: Rate(0),
+                taker: Rate(0),
+            },
+        });
+        for r in venue_coinbase::CoinbaseAdv::rate_rules() {
+            b.limit(
+                cbp,
+                RateLimit {
+                    scope: r.scope,
+                    bucket: r.bucket,
+                    limit: r.limit,
+                    window_ms: r.window_ms,
+                    default_cost: 1,
+                },
+            );
+        }
+    }
     for (i, s) in slots.iter().enumerate() {
         b.inst(InstSpec {
             id: InstId(i as u32 + 1),
@@ -1181,6 +1258,30 @@ fn write_pm(
             ..InstSpec::default()
         });
     }
+    if let Some(id) = cbp_ref {
+        // Market data only: tick 5 USD; quantities are contracts of 0.01 BTC.
+        b.inst(InstSpec {
+            id,
+            venue: cbp,
+            symbol: PM_CB_PERP_SYMBOL.into(),
+            kind: InstKind::Perp,
+            asset: btc,
+            quote: usd,
+            qty_unit_shift: -2,
+            tick: 50_000,
+            lot: 1_000_000,
+            min_qty: Qty(1_000_000),
+            max_qty: Qty(100_000_000_000),
+            min_notional: Notional(1_000_000),
+            book_window: 4096,
+            tick_str: "5".into(),
+            lot_str: "1".into(),
+            min_qty_str: "1".into(),
+            funding_interval_s: 3_600,
+            max_leverage: 10,
+            ..InstSpec::default()
+        });
+    }
     b.instance(InstanceSpec {
         id: StrategyId(1),
         kind_id: desc.kind_id,
@@ -1262,9 +1363,10 @@ fn write_pm(
         }
     }
     if strategy == PmStrategy::Maker {
-        // The auxiliary groups (binary-maker `ref_aux`): bit 0 perpetual, bit 1 Chainlink.
+        // The auxiliary groups (binary-maker `ref_aux`): bit 0 perpetual, bit 1 Chainlink, bit 2
+        // Coinbase perpetual.
         defaults[field("ref_aux").ok_or("binary-maker has no `ref_aux`")?] =
-            i64::from(perp) | i64::from(chainlink) << 1;
+            i64::from(perp) | i64::from(chainlink) << 1 | i64::from(cb_perp) << 2;
     }
     for (name, value) in params {
         if let Some(k) = field(name) {
@@ -1419,7 +1521,7 @@ fn write_pm(
     ledger.stable_par_fallback.clear();
     ledger.par_assets.push(hft_ledger::AssetName::new("USDC"));
     // Coinbase and Chainlink quote BTC in USD: valued at par (no position is ever held on them).
-    if coinbase || chainlink {
+    if coinbase || chainlink || cb_perp {
         ledger.par_assets.push(hft_ledger::AssetName::new("USD"));
     }
     let caps = Capacities {
@@ -1443,6 +1545,9 @@ fn write_pm(
     }
     if chainlink {
         feed_venues.push(clv);
+    }
+    if cb_perp {
+        feed_venues.push(cbp);
     }
     let mut engine = engine_base(&rd, &caps, ledger, feed_venues.clone());
     engine.drain_timeout_ms = 3000;
@@ -1580,6 +1685,15 @@ quote_interval_ms = 1000
         );
         text = text.replacen("[sim]\n", &format!("{cl_text}[sim]\n"), 1);
     }
+    if cb_perp {
+        let cp_text = format!(
+            "[venues.cp]\nprotocol = 'coinbase-adv'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
+             src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n\
+             [venues.cp.feed]\nrace_rotate_s = 600\n",
+            cbp.0
+        );
+        text = text.replacen("[sim]\n", &format!("{cp_text}[sim]\n"), 1);
+    }
     for (name, task, nice) in [
         ("sequencer", "sequencer", 0),
         ("persist", "persist", 10),
@@ -1612,6 +1726,12 @@ quote_interval_ms = 1000
     }
     if chainlink {
         for (name, task, nice) in [("feed-cl", "feed:cl", 0), ("build-cl", "conn-builder:cl", 10)] {
+            text +=
+                &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+        }
+    }
+    if cb_perp {
+        for (name, task, nice) in [("feed-cp", "feed:cp", 0), ("build-cp", "conn-builder:cp", 10)] {
             text +=
                 &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
         }
@@ -1657,7 +1777,7 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     let instance = table(config.get_mut("instance"))?;
     instance.insert("name".into(), "prod".into());
     instance.insert("order_env".into(), "prod".into());
-    for name in ["pm", "bn", "cb", "bp", "cl"] {
+    for name in ["pm", "bn", "cb", "bp", "cl", "cp"] {
         if let Some(v) = config["venues"].get_mut(name).and_then(toml::Value::as_table_mut) {
             v.remove("live_feed");
         }
