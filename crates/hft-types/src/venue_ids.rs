@@ -23,6 +23,9 @@ impl VenueId {
     pub const COINBASE_SPOT: VenueId = VenueId(16);
     /// Polymarket's live price stream (Chainlink price and TWAP; market data only; venue-pmprice).
     pub const POLYMARKET_PRICE: VenueId = VenueId(17);
+    /// Coinbase Advanced Trade derivatives (perpetual-style futures; market data only;
+    /// venue-coinbase `coinbase-adv`).
+    pub const COINBASE_ADV: VenueId = VenueId(18);
     pub const CHAIN_BSC: VenueId = VenueId(32);
     pub const CHAIN_SOLANA: VenueId = VenueId(33);
 
@@ -30,7 +33,7 @@ impl VenueId {
     #[inline]
     pub const fn market(self) -> Option<MarketKind> {
         match self.0 {
-            1 | 3 | 5 | 8 | 10 | 12 | 14 => Some(MarketKind::LinearPerp),
+            1 | 3 | 5 | 8 | 10 | 12 | 14 | 18 => Some(MarketKind::LinearPerp),
             2 | 4 | 6 | 9 | 11 | 13 | 15 | 16 | 17 => Some(MarketKind::Spot),
             _ => None,
         }
@@ -56,6 +59,7 @@ impl VenueId {
             15 => "POLYMARKET_CLOB",
             16 => "COINBASE_SPOT",
             17 => "POLYMARKET_PRICE",
+            18 => "COINBASE_ADV",
             32 => "CHAIN_BSC",
             33 => "CHAIN_SOLANA",
             _ => return None,

@@ -15,11 +15,17 @@
     clippy::unimplemented
 )]
 
+mod adv;
+mod adv_book;
+mod adv_md;
 mod caps;
 mod md;
 mod session;
 mod time;
 
+pub use adv::{CoinbaseAdv, ROUTE_L2};
+pub use adv_book::LEVELS as ADV_LEVELS;
+pub use adv_md::{AdvClass, AdvFeedCtx, BOOKS as ADV_BOOKS};
 pub use md::MdClass;
 pub use session::{ROUTE_BBO, ROUTE_MD};
 pub use time::iso8601_ns;

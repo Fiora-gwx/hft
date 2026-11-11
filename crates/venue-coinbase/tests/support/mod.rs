@@ -9,16 +9,20 @@ use hft_refdata::{
 };
 use hft_types::{AssetExp, AssetId, ConnId, InstId, Notional, Px, Qty, Rate, VenueId};
 use hft_venue_proto::{RxMeta, VenueProtocol};
-use venue_coinbase::CoinbaseSpot;
+use venue_coinbase::{CoinbaseAdv, CoinbaseSpot};
 
 pub const USD: AssetId = AssetId(1);
 pub const BTC: AssetId = AssetId(2);
 pub const BTC_USD: InstId = InstId(1);
 /// An inst of another venue whose symbol is also `BTC-USD`.
 pub const FOREIGN: InstId = InstId(2);
+/// `COINBASE_ADV` `BIP-20DEC30-CDE` (tick 5 USD, one contract = 0.01 BTC).
+pub const BIP: InstId = InstId(3);
 
 /// `RD-CB`: USD (Stable) and BTC (px −4, qty −8); `COINBASE_SPOT` `BTC-USD` = InstId 1 (tick
-/// 0.01, lot 1e-8); `BINANCE_SPOT` `BTC-USD` = InstId 2 (a foreign inst with the same symbol).
+/// 0.01, lot 1e-8); `BINANCE_SPOT` `BTC-USD` = InstId 2 (a foreign inst with the same symbol);
+/// `COINBASE_ADV` `BIP-20DEC30-CDE` = InstId 3 (perpetual, tick 5, `qty_unit_shift` −2: wire
+/// quantities are contracts of 0.01 BTC).
 pub fn rd() -> &'static RefData {
     static RD: OnceLock<RefData> = OnceLock::new();
     RD.get_or_init(|| RefData::load(&blob(), None).unwrap_or_else(|e| panic!("RD-CB rejected: {e:?}")))
@@ -84,8 +88,46 @@ pub fn blob() -> Vec<u8> {
             },
         });
     }
+    b.venue(VenueSpec {
+        id: VenueId::COINBASE_ADV,
+        exchange: Exchange::Coinbase,
+        product: InstKind::Perp,
+        ws_max_streams_per_conn: 2,
+        ws_max_in_msgs_per_s: 8,
+        ws_max_conn_age_s: 86_400,
+        ws_new_conn_per_5min_ip: 300,
+        app_ping_interval_s: 0,
+        ts_unit: TsUnit::Us,
+        client_id_max_len: 36,
+        client_id_prefix: "".into(),
+        max_batch: 1,
+        max_inflight_amend: 1,
+        crossed_tolerance_default: 0,
+        stale_guard: StaleGuardKind::None,
+    });
+    b.fee(FeeSpec {
+        venue: VenueId::COINBASE_ADV,
+        tier: 0,
+        fee: FeePair {
+            maker: Rate(0),
+            taker: Rate(0),
+        },
+    });
     b.caps(venue_binance_caps());
     b.caps(CoinbaseSpot::default_caps(|_| None));
+    b.caps(CoinbaseAdv::default_caps(|_| None));
+    for r in CoinbaseAdv::rate_rules() {
+        b.limit(
+            VenueId::COINBASE_ADV,
+            RateLimit {
+                scope: r.scope,
+                bucket: r.bucket,
+                limit: r.limit,
+                window_ms: r.window_ms,
+                default_cost: 1,
+            },
+        );
+    }
     for r in CoinbaseSpot::rate_rules() {
         b.limit(
             VenueId::COINBASE_SPOT,
@@ -122,6 +164,28 @@ pub fn blob() -> Vec<u8> {
             ..InstSpec::default()
         });
     }
+    b.inst(InstSpec {
+        id: BIP,
+        venue: VenueId::COINBASE_ADV,
+        symbol: "BIP-20DEC30-CDE".into(),
+        status: InstStatus::Trading,
+        kind: InstKind::Perp,
+        asset: BTC,
+        quote: USD,
+        qty_unit_shift: -2,
+        tick: 50_000,
+        lot: 1_000_000,
+        min_qty: Qty(1_000_000),
+        max_qty: Qty(100_000_000_000),
+        min_notional: Notional(1_000_000),
+        book_window: 4096,
+        tick_str: "5".into(),
+        lot_str: "1".into(),
+        min_qty_str: "1".into(),
+        funding_interval_s: 3_600,
+        max_leverage: 10,
+        ..InstSpec::default()
+    });
     b.finish()
 }
 
@@ -169,6 +233,19 @@ pub fn fixture(msg_type: &str, case: &str) -> (Vec<u8>, Vec<serde_json::Value>) 
 pub fn jsonl(rel: &str) -> Vec<serde_json::Value> {
     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/coinbase-spot")
+        .join(rel);
+    std::fs::read_to_string(p)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+/// Lines of a `.jsonl` file under `fixtures/coinbase-adv/`.
+pub fn jsonl_adv(rel: &str) -> Vec<serde_json::Value> {
+    let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/coinbase-adv")
         .join(rel);
     std::fs::read_to_string(p)
         .unwrap()

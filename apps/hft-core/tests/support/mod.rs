@@ -837,6 +837,7 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
             perp: true,
             chainlink: true,
             cl_keys: None,
+            cb_perp: false,
         }
     }
 }

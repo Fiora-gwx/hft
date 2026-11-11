@@ -24,6 +24,7 @@ status: impl
   - [限速默认值](#限速默认值)
   - [VenueCaps 默认值](#venuecaps-默认值)
   - [账户](#账户)
+  - [Advanced Trade 衍生品行情(coinbase-adv)](#advanced-trade-衍生品行情coinbase-adv)
   - [接入清单中不适用的步骤](#接入清单中不适用的步骤)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
@@ -123,6 +124,18 @@ hft-core 装配:`venues.<v>.protocol = "coinbase-spot"`,与 `binance-spot` 参�
 ### 账户
 
 无。`build_templates`、`encode`、`private_subscribe`、`session_identity_request`、`account_request` → `Unsupported`;`decode_report`、`decode_identity`、`account_decode`、`funding_decode`、`decode_snapshot` → `UnknownClass`;`login` 对 `Md` 返回 `NotNeeded`,其余角色 `Unsupported`;`render_cid` 返回 0、`parse_cid` 返回 `None`。hft-core 对带 `accounts` 的本协议 venue 退出 2(`ReadOnlyVenue`)。
+
+### Advanced Trade 衍生品行情(coinbase-adv)
+
+本 crate 的第二个协议 `CoinbaseAdv`(`coinbase-adv`,`VenueId::COINBASE_ADV` = 18,`MarketKind::LinearPerp`):Coinbase Advanced Trade 公共行情里的衍生品(Coinbase Derivatives 的永续式期货,当前 `BIP-20DEC30-CDE`:最小变动 5 USD,一张合约 0.01 BTC)。同样只读:没有下单、账户、登录;订单、回报、账户与会话身份方法返回 trait 允许的 `Unsupported` / `UnknownClass` 形式。用途:binary-maker 规则 15 的 Coinbase 永续触发源,并把它的最优报价记进 journal。
+
+- **端点与路由**:`wss://advanced-trade-ws.coinbase.com`,路径 `/`,无需鉴权(2026-11-11 实测)。一条 `Bbo` 路由 `level2`(`ROUTE_L2`,赛马,`feed.bbo_conns` 缺省 2);只有 `StreamKind::Bbo` 有路由。Exchange 行情(`coinbase-spot` 用的 `ws-feed.exchange.coinbase.com`)没有这个产品,`level2` 在那边还要鉴权;Advanced Trade 的 `ticker` 频道对这个产品每秒约 2 条、比 `level2` 的最优报价变化晚约 145 ms(2026-11-10 录制的中位数),所以不用。
+- **订阅与保活**:`{"type":"subscribe","product_ids":["BIP-20DEC30-CDE"],"channel":"level2"}`(一帧覆盖领头的 `Bbo` 订阅项,至多 2 个产品;退订把 `subscribe` 换成 `unsubscribe`);每帧由一条 `subscriptions` 应答 → `ControlHint::SubAck{ok: true}`;`{"type":"error",…}` → `SubAck{ok: false}`(产品名不存在时交易所不报错,只是应答里没有它:此时没有数据,该 inst 一直不出报价)。交易所对一分钟左右没有数据的订阅会断开,要靠 `heartbeats` 频道保持;一次订阅调用只能发一帧,所以 `heartbeats` 由 BBO 探测帧来订:`bbo_probe()` = `PingKind::AppJson`,`app_ping` 写出 `{"type":"subscribe","channel":"heartbeats"}`,每 `feed.bbo_ping_ms`(1 s)发一次。第一次订上 `heartbeats`(此后每秒一帧 → `ControlHint::Pong`),之后的重复订阅交易所每次都回一条 `subscriptions`;这些应答同样是 `SubAck{ok: true}`,运行时没有待应答的订阅帧时只把它计为多余的应答(`stray_ack`),不影响订阅状态。
+- **`level2` → `Bbo`**:`l2_data` 帧的每个事件是一个产品的 `snapshot`(全簿,2026-11-11 为 1 432 档、145 KB)或 `update`(若干档的新数量,0 = 删除)。解码器按(连接, 产品)各保存一本簿(`AdvFeedCtx`,启动时一次分配:`ADV_BOOKS` = 4 本,每边最优的 `ADV_LEVELS` = 1 024 档,按价格排序;超出的最差档丢弃并记下,该边被删空时其最优价未知、不出事件);`snapshot` 重建该连接的簿,`snapshot` 之前的 `update` 忽略,没有 inst 的产品跳过。一个事件应用完后,若该连接的最优买卖(价、量)变了、两边都有且买 < 卖,就是一个候选 `Bbo`:`ex_ts_ns` = 该事件各档 `event_time` 的最大值,`update_id` = 它的微秒数,价格按 `px_wire_exp`、数量按 `qty_wire_exp`(合约张数 × 0.01 BTC)精确解析。
+- **两条连接的合并**:这个频道没有两条连接共用的序号(`sequence_num` 是每条连接自己的帧计数),而且两条连接各自批量合并更新、批次边界不同,所以运行时的去重规则是 `SeqRule::None`(每帧都交给解码器),去重在解码器里做:候选与上一个已转发的最优报价相同 → 不发;来自另一条连接且交易所时间不晚于上一个已转发的 → 不发(较慢连接重放的旧状态);否则转发并记为最新。结果是按交易所时间严格递增的一串最优报价,比单条连接更密(2026-11-11 的 25 s 录制:单连接 116 / 117 次变化,合并后 147 个事件,两条连接各有领先)。
+- **解析**:逐字节游标,不分配;对象成员顺序不限,未知成员跳过;本 crate 读的字符串里出现反斜杠 → `Shape`;帧在任何位置被截断 → `Truncated`;缺字段、未知的 `type` 或 `side` → `Shape`;数值或时间写法不对 → `Number`。帧的第一遍只找 `timestamp` 与 `events` 的位置,截断在这一遍就报错,簿不变。
+- **默认值**:`VenueCaps` 无能力位、`LinearPerp`、`funding_settle = RateOnly`(refdata 要求永续行写明;从不结算);限速规则与 `coinbase-spot` 相同;`heartbeat(role)` 与 `coinbase-spot` 同(WS Ping 5 s),只对非 BBO 连接有意义,本协议没有。
+- **限制**:行情连接的接收缓冲与单帧上限(hft-net `rx_buf.md`、`max_msg`,缺省 256 KiB)要容得下簿快照(现在 145 KB);簿若长到超过这个上限,连接会在快照处失败,需要先调大该 venue 的缓冲。到达实盘机的延迟约 60 ms(2026-11-10,`level2` 最优报价变化的中位数)。
 
 ### 接入清单中不适用的步骤
 

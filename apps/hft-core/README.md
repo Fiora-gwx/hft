@@ -80,7 +80,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `AccountMismatch` | 2 | `[[accounts]]` 的 `id`/`label` 与 refdata `AccountMeta` 不一致,或引用 refdata 中没有的账户 |
 | `SecretsInSim` | 2 | `sim` 实例出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` |
 | `LiveFeed` | 2 | 网络模式(非 `--dry-run`)出现 `venues.<v>.live_feed` |
-| `ReadOnlyVenue` | 2 | 只读行情协议(`venues::READ_ONLY_PROTOCOLS`,当前 `coinbase-spot`、`polymarket-price`)的 venue 配了 `accounts`:协议没有下单、回报与账户方法 |
+| `ReadOnlyVenue` | 2 | 只读行情协议(`venues::READ_ONLY_PROTOCOLS`,当前 `coinbase-spot`、`coinbase-adv`、`polymarket-price`)的 venue 配了 `accounts`:协议没有下单、回报与账户方法 |
 | `MdLoginRequired` / `MdLoginUnsupported` | 2 | 行情要登录的协议(`venues::MD_LOGIN_PROTOCOLS`,当前 `polymarket-price`)缺 `venues.<v>.md_login` / 其他协议配了它 |
 | `MissingCredential` | 2 | Live 账户在其交易的某个 venue 缺会话 key 或 REST key 的秘密名 |
 | `EndpointOverrideInProd` | 2 | `order_env = "prod"` 的配置出现 `endpoint_override` 或 `test.extra_ca` |
@@ -756,7 +756,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `[[threads]]` | 数组 `{name, core, idle, nice?, tasks}` | 线程计划 | 必填(deploy 按主机类模板生成) |
 | `rt.*` | 表 | 校准、PHC、`rt.host.mode` | 见 [hft-rt 配置项](../../crates/hft-rt/README.md) |
 | `journal.<name>.segment_bytes` / `.hot_keep`、`journal.page` | u64 / u8 / `huge`\|`normal` | 键由 hft-journal 定义 | 取值按[内存表](#内存与-journal-段按主机类唯一归属);tmpfs 主机类与 `sim` 实例必须 `normal` |
-| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp`、`polymarket-clob`(Cargo feature `polymarket`;当前只有行情)、`polymarket-price`(只读行情:Chainlink 价格 → IndexPrice、60 s TWAP → MarkPrice,行情连接登录,须有 `md_login`,不得有 `accounts`,[venue-pmprice](../../crates/venue-pmprice/README.md))、`coinbase-spot`(只读行情:Bbo 与成交,不得有 `accounts`,[venue-coinbase](../../crates/venue-coinbase/README.md)) | 必填 |
+| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp`、`polymarket-clob`(Cargo feature `polymarket`;当前只有行情)、`polymarket-price`(只读行情:Chainlink 价格 → IndexPrice、60 s TWAP → MarkPrice,行情连接登录,须有 `md_login`,不得有 `accounts`,[venue-pmprice](../../crates/venue-pmprice/README.md))、`coinbase-spot`(只读行情:Bbo 与成交,不得有 `accounts`,[venue-coinbase](../../crates/venue-coinbase/README.md))、`coinbase-adv`(只读行情:Coinbase Advanced Trade 衍生品的 level2 → Bbo,不得有 `accounts`,同一 crate) | 必填 |
 | `venues.<v>.max_sub_insts` | u16 | 该 venue 订阅 inst 上限;Σ ≤ 容量 `max_insts`(装配期交叉校验);装配时写进该 venue 每个行情任务的 `FeedCfg.max_sub_insts` | 必填(deploy 生成:`dev2` 按线程计划,其他按容量表) |
 | `venues.<v>.optional` | bool | true 时该 venue 起不来不阻塞其他 venue 的闸门 | 必填 |
 | `venues.<v>.live_feed` | bool | 只用于 `--dry-run`:该 venue 的行情取自交易所公共行情而不是 `sim.quotes`(订单仍进 sim-gw);网络模式出现即退出 2(`LiveFeed`) | false |

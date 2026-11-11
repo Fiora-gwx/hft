@@ -4810,3 +4810,18 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-445.3 | 不带默认表的 Polymarket 实盘配置(`presign: false`)加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
 | CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000)、无 `grid_qty`;后者的配置文本不含 `presign` |
 | CORE-445.5 | 同 .3 的实盘配置,表 (3, 1, `step`, 30 000) 加 `grid_qty`:(`0.01`, `5`)、(`0.5`, `0.25`);再分别为 `grid_qty` `0`、`5.0000001`、`-5`、空,以及 `step` `0.03`、`0.005`、`1` 配 `grid_qty` `5` | 前两者加载成功,`grid_qty` 原样、`grid_qty_e6` = 5 000 000、250 000;其余含 `BadValue`(数量无效;1 不被 `step` 整除、199 个价位、0 个价位) |
+
+### CORE-456 `coinbase-adv` 的登记、公共端点白名单与带 Coinbase 永续参考的实盘配置
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.protocol`);协议归 [venue-coinbase](../../crates/venue-coinbase/README.md)
+- 级别:table
+- 里程碑:M3
+- 前置:直接调用 `hft_core::venues` 的登记函数;`hft_pmcfg::write_polymarket_maker_live_with`(`cb_perp = true`,参数 `lead_w_ms` 300、`lead_x_bp` 1 bp、`lead_src` 15、`lead_cf_ms` 200、`lead_cf_x_bp` 0.5 bp;Cargo feature `polymarket`)
+- 实现:`apps/hft-core/tests/config.rs::core_456_coinbase_adv_registration_and_config`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-456.1 | `registered("coinbase-adv", 18)`;与 `COINBASE_SPOT` 配对;`gw_rest_defaults`;`shared_egress_ip`;`READ_ONLY_PROTOCOLS` | `Ok`;`Err`;`(2, 0)`;假;含 `coinbase-adv` |
+| CORE-456.2 | `public_market_endpoint`:MdPublic/MdMarket `wss://advanced-trade-ws.coinbase.com`、Rest `https://api.coinbase.com`;同 URL 的 OrderWs/UserData;主机加 `.evil.invalid`;Exchange feed 主机;`coinbase-spot` 配 Advanced Trade 主机 | 允许;其余全部拒绝 |
+| CORE-456.3 | 带 `--cb-perp` 的实盘做市配置 | 加载成功;venue 18 只有 InstId 11;`venues.cp` = `coinbase-adv`、18 |
+| CORE-456.4 | 给 `venues.cp` 加 `accounts` | `ReadOnlyVenue` |
