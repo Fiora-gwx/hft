@@ -452,6 +452,7 @@ fn pmk_008_subscribe_frames_from_bindings() {
         Err(ProtoErr::Unsupported)
     );
     const { assert!(!Pm::SUB_ACKS) };
+    assert_eq!(Pm::REST_KEEPALIVE_PATH, b"/time", "PMK-008.6");
 }
 
 #[test]

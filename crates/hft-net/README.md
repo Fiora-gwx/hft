@@ -278,6 +278,9 @@ impl<const N: usize> RestPool<N> {
     pub fn new(host: &[u8], cfg: &NetConfig, clock: TscClock) -> Self;   // N 条通道,不保留
     /// 只用前 lanes 条通道(1..=N),其中 reserve(< lanes)条空闲通道只给 submit_urgent(§9 通道数与保留);越界 → None。
     pub fn with_lanes(host: &[u8], cfg: &NetConfig, clock: TscClock, lanes: usize, reserve: usize) -> Option<Self>;
+    /// 仅启动期:保活请求的目标(该端点的一个无需鉴权、代价低的 GET;空 = 不发)。配合 rest_keepalive_ms(§9 保活)。
+    pub fn set_keepalive(&mut self, path: &[u8]);
+    pub fn keepalives(&self) -> u64;              // 已发出的保活请求数
     pub fn lanes(&self) -> usize;                 // 使用的通道数
     pub fn free_lanes(&mut self) -> usize;        // Open 且没有在途请求的通道数
     /// 空闲的 Open 通道数 ≤ reserve(含 0,且有 Open 连接)→ Busy;没有 Open 连接 → NoConn;请求拼接超过 tx 明文区 → ReqTooLarge(都未加密)。
@@ -289,7 +292,7 @@ impl<const N: usize> RestPool<N> {
     /// 只读有在途请求的连接;返回一个完整响应(已去 chunk)或一个失败(该连接随之退役)。
     pub fn poll(&mut self, now_tsc: u64) -> Option<Result<RestResp<'_>, RestFail>>;
     /// 对没有在途请求的连接各做一次非阻塞读,只为发现对端关闭(EOF、RST、close_notify)或协议错误(未请求的数据),
-    /// 发现即退役补建;`rest_max_idle_ms` 非 0 时另退役至多一条空闲达该时长的连接(§9 空闲回收);返回本次读过的连接数。
+    /// 发现即退役补建;`rest_max_idle_ms` 非 0 时另退役至多一条空闲达该时长的连接(§9 空闲回收);配置了保活时随后至多发出一个保活请求(§9 保活);返回本次读过的连接数。
     /// 调用节拍由上层定(hft-venue `gw.rest_idle_check_ms`)。
     pub fn idle_check(&mut self, now_tsc: u64) -> u8;
     /// 补建与退役的交接同 ConnPool:连接数 < 通道数且无在建时 next_build 给 Fill;退役的连接经 take_retired 交出。
@@ -367,6 +370,7 @@ impl TxTsDrain {
 | `warm_interval_ns` | u64 | 0(关) | `warm` 最小调用间隔;scratch TLS 预热是可选项,默认关 |
 | `rest_timeout_ms` | u32 | 2000 | REST 请求超时 → `RestErr::Timeout`;hft-core 按 venue 配置(`venues.<v>.net.rest_timeout_ms`,[hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段));有下单网关的 venue 须 ≤ 该 venue 的 OMS `ack_timeout_ms`([hft-oms 配置](../hft-oms/README.md)),否则订单的迟到应答在 OMS 仍等待时已被丢弃 |
 | `rest_max_idle_ms` | u32 | 0(关) | 池中连接空闲(无在途请求、距上次应答或交接)达此时长即由 `idle_check` 退役并补建(§9 空闲回收);hft-core 按 venue 配置(`venues.<v>.net.rest_max_idle_ms`) |
+| `rest_keepalive_ms` | u32 | 0(关) | 池设了保活目标(`RestPool::set_keepalive`)时,`idle_check` 对还没有应答过请求的连接、以及空闲达此时长的连接发保活请求(§9 保活);hft-core 按 venue 配置(`venues.<v>.net.rest_keepalive_ms`) |
 | `ts_expect_hw` | bool | true | 生产开;缺 HW 戳置 `TS_MISSING` |
 | `tls_mode` | `unbuffered \| buffered` | `unbuffered`(`dev2` 可设 `buffered`) | `unbuffered` = rustls 握手 + 本 crate 的原地记录层(实现说明 §1);`buffered` = rustls 普通 `ClientConnection`(内部缓冲,读写各多一次拷贝、稳态有分配);**`Conn` 的公开 API 不变**,只换 `src/tls.rs` 的后端。`buffered` 随 M3(NET-340–NET-342)实现,此前 `Connector::new` 拒绝;零分配测试与延迟基准只对 `unbuffered` 生效 |
 
@@ -491,7 +495,7 @@ PrimaryStandby:  [P 发单] [S 已登录、心跳] [W 预热中?]  只有 P 发�
 
 ### 9. REST 客户端
 
-HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scratch 中拼接(`Host`、`Accept-Encoding: identity`、`Connection: keep-alive`、上层给的签名头),一次 `encrypt` + `sendmsg`。响应头用 `httparse`,正文支持 `Content-Length` 与 chunked(原地去 chunk);204/304 无正文;其余既无 `Content-Length` 又非 chunked → `RestErr::Proto`;接收缓冲满仍凑不齐响应(或 `Content-Length` 已超过 `rx_buf`)→ `RestErr::TooLarge`;`now_tsc` 距 `submit` ≥ `rest_timeout_ms` 仍无完整响应 → `RestErr::Timeout`;响应完整前对端关闭 → `RestErr::Closed`。每连接一个在途请求(不做 pipelining),`submit` 在空闲连接间轮转(按连接序号循环);`poll` 只读有在途请求的连接,空闲的 keep-alive 连接只在 `idle_check` 时各读一次(对端已关闭或送来未请求的数据 → 退役补建,后者置 `HTTP_PROTO`);`Connection: close` 的响应交出后、或任何 `RestFail` 之后该连接退役补建(超时后迟到的响应不会被当作下一个请求的响应)。**空闲回收**:中间设备(NAT、负载均衡、CDN)可能不告而别地丢弃空闲的 keep-alive 连接,`idle_check` 的读只能发现干净的关闭,死连接上的请求只会超时;`rest_max_idle_ms` 非 0 时,`idle_check` 在读过之后退役一条空闲达该时长的连接(`why` = `IDLE_TIMEOUT`;空闲时长从交接后的第一次 `idle_check`、或上一个应答交出时算起,在途期间不计),每次至多一条,且只在池满(每条通道都有连接)、没有在建连接时进行,补建经 `next_build` 交给 warm 线程,另一条连接在此期间照常承接请求;热线程不建连。取值应明显小于路径上最短的空闲超时。一个池只连一个端点。**通道数与保留**:池的容量 `N` 是编译期上限,`with_lanes` 在启动期定下使用的通道数(1..=`N`;其余通道不建连、不交接、不分配接收缓冲,`next_build`、`install`、`idle_check` 只看使用的通道)与保留数 `reserve`(< 通道数):`submit` 只在空闲的 Open 通道多于 `reserve` 时发出(否则 `Busy`),`submit_urgent` 可以用任何空闲的 Open 通道。保留只按此刻空闲的 Open 通道计,不区分连接是否在建;`reserve = 0` 时两者相同。`new` 用全部 `N` 条、不保留。通道数与保留数的取值由上层定(gw:hft-venue `gw.rest_conns`、`gw.rest_cancel_reserve`)。用途:`Unknown` 订单查询、死手刷新(REST 型)、listenKey 续期、下单兜底(gw);账户配置查询与保证金轮询(warm 任务 acct-fetch,调度在 gw,[hft-venue §4a](../hft-venue/README.md#4a-账户查询保证金轮询与配置核验));BBO 补帧与(启用增量深度时的)行情快照(warm 任务 snap-fetch,[hft-venue §3b](../hft-venue/README.md#3b-快照获取snap-fetch))。feed 任务不持有 REST 连接。对账等冷查询在冷进程自带客户端,不用本池。本 crate 不区分这些用途,只保证一连接一在途、响应体 ≤ `rx_buf`。
+HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scratch 中拼接(`Host`、`Accept-Encoding: identity`、`Connection: keep-alive`、上层给的签名头),一次 `encrypt` + `sendmsg`。响应头用 `httparse`,正文支持 `Content-Length` 与 chunked(原地去 chunk);204/304 无正文;其余既无 `Content-Length` 又非 chunked → `RestErr::Proto`;接收缓冲满仍凑不齐响应(或 `Content-Length` 已超过 `rx_buf`)→ `RestErr::TooLarge`;`now_tsc` 距 `submit` ≥ `rest_timeout_ms` 仍无完整响应 → `RestErr::Timeout`;响应完整前对端关闭 → `RestErr::Closed`。每连接一个在途请求(不做 pipelining),`submit` 在空闲连接间轮转(按连接序号循环);`poll` 只读有在途请求的连接,空闲的 keep-alive 连接只在 `idle_check` 时各读一次(对端已关闭或送来未请求的数据 → 退役补建,后者置 `HTTP_PROTO`);`Connection: close` 的响应交出后、或任何 `RestFail` 之后该连接退役补建(超时后迟到的响应不会被当作下一个请求的响应)。**空闲回收**:中间设备(NAT、负载均衡、CDN)可能不告而别地丢弃空闲的 keep-alive 连接,`idle_check` 的读只能发现干净的关闭,死连接上的请求只会超时;`rest_max_idle_ms` 非 0 时,`idle_check` 在读过之后退役一条空闲达该时长的连接(`why` = `IDLE_TIMEOUT`;空闲时长从交接后的第一次 `idle_check`、或上一个应答交出时算起,在途期间不计),每次至多一条,且只在池满(每条通道都有连接)、没有在建连接时进行,补建经 `next_build` 交给 warm 线程,另一条连接在此期间照常承接请求;热线程不建连。取值应明显小于路径上最短的空闲超时。一个池只连一个端点。**保活**:有的前端会关掉握手之后迟迟不发请求的连接(Polymarket:15 s;应答过一次请求的连接空闲 130 s 仍可用),而 `idle_check` 的读至多每个节拍发现一次关闭,其间写进这种连接的请求立即失败(订单成为 `Unknown`)。池设了保活目标(`set_keepalive(path)`,上层在启动期给出,取协议的 `REST_KEEPALIVE_PATH`)且 `rest_keepalive_ms` 非 0 时,`idle_check` 在读过之后至多发出一个保活请求 `GET path`(只带池自己的头,无正文):先给还没有应答过任何请求的连接(交接后的第一个节拍),再给距上次应答达 `rest_keepalive_ms` 的连接(空闲最久的优先);一个池同一时刻至多一个保活在途,且只在发出之后剩下的空闲 Open 通道仍多于 `reserve` 时才发(订单与撤单能用的通道与不保活时相同;只有一条通道、或通道数 ≤ `reserve` + 1 的池不保活)。保活的应答由 `poll` 就地消化、不交给调用方:成功即把该连接记为已应答并重新计空闲时长(因此 `rest_max_idle_ms` 的回收在保活正常时不会发生,只作兜底);失败(超时、对端关闭、协议错误、`Connection: close`)按普通请求的规则退役补建。保活在途的通道对 `submit` 而言是忙的;`pending_conn`/`pending_sent`/`cancel` 只认调用方的请求。**通道数与保留**:池的容量 `N` 是编译期上限,`with_lanes` 在启动期定下使用的通道数(1..=`N`;其余通道不建连、不交接、不分配接收缓冲,`next_build`、`install`、`idle_check` 只看使用的通道)与保留数 `reserve`(< 通道数):`submit` 只在空闲的 Open 通道多于 `reserve` 时发出(否则 `Busy`),`submit_urgent` 可以用任何空闲的 Open 通道。保留只按此刻空闲的 Open 通道计,不区分连接是否在建;`reserve = 0` 时两者相同。`new` 用全部 `N` 条、不保留。通道数与保留数的取值由上层定(gw:hft-venue `gw.rest_conns`、`gw.rest_cancel_reserve`)。用途:`Unknown` 订单查询、死手刷新(REST 型)、listenKey 续期、下单兜底(gw);账户配置查询与保证金轮询(warm 任务 acct-fetch,调度在 gw,[hft-venue §4a](../hft-venue/README.md#4a-账户查询保证金轮询与配置核验));BBO 补帧与(启用增量深度时的)行情快照(warm 任务 snap-fetch,[hft-venue §3b](../hft-venue/README.md#3b-快照获取snap-fetch))。feed 任务不持有 REST 连接。对账等冷查询在冷进程自带客户端,不用本池。本 crate 不区分这些用途,只保证一连接一在途、响应体 ≤ `rx_buf`。
 
 ### 10. 内存
 

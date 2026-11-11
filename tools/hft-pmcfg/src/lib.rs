@@ -70,6 +70,9 @@ pub const PM_LIVE_PARAMS: [(&str, i64); 9] = hft_strategy_registry::BINARY_MAKER
 /// as long as the OMS waits for it), and the REST connections' maximum idle age.
 pub const PM_REST_TIMEOUT_MS: u32 = 5000;
 pub const PM_REST_MAX_IDLE_MS: u32 = 25_000;
+/// Live Polymarket: a REST connection of the gw that has not answered a request yet, or has been
+/// idle this long, gets the keep-alive `GET /time` (hft-net "9. REST 客户端", 保活).
+pub const PM_REST_KEEPALIVE_MS: u32 = 5000;
 
 /// Label of the first Live account (`--live`).
 pub const PM_LIVE_LABEL: &str = "pm-live";
@@ -452,7 +455,7 @@ pub fn check_params(s: PmStrategy, params: &[(String, i64)]) -> Result<(), Strin
 /// `live.keys_dir`, `PM_LIVE_PARAMS`, the micro risk limits (order 10 USDC, account and venue
 /// 55, slot group 25, daily loss `live.daily_loss_abs` or 15, resumes `live.daily_loss_max_resumes`
 /// or the default), OMS `ack_timeout_ms[polymarket] = 5000` and the REST pools'
-/// `venues.pm.net` (`rest_timeout_ms = 5000`, `rest_max_idle_ms = 25000`); every Polymarket
+/// `venues.pm.net` (`rest_timeout_ms = 5000`, `rest_max_idle_ms = 25000`, `rest_keepalive_ms = 5000`); every Polymarket
 /// config sets OMS `expire_window_ms[polymarket]` to the GTD lifetime (`stale_guard()`).
 /// `live.extra_accounts` are accounts 2, 3, … of the same instance with `pm-live`'s limits.
 pub fn write_polymarket_maker_live(
@@ -1682,11 +1685,12 @@ fn live_toml(text: &str, a: AccountId, extra: &[AccountId], l: &PmLive) -> Resul
     );
     // A place answer is read up to the OMS ack timeout (tail 0.8 s, multi-second at window
     // starts); an idle REST connection is rebuilt after 25 s, before a middlebox can drop it
-    // silently (hft-net "9. REST 客户端").
+    // silently (hft-net "9. REST 客户端"); the keep-alive request keeps every connection answered
+    // and fresh, so that rebuild is only the fallback.
     pm.insert(
         "net".into(),
         parse(&format!(
-            "rest_timeout_ms={PM_REST_TIMEOUT_MS}\nrest_max_idle_ms={PM_REST_MAX_IDLE_MS}"
+            "rest_timeout_ms={PM_REST_TIMEOUT_MS}\nrest_max_idle_ms={PM_REST_MAX_IDLE_MS}\nrest_keepalive_ms={PM_REST_KEEPALIVE_MS}"
         ))?,
     );
     if l.presign {

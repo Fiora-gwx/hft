@@ -147,6 +147,7 @@ spec: README.md
 | PMK-008.3 | 未绑定的绑定表 | `Err(Cfg)` |
 | PMK-008.4 | `Bbo` 流 | `Err(Unsupported)` |
 | PMK-008.5 | `SUB_ACKS` | `false` |
+| PMK-008.6 | `REST_KEEPALIVE_PATH` | `/time` |
 
 ### PMK-009 绑定表规则
 

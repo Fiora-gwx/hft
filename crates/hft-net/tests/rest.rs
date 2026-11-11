@@ -541,3 +541,140 @@ fn net_378_reserved_lanes_only_for_urgent_requests() {
     p.submit(&req(2), 0).unwrap();
     assert_eq!(p.submit(&req(3), 0), Err(RestErr::Busy), "NET-378.5");
 }
+
+#[test]
+fn net_379_keepalive_request() {
+    const S: u64 = 1_000_000_000;
+    let cfg = NetConfig {
+        rest_keepalive_ms: 5_000,
+        rest_max_idle_ms: 25_000,
+        ..NetConfig::default()
+    };
+    let sent = |p: &mut RestPool<16>, id: u8| p.get(ConnId(id)).unwrap().sys().sendmsg;
+    let pool = |n: u8, reserve: usize| {
+        let mut p =
+            RestPool::<16>::with_lanes(b"a.test", &cfg, mempeer::clock(), usize::from(n), reserve).unwrap();
+        let mut peers = Vec::new();
+        for id in 1..=n {
+            let (h, s) = rest_conn(&cfg, id);
+            p.install(h).unwrap();
+            peers.push(s);
+        }
+        (p, peers)
+    };
+    // .1 no path set, or rest_keepalive_ms = 0: idle_check sends nothing.
+    let (mut p, _s) = pool(3, 0);
+    p.idle_check(0);
+    p.idle_check(20 * S);
+    assert_eq!((p.keepalives(), p.free_lanes()), (0, 3), "NET-379.1 no path");
+    let (mut q, _s) = lanes(3, 0, 3);
+    q.set_keepalive(b"/time");
+    q.idle_check(0);
+    q.idle_check(20 * S);
+    assert_eq!((q.keepalives(), q.free_lanes()), (0, 3), "NET-379.1 off");
+    // .2 a connection that has not answered a request gets the keep-alive at the first check:
+    // GET of the path with the pool's own headers only, one in flight, the lowest lane first.
+    let (mut p, mut s) = pool(3, 0);
+    p.set_keepalive(b"/time");
+    p.idle_check(0);
+    assert_eq!((p.keepalives(), p.free_lanes()), (1, 2), "NET-379.2");
+    assert_eq!((sent(&mut p, 1), sent(&mut p, 2)), (1, 0), "NET-379.2");
+    s[0].pump(p.get(ConnId(1)).unwrap());
+    assert_eq!(
+        String::from_utf8(s[0].client_plain.clone()).unwrap(),
+        "GET /time HTTP/1.1\r\nHost: a.test\r\nAccept-Encoding: identity\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n",
+        "NET-379.2"
+    );
+    p.idle_check(1);
+    assert_eq!(p.keepalives(), 1, "NET-379.2 one in flight");
+    // .3 its answer is consumed by poll (nothing delivered); the next checks take the other
+    // connections that have not answered; then nothing is due.
+    deliver(&mut p, &mut s[0], 1, OK, 2);
+    assert!(p.poll(2).is_none(), "NET-379.3");
+    assert_eq!(p.free_lanes(), 3, "NET-379.3");
+    for (k, id) in [(1usize, 2u8), (2, 3)] {
+        p.idle_check(3);
+        assert_eq!(sent(&mut p, id), 1, "NET-379.3 conn {id}");
+        deliver(&mut p, &mut s[k], id, OK, 4);
+        assert!(p.poll(4).is_none(), "NET-379.3");
+    }
+    p.idle_check(5);
+    assert_eq!((p.keepalives(), p.free_lanes()), (3, 3), "NET-379.3");
+    // .4 an answered connection is due again rest_keepalive_ms after its last answer, the longest
+    // idle first; an answer to an ordinary request restarts that age too.
+    p.submit(&req(7), 3 * S).unwrap();
+    assert_eq!(p.pending_conn(7), Some(ConnId(1)), "NET-379.4");
+    deliver(&mut p, &mut s[0], 1, OK, 3 * S + 1);
+    assert_eq!(p.poll(3 * S + 1).unwrap().unwrap().tag, 7, "NET-379.4");
+    p.idle_check(5 * S + 1);
+    assert_eq!(p.keepalives(), 3, "NET-379.4 not due");
+    p.idle_check(5 * S + 4);
+    assert_eq!(
+        (p.keepalives(), sent(&mut p, 2), sent(&mut p, 3)),
+        (4, 2, 1),
+        "NET-379.4 conn 2 first"
+    );
+    deliver(&mut p, &mut s[1], 2, OK, 5 * S + 5);
+    assert!(p.poll(5 * S + 5).is_none(), "NET-379.4");
+    p.idle_check(5 * S + 6);
+    assert_eq!(
+        (p.keepalives(), sent(&mut p, 3), sent(&mut p, 1)),
+        (5, 2, 2),
+        "NET-379.4 conn 3, not conn 1"
+    );
+    deliver(&mut p, &mut s[2], 3, OK, 5 * S + 7);
+    assert!(p.poll(5 * S + 7).is_none(), "NET-379.4");
+    // .5 the answers keep the idle age below rest_max_idle_ms: nothing is recycled.
+    let mut now = 5 * S + 7;
+    let mut seen = [sent(&mut p, 1), sent(&mut p, 2), sent(&mut p, 3)];
+    while now < 60 * S {
+        now += S;
+        p.idle_check(now);
+        for id in 1..=3u8 {
+            let k = usize::from(id) - 1;
+            let n = sent(&mut p, id);
+            if n > seen[k] {
+                seen[k] = n;
+                deliver(&mut p, &mut s[k], id, OK, now + 1);
+            }
+        }
+        assert!(p.poll(now + 1).is_none(), "NET-379.5");
+    }
+    assert!(p.take_retired().is_none(), "NET-379.5");
+    assert!(p.keepalives() >= 25, "NET-379.5 {}", p.keepalives());
+    // .6 a keep-alive is sent only while the free connections left after it exceed the reserve:
+    // two connections with one reserved never send it; three do.
+    let (mut p, _s) = pool(2, 1);
+    p.set_keepalive(b"/time");
+    p.idle_check(0);
+    assert_eq!(p.keepalives(), 0, "NET-379.6 two lanes, one reserved");
+    let (mut p, _s) = pool(3, 1);
+    p.set_keepalive(b"/time");
+    p.idle_check(0);
+    assert_eq!(p.keepalives(), 1, "NET-379.6 three lanes, one reserved");
+    p.submit(&req(1), 1).unwrap();
+    assert_eq!(
+        p.submit(&req(2), 1),
+        Err(RestErr::Busy),
+        "NET-379.6 the reserve holds"
+    );
+    p.submit_urgent(&req(3), 1).unwrap();
+    // .7 a keep-alive without an answer times out like a request: the connection retires and
+    // nothing is delivered; a tag-0 request of the caller is not confused with it.
+    let (mut p, mut s) = pool(3, 0);
+    p.set_keepalive(b"/time");
+    p.idle_check(0);
+    p.submit(&req(0), 1).unwrap();
+    assert_eq!(
+        p.pending_conn(0),
+        Some(ConnId(2)),
+        "NET-379.7 tag 0 is the caller's request"
+    );
+    deliver(&mut p, &mut s[1], 2, OK, 2);
+    assert_eq!(p.poll(2).unwrap().unwrap().conn, ConnId(2), "NET-379.7");
+    assert!(p.poll(2 * S).is_none(), "NET-379.7 timeout not delivered");
+    let r = p.take_retired().unwrap();
+    assert_eq!(r.id(), ConnId(1), "NET-379.7");
+    assert!(r.why.contains(ErrBits::IDLE_TIMEOUT), "NET-379.7");
+    assert_eq!(p.next_build(2 * S), Some(BuildWhy::Fill), "NET-379.7");
+}

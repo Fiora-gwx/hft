@@ -4720,7 +4720,7 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-432.2 | OMS `expire_window_ms[polymarket]` | `PolymarketClob::stale_guard()` 的 `default_ms`(300 000);`not_found_grace_of` = 300 500 |
 | CORE-432.3 | OMS `unknown_alarm_ms` | 30 000(不改;`ExpireAt` 非链接槽的告警由 OMS 顺延 grace) |
 
-### CORE-433 REST 请求超时与空闲回收按 venue 配置(`venues.<v>.net`)
+### CORE-433 REST 请求超时、空闲回收与保活按 venue 配置(`venues.<v>.net`)
 
 - 规则:[配置文件字段](README.md#配置文件字段);键的语义归 [hft-net 配置项](../../crates/hft-net/README.md#配置项)
 - 级别:table
@@ -4730,10 +4730,10 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| CORE-433.1 | 未配置 | `NetOpts::apply` 后 `rest_timeout_ms = 2000`、`rest_max_idle_ms = 0`(hft-net 默认) |
-| CORE-433.2 | `[venues.public.net] rest_timeout_ms = 3000`、`rest_max_idle_ms = 20000` | 3000、20 000 |
+| CORE-433.1 | 未配置 | `NetOpts::apply` 后 `rest_timeout_ms = 2000`、`rest_max_idle_ms = 0`、`rest_keepalive_ms = 0`(hft-net 默认) |
+| CORE-433.2 | `[venues.public.net] rest_timeout_ms = 3000`、`rest_max_idle_ms = 20000`、`rest_keepalive_ms = 4000` | 3000、20 000、4000 |
 | CORE-433.3 | `rest_timeout_ms = 0`;未知键 `idle_ms` | `BadValue`;`ConfigParse` |
-| CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000;OMS `ack_timeout_ms[polymarket]` = 5000 |
+| CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000、5000;OMS `ack_timeout_ms[polymarket]` = 5000 |
 | CORE-433.5 | 同上改 `rest_timeout_ms = 5001` | 含 `RestTimeoutAboveAck` |
 
 ### CORE-434 Polymarket 实盘配置按 USDC 计当日亏损

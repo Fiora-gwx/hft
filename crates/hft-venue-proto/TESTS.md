@@ -1723,13 +1723,14 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)
 - 级别:table
 - 里程碑:M3
-- 前置:假协议 `FakeSpot`、`FakePerp`(都不覆盖这两项)
+- 前置:假协议 `FakeSpot`、`FakePerp`(都不覆盖这三项)
 - 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_152_gw_rest_pool_defaults`
 
 | 行 | 常量 | 期望 |
 |---|---|---|
 | VPR-152.1 | `GW_REST_CONNS` | 两者都是 2 |
 | VPR-152.2 | `GW_REST_CANCEL_RESERVE` | 两者都是 0 |
+| VPR-152.3 | `REST_KEEPALIVE_PATH` | 两者都是空 |
 
 ## 验收
 

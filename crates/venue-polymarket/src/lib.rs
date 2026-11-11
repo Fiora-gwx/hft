@@ -91,6 +91,9 @@ impl VenueProtocol for PolymarketClob {
     /// Every order op is REST (README "下单"): eight connections, one kept for cancels.
     const GW_REST_CONNS: u8 = 8;
     const GW_REST_CANCEL_RESERVE: u8 = 1;
+    /// `GET /time` (README "下单"): the front end closes a connection that sends no request
+    /// within 15 s of the handshake; one that has answered a request stays open when idle.
+    const REST_KEEPALIVE_PATH: &'static [u8] = b"/time";
 
     fn default_caps(asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
         caps::default_caps(VENUE, asset)

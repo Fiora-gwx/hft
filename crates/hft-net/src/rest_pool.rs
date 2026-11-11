@@ -110,6 +110,10 @@ struct Lane {
     /// Last activity (install is stamped by the first `idle_check`, then each response); `None`
     /// while a request is in flight.
     idle_since: Option<u64>,
+    /// The pending request is the keep-alive of the pool: `poll` consumes its response.
+    ka: bool,
+    /// The connection has answered a request (a keep-alive counts).
+    primed: bool,
 }
 
 /// `N` is the lane capacity; `lanes[..active]` are used (README §9 "通道数与保留").
@@ -124,6 +128,11 @@ pub struct RestPool<const N: usize = 2> {
     clock: TscClock,
     timeout_ns: u64,
     max_idle_ns: u64,
+    /// `rest_keepalive_ms`; keep-alive requests need it and a path (`set_keepalive`).
+    keepalive_ns: u64,
+    /// Target of the keep-alive `GET`; empty = none.
+    ka_path: Box<[u8]>,
+    ka_sent: u64,
     building: bool,
 }
 
@@ -176,6 +185,8 @@ impl<const N: usize> RestPool<N> {
                 len: 0,
                 ts: None,
                 idle_since: None,
+                ka: false,
+                primed: false,
             }),
             active,
             reserve,
@@ -184,8 +195,24 @@ impl<const N: usize> RestPool<N> {
             clock,
             timeout_ns: u64::from(cfg.rest_timeout_ms) * 1_000_000,
             max_idle_ns: u64::from(cfg.rest_max_idle_ms) * 1_000_000,
+            keepalive_ns: u64::from(cfg.rest_keepalive_ms) * 1_000_000,
+            ka_path: Box::default(),
+            ka_sent: 0,
             building: false,
         }
+    }
+
+    /// Startup only: the target of the keep-alive `GET` (an unauthenticated, cheap request of
+    /// the endpoint; no extra headers, no body). With `rest_keepalive_ms` non-zero `idle_check`
+    /// then sends it on connections that have not answered a request yet and on connections
+    /// idle that long (README §9 "保活"). An empty path turns it off.
+    pub fn set_keepalive(&mut self, path: &[u8]) {
+        self.ka_path = path.into();
+    }
+
+    /// Keep-alive requests sent so far.
+    pub fn keepalives(&self) -> u64 {
+        self.ka_sent
     }
 
     pub fn install(&mut self, mut h: Handoff) -> Result<ConnId, PoolErr> {
@@ -206,6 +233,8 @@ impl<const N: usize> RestPool<N> {
         lane.id = id;
         lane.h = Some(h);
         lane.idle_since = None;
+        lane.ka = false;
+        lane.primed = false;
         self.building = false;
         Ok(id)
     }
@@ -331,11 +360,24 @@ impl<const N: usize> RestPool<N> {
             if let Some(why) = why {
                 retire(lane, why);
             }
+            // A keep-alive: its outcome is not delivered. A failure retired the connection
+            // above; an answer restarts the idle age.
+            if lane.ka && lane.result.is_some() {
+                if matches!(lane.result, Some(Ok(_))) {
+                    lane.primed = true;
+                    lane.idle_since = Some(now_tsc);
+                }
+                lane.result = None;
+                lane.pending = None;
+                lane.ka = false;
+                lane.len = 0;
+            }
         }
         let lane = self.lanes.iter_mut().find(|l| l.result.is_some())?;
         let result = lane.result.take()?;
         let (tag, sent_tsc) = lane.pending.take()?;
         lane.idle_since = Some(now_tsc);
+        lane.primed |= result.is_ok();
         Some(match result {
             Err(err) => Err(RestFail { tag, err }),
             Ok(done) => {
@@ -366,8 +408,86 @@ impl<const N: usize> RestPool<N> {
 
     /// Liveness read of every idle connection; with `rest_max_idle_ms`, also retires at most one
     /// connection idle that long, and only while every lane holds a connection and no build is
-    /// outstanding, so the pool keeps its other connection while the replacement is built.
+    /// outstanding, so the pool keeps its other connection while the replacement is built. With
+    /// keep-alive configured, then sends at most one keep-alive request.
     pub fn idle_check(&mut self, now_tsc: u64) -> u8 {
+        let count = self.liveness(now_tsc);
+        self.keepalive(now_tsc);
+        count
+    }
+
+    /// One keep-alive `GET` on a free open connection that has not answered a request yet (those
+    /// first: an endpoint may close a connection that sends nothing soon after the handshake)
+    /// or that has been idle for `rest_keepalive_ms` (the longest idle first). At most one is in
+    /// flight per pool, and only while the free connections left after it still exceed the
+    /// reserve, so an order or a cancel always finds the lane it would have found without it.
+    fn keepalive(&mut self, now_tsc: u64) {
+        if self.keepalive_ns == 0 || self.ka_path.is_empty() {
+            return;
+        }
+        let clock = self.clock;
+        let mut free = 0usize;
+        let mut pick: Option<(usize, bool, u64)> = None;
+        for (i, l) in self.lanes[..self.active].iter_mut().enumerate() {
+            if l.ka {
+                return;
+            }
+            if l.pending.is_some() || !ready(l) {
+                continue;
+            }
+            free += 1;
+            let idle = l.idle_since.map_or(0, |s| clock.delta_ns(Tsc(s), Tsc(now_tsc)));
+            if l.primed && idle < self.keepalive_ns {
+                continue;
+            }
+            let better = match pick {
+                None => true,
+                Some((_, primed, age)) => (primed && !l.primed) || (primed == l.primed && idle > age),
+            };
+            if better {
+                pick = Some((i, l.primed, idle));
+            }
+        }
+        let Some((idx, _, _)) = pick else {
+            return;
+        };
+        if free < self.reserve + 2 {
+            return;
+        }
+        let req = RestReq {
+            method: Method::Get,
+            path_query: &self.ka_path,
+            headers: &[],
+            body: &[],
+            tag: 0,
+        };
+        let Ok(n) = encode(&req, &self.host, &mut self.tx) else {
+            self.tx.fill(0);
+            return;
+        };
+        let lane = &mut self.lanes[idx];
+        let Some(c) = lane.h.as_mut().and_then(Handoff::conn) else {
+            return;
+        };
+        if n.saturating_add(22) > c.buf_caps().1 as usize {
+            return;
+        }
+        match c.send_plain(&self.tx[..n]) {
+            Ok(ok) => {
+                lane.pending = Some((0, now_tsc));
+                lane.sent_tsc = ok.sent_tsc;
+                lane.len = 0;
+                lane.ts = None;
+                lane.result = None;
+                lane.idle_since = None;
+                lane.ka = true;
+                self.ka_sent += 1;
+            }
+            Err(_) => retire(lane, ErrBits::IO),
+        }
+    }
+
+    fn liveness(&mut self, now_tsc: u64) -> u8 {
         let mut count = 0u8;
         let lanes = &mut self.lanes[..self.active];
         let mut recycle = self.max_idle_ns > 0 && !self.building && lanes.iter().all(|l| l.h.is_some());
@@ -422,7 +542,7 @@ impl<const N: usize> RestPool<N> {
     pub fn pending_sent(&self, tag: ReqTag) -> Option<(ConnId, u64)> {
         self.lanes
             .iter()
-            .find(|l| l.pending.is_some_and(|p| p.0 == tag))
+            .find(|l| !l.ka && l.pending.is_some_and(|p| p.0 == tag))
             .map(|l| (l.id, l.sent_tsc))
     }
     /// Drain: retire all lanes for reclamation by their connector.
@@ -432,6 +552,7 @@ impl<const N: usize> RestPool<N> {
             lane.pending = None;
             lane.result = None;
             lane.len = 0;
+            lane.ka = false;
         }
     }
     /// Timeout/cancellation retires the socket: a late response cannot satisfy a later request.
@@ -439,7 +560,7 @@ impl<const N: usize> RestPool<N> {
         if let Some(l) = self
             .lanes
             .iter_mut()
-            .find(|l| l.pending.is_some_and(|p| p.0 == tag))
+            .find(|l| !l.ka && l.pending.is_some_and(|p| p.0 == tag))
         {
             retire(l, ErrBits::IDLE_TIMEOUT);
             l.pending = None;

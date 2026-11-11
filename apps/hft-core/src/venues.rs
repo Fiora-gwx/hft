@@ -914,9 +914,10 @@ where
         gw.set_rep_bulk(rep_bulk_tx);
         if let Some((endpoint, host)) = gateway_rest {
             for k in &v.accounts {
-                let pool = gwcfg
+                let mut pool = gwcfg
                     .rest_pool(host.as_bytes(), &net, clock)
                     .ok_or_else(|| Error::config("RestPool", name))?;
+                pool.set_keepalive(P::REST_KEEPALIVE_PATH);
                 gw.set_rest_pools(AccountId(k.account), vec![(endpoint, pool)])
                     .map_err(|_| Error::config("RestPool", name))?;
             }

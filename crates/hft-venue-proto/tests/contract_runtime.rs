@@ -278,4 +278,8 @@ fn vpr_152_gw_rest_pool_defaults() {
         (0, 0),
         "VPR-152.2"
     );
+    assert!(
+        FakeSpot::REST_KEEPALIVE_PATH.is_empty() && FakePerp::REST_KEEPALIVE_PATH.is_empty(),
+        "VPR-152.3"
+    );
 }
