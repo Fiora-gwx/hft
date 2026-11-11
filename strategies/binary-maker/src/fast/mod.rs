@@ -45,6 +45,9 @@ pub const LEAD_LAST_MS: i64 = 10_000;
 /// Rule 15 trigger sources (`lead_src` bits): the perpetual and the fair-value (spot) reference.
 pub const LEAD_SRC_PERP: u32 = 1;
 pub const LEAD_SRC_SPOT: u32 = 2;
+/// The second (Coinbase spot) reference and the Coinbase perpetual (`ref_aux` bit 2); schema v45.
+pub const LEAD_SRC_CB: u32 = 4;
+pub const LEAD_SRC_CBP: u32 = 8;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -271,9 +274,27 @@ pub const AUX_PERP: u32 = 1;
 /// `ref_aux` bit 1: a Chainlink group (`Index` = price, `Mark` = 60 s TWAP).
 pub const AUX_CL: u32 = 2;
 
-/// Auxiliary groups of `ref_aux` (bits 0 and 1), placed in that order after the reference groups.
+/// `ref_aux` bit 2: a Coinbase perpetual group (`Bbo`; rule 15 trigger source `LEAD_SRC_CBP`).
+pub const AUX_CBP: u32 = 4;
+
+/// Auxiliary groups of `ref_aux` (bits 0, 1 and 2), placed in that order after the reference
+/// groups.
 pub fn aux_count(ref_aux: u32) -> u16 {
-    u16::from(ref_aux & AUX_PERP != 0) + u16::from(ref_aux & AUX_CL != 0)
+    u16::from(ref_aux & AUX_PERP != 0) + u16::from(ref_aux & AUX_CL != 0) + u16::from(ref_aux & AUX_CBP != 0)
+}
+
+/// The `ref_aux` bit of the `k`-th auxiliary group (0-based, in bit order); 0 when there is none.
+pub fn aux_role(ref_aux: u32, k: u16) -> u32 {
+    let mut left = k;
+    for bit in [AUX_PERP, AUX_CL, AUX_CBP] {
+        if ref_aux & bit != 0 {
+            if left == 0 {
+                return bit;
+            }
+            left -= 1;
+        }
+    }
+    0
 }
 
 /// Reference groups at the end of the table before the last `aux` (auxiliary) groups: the
@@ -302,24 +323,19 @@ pub fn reference_count(groups: &GroupTable, aux: u16) -> u16 {
 
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
 /// ignores them), the BBO of the reference legs (the one or two groups before the auxiliary
-/// ones), BBO, book and trades of the perpetual group and price and TWAP of the Chainlink group
-/// (`ref_aux`).
+/// ones), BBO, book and trades of the perpetual group, price and TWAP of the Chainlink group and
+/// the BBO of the Coinbase perpetual group (`ref_aux`).
 pub fn subscribe(groups: &GroupTable, ref_aux: u32, out: &mut SubsBuilder<'_>) {
     let n = groups.len();
     let aux = aux_count(ref_aux);
     let refs = reference_count(groups, aux).max(1);
-    let perp_gix = if ref_aux & AUX_PERP != 0 {
-        n.wrapping_sub(aux)
-    } else {
-        u16::MAX
-    };
     for (gix, g) in groups.iter() {
         let Some(l) = g.legs.first() else { continue };
         let mask = if gix + aux >= n {
-            if gix == perp_gix {
-                EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0)
-            } else {
-                EvMask(EvMask::INDEX.0 | EvMask::MARK.0)
+            match aux_role(ref_aux, gix + aux - n) {
+                AUX_PERP => EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0),
+                AUX_CBP => EvMask::BBO,
+                _ => EvMask(EvMask::INDEX.0 | EvMask::MARK.0),
             }
         } else if gix + refs + aux >= n {
             EvMask::BBO
@@ -734,6 +750,8 @@ pub struct Fast {
     /// v41 auxiliary groups (`ref_aux`): the perpetual reference (recorded only) and the native
     /// Chainlink group; `INST_NONE` without them. Their events never run the rules.
     pub perp: InstId,
+    /// The Coinbase perpetual auxiliary group's inst (`ref_aux` bit 2; rule 15 trigger source).
+    pub cbperp: InstId,
     pub clref: InstId,
     /// Chainlink price units (the Chainlink inst's px) per 1e-8 USD, as a multiplier (10^(8 + px_exp));
     /// 0 = unknown (no native samples are used).
@@ -800,6 +818,7 @@ impl Fast {
             reference: INST_NONE,
             reference2: INST_NONE,
             perp: INST_NONE,
+            cbperp: INST_NONE,
             clref: INST_NONE,
             cl_mul: 0,
             fc: crate::fcev::FcState::default(),
@@ -851,13 +870,14 @@ impl Fast {
         self.reference2 = INST_NONE;
         self.perp = INST_NONE;
         self.clref = INST_NONE;
+        self.cbperp = INST_NONE;
         for (gix, g) in groups.iter() {
             let Some(l) = g.legs.first() else { continue };
             if gix + aux >= n {
-                if ref_aux & AUX_PERP != 0 && gix + aux == n {
-                    self.perp = l.inst;
-                } else {
-                    self.clref = l.inst;
+                match aux_role(ref_aux, gix + aux - n) {
+                    AUX_PERP => self.perp = l.inst,
+                    AUX_CBP => self.cbperp = l.inst,
+                    _ => self.clref = l.inst,
                 }
                 continue;
             }
@@ -1093,8 +1113,15 @@ impl Fast {
         self.outcomes(ctx);
         // v41 auxiliary groups: Chainlink samples are stored, perpetual events only recorded;
         // neither runs the features or the rules (decisions as without them).
-        if self.clref != INST_NONE || self.perp != INST_NONE {
+        if self.clref != INST_NONE || self.perp != INST_NONE || self.cbperp != INST_NONE {
             match *ev {
+                // The Coinbase perpetual: a rule-15 trigger source only.
+                EventRef::Bbo { inst, b, .. } if inst == self.cbperp && inst != INST_NONE => {
+                    if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_CBP != 0 {
+                        self.lead_quote(LEAD_SRC_CBP, b.bid_px.0.saturating_add(b.ask_px.0), v, ctx);
+                    }
+                    return;
+                }
                 EventRef::Index {
                     inst, px, ex_ts_ns, ..
                 } if inst == self.clref => {
@@ -1158,6 +1185,9 @@ impl Fast {
             EventRef::Bbo { inst, b, .. } if inst == self.reference2 && inst != INST_NONE => {
                 let (ens, mid_x2) = (v.now().engine_ns, b.bid_px.0.saturating_add(b.ask_px.0));
                 self.cb.on_bbo(ens, mid_x2);
+                if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_CB != 0 {
+                    self.lead_quote(LEAD_SRC_CB, mid_x2, v, ctx);
+                }
                 let w = self.p.defaults().ref_cb_w.0;
                 if w > 0 {
                     self.fuse.on_second(mid_x2, ens, self.feat.top.mid_x2, w);
@@ -1280,9 +1310,9 @@ impl Fast {
         self.lead_quote(LEAD_SRC_PERP, mid_x2, v, ctx);
     }
 
-    /// Rule 15 on a quote of trigger source `src` (`LEAD_SRC_PERP` or `LEAD_SRC_SPOT`, 2 × mid
-    /// `mid_x2`): the perp cancel (perpetual only), the lead trigger of that source (own ring and
-    /// cool-downs) and the lead orders' lifetime.
+    /// Rule 15 on a quote of trigger source `src` (one `LEAD_SRC_*` bit, 2 × mid `mid_x2`): the
+    /// perp cancel (perpetual only), the lead trigger of that source (own ring and cool-downs)
+    /// and the lead orders' lifetime.
     fn lead_quote<V: Views>(&mut self, src: u32, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
         use crate::lead::ret;
         let now = v.now();
@@ -1291,10 +1321,11 @@ impl Fast {
             return;
         }
         let perp = src == LEAD_SRC_PERP;
-        if perp {
-            self.lead.ring.push(ens, mid_x2);
-        } else {
-            self.lead.spot.push(ens, mid_x2);
+        match src {
+            LEAD_SRC_PERP => self.lead.ring.push(ens, mid_x2),
+            LEAD_SRC_CB => self.lead.cb.push(ens, mid_x2),
+            LEAD_SRC_CBP => self.lead.cbp.push(ens, mid_x2),
+            _ => self.lead.spot.push(ens, mid_x2),
         }
         let d = *self.p.defaults();
         let n = self.quotes.len();
@@ -1350,14 +1381,20 @@ impl Fast {
                 m.last_ens = ens;
             }
         }
-        let ring = if perp { &self.lead.ring } else { &self.lead.spot };
+        let ring = match src {
+            LEAD_SRC_PERP => &self.lead.ring,
+            LEAD_SRC_CB => &self.lead.cb,
+            LEAD_SRC_CBP => &self.lead.cbp,
+            _ => &self.lead.spot,
+        };
         let move_ = ring
             .at_or_before(ens - i64::from(d.lead_w_ms) * ms)
             .map(|base| ret(mid_x2, base));
-        let trigger = if perp {
-            &mut self.lead.lead
-        } else {
-            &mut self.lead.lead_spot
+        let trigger = match src {
+            LEAD_SRC_PERP => &mut self.lead.lead,
+            LEAD_SRC_CB => &mut self.lead.lead_cb,
+            LEAD_SRC_CBP => &mut self.lead.lead_cbp,
+            _ => &mut self.lead.lead_spot,
         };
         if in_range
             && d.lead_src & src != 0
@@ -1373,6 +1410,7 @@ impl Fast {
                 } else {
                     None
                 };
+                self.lead.cur_src = src;
                 self.lead_place(i, start, r.abs(), feat, v, ctx);
             }
         }
@@ -1480,6 +1518,8 @@ impl Fast {
                     handle: Some(h.0),
                     r: None,
                     placed: ens,
+                    src: self.lead.cur_src,
+                    confirmed: false,
                 };
             }
             if let Some(x) = self.fc_pair.get_mut(i) {
@@ -1537,8 +1577,39 @@ impl Fast {
                 continue;
             }
             let placed = self.lead.legs.get(i).map_or(i64::MIN / 2, |l| l.placed);
+            // lead_cf_ms: a bid of a Coinbase trigger needs the perpetual or the spot reference to
+            // show the move (since lead_w_ms before the place) within lead_cf_ms, else it goes.
+            let mut unconfirmed = false;
+            if lead
+                && d.lead_cf_ms > 0
+                && self
+                    .lead
+                    .legs
+                    .get(i)
+                    .is_some_and(|l| l.src & (LEAD_SRC_CB | LEAD_SRC_CBP) != 0 && !l.confirmed)
+            {
+                let base_t = placed - i64::from(d.lead_w_ms.max(1)) * 1_000_000;
+                let sg = if i == up { 1 } else { -1 };
+                let seen = [&self.lead.ring, &self.lead.spot].iter().any(|ring| {
+                    match (ring.at_or_before(base_t), ring.at_or_before(ens)) {
+                        (Some(b), Some(m)) => crate::lead::ret(m, b).saturating_mul(sg) >= d.lead_cf_x_bp.0,
+                        _ => false,
+                    }
+                });
+                if seen {
+                    if let Some(l) = self.lead.legs.get_mut(i) {
+                        l.confirmed = true;
+                    }
+                } else {
+                    unconfirmed = ens.saturating_sub(placed) >= i64::from(d.lead_cf_ms) * 1_000_000;
+                }
+            }
             let cancel = if lead {
-                !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
+                !d.enabled
+                    || !now.clock_ok
+                    || ens.saturating_sub(placed) >= life
+                    || left_ms <= FC_END_MS
+                    || unconfirmed
             } else {
                 all
             };

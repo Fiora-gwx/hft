@@ -30,6 +30,9 @@ pub const VP: VenueId = VenueId::BINANCE_USDM;
 pub const RP: InstId = InstId(9);
 pub const VC: VenueId = VenueId::POLYMARKET_PRICE;
 pub const RC: InstId = InstId(10);
+/// v45 auxiliary group: the Coinbase perpetual reference `RCP` on `VCP`.
+pub const VCP: VenueId = VenueId::COINBASE_ADV;
+pub const RCP: InstId = InstId(11);
 pub const USDC: AssetId = AssetId(1);
 pub const USDT: AssetId = AssetId(2);
 pub const BTC: AssetId = AssetId(3);
@@ -188,6 +191,7 @@ pub fn refdata() -> RefData {
     venue(&mut b, VR2, Exchange::Okx);
     venue(&mut b, VB, Exchange::Polymarket);
     venue(&mut b, VC, Exchange::Polymarket);
+    venue_m(&mut b, VCP, Exchange::Coinbase, MarketKind::LinearPerp);
     for (k, i) in SLOTS.iter().enumerate() {
         let side = if k % 2 == 0 { "up" } else { "dn" };
         inst(
@@ -236,6 +240,30 @@ pub fn refdata() -> RefData {
         ..InstSpec::default()
     });
     inst(&mut b, RC, VC, BTC, USDT, "btcusd".into(), "0.01", "0.00000001");
+    b.inst(InstSpec {
+        id: RCP,
+        venue: VCP,
+        symbol: "BIP-20DEC30-CDE".into(),
+        status: InstStatus::Trading,
+        kind: InstKind::Perp,
+        asset: BTC,
+        quote: USDT,
+        qty_unit_shift: -2,
+        tick: 500,
+        lot: 1_000_000,
+        min_qty: Qty(1_000_000),
+        max_qty: Qty(1_000_000_000_000),
+        min_notional: Notional(1),
+        book_window: 128,
+        l2_depth: 100,
+        crossed_tolerance: 0,
+        tick_str: "5".into(),
+        lot_str: "1".into(),
+        min_qty_str: "1".into(),
+        funding_interval_s: 3_600,
+        max_leverage: 10,
+        ..InstSpec::default()
+    });
     b.instance(InstanceSpec {
         id: S1,
         kind_id: 7,
@@ -328,6 +356,13 @@ pub fn specs3() -> Vec<GroupSpec> {
     let mut v = specs2();
     v.push(spec(gid(8), BTC, &[(RP, VP)]));
     v.push(spec(gid(9), BTC, &[(RC, VC)]));
+    v
+}
+
+/// `specs3()` plus the v45 auxiliary group: the Coinbase perpetual reference (`RCP`).
+pub fn specs4() -> Vec<GroupSpec> {
+    let mut v = specs3();
+    v.push(spec(gid(10), BTC, &[(RCP, VCP)]));
     v
 }
 
