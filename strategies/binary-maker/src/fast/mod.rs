@@ -49,6 +49,8 @@ pub const LEAD_SRC_SPOT: u32 = 2;
 pub const HEAD_ENTRY: u32 = 1;
 pub const HEAD_GATE: u32 = 2;
 pub const HEAD_CANCEL: u32 = 4;
+/// Research: a lead bid at its life stays while the head for its token is at least `head_hold`.
+pub const HEAD_HOLD: u32 = 8;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -1486,7 +1488,7 @@ impl Fast {
         up: usize,
     ) {
         let d = *self.p.defaults();
-        if d.head_mode & (HEAD_ENTRY | HEAD_CANCEL) == 0 {
+        if d.head_mode & (HEAD_ENTRY | HEAD_CANCEL | HEAD_HOLD) == 0 {
             return;
         }
         let ens = v.now().engine_ns;
@@ -1777,8 +1779,37 @@ impl Fast {
             let (placed, life) = self.lead.legs.get(i).map_or((i64::MIN / 2, life), |l| {
                 (l.placed, if l.life > 0 { l.life } else { life })
             });
+            // Hold (bit 8): past its life the bid stays at its price while the head, evaluated
+            // within the last 250 ms, is at least head_hold for its token, up to head_hold_ms.
+            let aged = ens.saturating_sub(placed) >= life;
+            let hold = aged
+                && d.head_mode & HEAD_HOLD != 0
+                && i / 2 == up / 2
+                && ens.saturating_sub(placed) < i64::from(d.head_hold_ms) * 1_000_000
+                && ens.saturating_sub(self.head.last_eval) <= 250_000_000
+                && self
+                    .head
+                    .last
+                    .is_some_and(|h| (if i == up { h } else { -h }).saturating_mul(1_000) >= d.head_hold.0);
+            // Signal-intact hold: past its life the bid stays while the perpetual, against its
+            // mid lead_w_ms before the place, still shows at least lead_hold_x_bp in the bid's
+            // direction, up to lead_hold_ms after the place.
+            let intact = aged
+                && d.lead_hold_ms > 0
+                && i / 2 == up / 2
+                && ens.saturating_sub(placed) < i64::from(d.lead_hold_ms) * 1_000_000
+                && match (
+                    self.lead.ring.at_or_before(placed - i64::from(d.lead_w_ms.max(1)) * 1_000_000),
+                    self.lead.ring.at_or_before(ens),
+                ) {
+                    (Some(b), Some(m)) => {
+                        let r = crate::lead::ret(m, b);
+                        (if i == up { r } else { -r }) >= d.lead_hold_x_bp.0
+                    }
+                    _ => false,
+                };
             let cancel = if lead {
-                !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
+                !d.enabled || !now.clock_ok || (aged && !hold && !intact) || left_ms <= FC_END_MS
             } else {
                 all
             };

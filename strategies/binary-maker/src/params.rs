@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 45, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 46, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -458,7 +458,7 @@ hft_strategy_sdk::define_params! {
         /// rule 16 (short-horizon head), bits: 1 = bids inside the spread when the head's prediction
         /// for a token is at least head_on; 2 = rule 15 places only when it is at least head_gate;
         /// 4 = lead bids (rules 15 and 16) are cancelled when it falls below head_off; 0 = off
-        head_mode: Count [min = 0, max = 7, default = 0, since = 45, relax = None],
+        head_mode: Count [min = 0, max = 15, default = 0, since = 45, relax = None],
         /// rule 16 entry threshold: predicted rise of the token's mid over 3 s, cents (1e-9)
         head_on: Rate [min = 0, max = 50_000_000_000, default = 2_000_000_000, since = 45, relax = None],
         /// rule 16 gate of rule 15, cents (1e-9)
@@ -471,6 +471,15 @@ hft_strategy_sdk::define_params! {
         head_cool_ms: DurationMs [min = 0, max = 60_000, default = 1_000, since = 45, relax = None],
         /// rule 16 minimum time between two evaluations of the head
         head_eval_ms: DurationMs [min = 1, max = 1_000, default = 25, since = 45, relax = None],
+        /// rule 16 hold (head_mode bit 8): a lead bid at its life stays while the head's prediction
+        /// for its token is at least this, cents (1e-9)
+        head_hold: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 500_000_000, since = 46, relax = None],
+        /// rule 16 hold: longest time a held lead bid stays after its place
+        head_hold_ms: DurationMs [min = 0, max = 60_000, default = 3_000, since = 46, relax = None],
+        /// research: a lead bid at its life stays, up to this long after its place, while the
+        /// perpetual keeps at least lead_hold_x_bp of its move since before the trigger; 0 = off
+        lead_hold_ms: DurationMs [min = 0, max = 300_000, default = 0, since = 46, relax = None],
+        lead_hold_x_bp: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 50_000, since = 46, relax = None],
     }
 }
 
