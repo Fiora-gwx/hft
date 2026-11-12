@@ -36,11 +36,13 @@ pub enum Ev {
         inst: InstId,
         gix: u16,
         px: Px,
+        ex_ts_ns: i64,
     },
     Index {
         inst: InstId,
         gix: u16,
         px: Px,
+        ex_ts_ns: i64,
     },
     Liquidation {
         inst: InstId,
@@ -124,15 +126,27 @@ impl Ev {
                 gix: *gix,
                 f,
             },
-            Ev::Mark { inst, gix, px } => EventRef::Mark {
+            Ev::Mark {
+                inst,
+                gix,
+                px,
+                ex_ts_ns,
+            } => EventRef::Mark {
                 inst: *inst,
                 gix: *gix,
                 px: *px,
+                ex_ts_ns: *ex_ts_ns,
             },
-            Ev::Index { inst, gix, px } => EventRef::Index {
+            Ev::Index {
+                inst,
+                gix,
+                px,
+                ex_ts_ns,
+            } => EventRef::Index {
                 inst: *inst,
                 gix: *gix,
                 px: *px,
+                ex_ts_ns: *ex_ts_ns,
             },
             Ev::Liquidation { inst, gix, l } => EventRef::Liquidation {
                 inst: *inst,
@@ -212,10 +226,38 @@ pub fn funding(inst: InstId, gix: u16, f: FundingView) -> Ev {
     Ev::Funding { inst, gix, f }
 }
 pub fn mark(inst: InstId, gix: u16, px: Px) -> Ev {
-    Ev::Mark { inst, gix, px }
+    Ev::Mark {
+        inst,
+        gix,
+        px,
+        ex_ts_ns: 0,
+    }
 }
 pub fn index(inst: InstId, gix: u16, px: Px) -> Ev {
-    Ev::Index { inst, gix, px }
+    Ev::Index {
+        inst,
+        gix,
+        px,
+        ex_ts_ns: 0,
+    }
+}
+/// `mark` with the exchange time of the sample.
+pub fn mark_at(inst: InstId, gix: u16, px: Px, ex_ts_ns: i64) -> Ev {
+    Ev::Mark {
+        inst,
+        gix,
+        px,
+        ex_ts_ns,
+    }
+}
+/// `index` with the exchange time of the sample.
+pub fn index_at(inst: InstId, gix: u16, px: Px, ex_ts_ns: i64) -> Ev {
+    Ev::Index {
+        inst,
+        gix,
+        px,
+        ex_ts_ns,
+    }
 }
 pub fn liquidation(inst: InstId, gix: u16, l: LiquidationView) -> Ev {
     Ev::Liquidation { inst, gix, l }

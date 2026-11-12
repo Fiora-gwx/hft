@@ -596,3 +596,61 @@ fn sim_244_queue_strict() {
     s.run_to(ms(210));
     assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("100"))], "SIM-244.4");
 }
+
+#[test]
+fn sim_246_bid_inside_the_spread() {
+    let d = VenueModel::default;
+    // Up 0.45 bid / 0.47 ask; a buy of 5 @ 0.46 rests inside the spread with nothing ahead.
+    let inside = |fill| {
+        let mut s = binary(fill, d());
+        let o = s.place(A9, UP_B5, Buy, "5", "0.46", Tif::PostOnly, ms(100));
+        s.run_to(ms(110));
+        (s, o)
+    };
+    for fill in [MakerFill::Queue, MakerFill::QueueCap, MakerFill::QueueStrict] {
+        // .1 a sell of 3 at 0.46 fills 3 at once (empty queue ahead).
+        let (mut s, o) = inside(fill);
+        s.trade_by(ms(200), UP_B5, "0.46", "3", Side::Sell);
+        s.run_to(ms(210));
+        assert_eq!(
+            s.fills_of(A9, o),
+            vec![(px("0.46"), q("3"))],
+            "SIM-246.1 {fill:?}"
+        );
+        // .2 a sell printed at the old best bid 0.45 went through 0.46 first: QueueCap and
+        // QueueStrict fill the whole 5, Queue the printed quantity.
+        let (mut s, o) = inside(fill);
+        s.trade_by(ms(200), UP_B5, "0.45", "2", Side::Sell);
+        s.run_to(ms(210));
+        let want = if fill == MakerFill::Queue { "2" } else { "5" };
+        assert_eq!(
+            s.fills_of(A9, o),
+            vec![(px("0.46"), q(want))],
+            "SIM-246.2 {fill:?}"
+        );
+        // .3 the same flow on the complement: a buy of Down at 0.54 is a sell of Up at 0.46.
+        let (mut s, o) = inside(fill);
+        s.trade_by(ms(200), DN_B5, "0.54", "4", Side::Buy);
+        s.run_to(ms(210));
+        assert_eq!(
+            s.fills_of(A9, o),
+            vec![(px("0.46"), q("4"))],
+            "SIM-246.3 {fill:?}"
+        );
+        // .4 a later public bid at 0.46 does not move ahead of it.
+        let (mut s, o) = inside(fill);
+        s.topn(
+            ms(150),
+            UP_B5,
+            &[("0.47", "50")],
+            &[("0.46", "30"), ("0.45", "50")],
+        );
+        s.trade_by(ms(200), UP_B5, "0.46", "5", Side::Sell);
+        s.run_to(ms(210));
+        assert_eq!(
+            s.fills_of(A9, o),
+            vec![(px("0.46"), q("5"))],
+            "SIM-246.4 {fill:?}"
+        );
+    }
+}

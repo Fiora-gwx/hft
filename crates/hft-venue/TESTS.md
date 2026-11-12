@@ -3169,6 +3169,8 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 | VEN-310.3 | Order / `login_result`:`Continue` 后 `Ok` | 发两步登录帧,`Ready` |
 | VEN-310.4 | Order / `Rejected(4001)` | `SessEvent::Failed`,带码 4001;不交接,连接被 `reclaim` |
 | VEN-310.5 | Order / `login` 返回 `Sent` | 发一帧登录帧,不等回复即 `Ready` |
+| VEN-310.6 | Md / 设了行情凭据,`login` 返回 `Frame`,应答 `Ok` | 发一帧登录帧,帧内是行情凭据的 key(不是账户的),`Ready` |
+| VEN-310.7 | Md / 只有账户凭据、没有行情凭据,登录方式 `Frame` | 不发登录帧,直接 `Ready` |
 
 ### VEN-311 NAPI 落点不符的连接不交接
 

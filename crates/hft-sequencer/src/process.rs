@@ -366,6 +366,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
                 p.market = Some(MarketEv::Index {
                     inst: m.h.inst,
                     px: m.px,
+                    ex_ts_ns: m.h.ex_ts_ns,
                 });
             }
             Ok(())
@@ -842,7 +843,11 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
     upnl_pnl(e, inst, drv)?;
     e.trace.rec("exec.touch_inst", u64::from(i.0), 2);
     e.exec.touch_inst(i);
-    p.market = Some(MarketEv::Mark { inst: i, px: m.px });
+    p.market = Some(MarketEv::Mark {
+        inst: i,
+        px: m.px,
+        ex_ts_ns: m.h.ex_ts_ns,
+    });
     Ok(())
 }
 
@@ -1561,7 +1566,10 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
                     .books
                     .l2(l.inst)
                     .is_none_or(|b| b.state() == hft_book::BookState::Live);
-                if b.seq == 0 || !b.conn_up || !book_ok {
+                // A price-only leg (Index/Mark stream, no Bbo: the Chainlink reference) is quoted once
+                // its first Mark arrived.
+                let price_only = b.seq == 0 && e.market.row(l.inst).is_some_and(|r| r.mark_ens != 0);
+                if !price_only && (b.seq == 0 || !b.conn_up || !book_ok) {
                     ok = false;
                 }
             }

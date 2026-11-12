@@ -1,0 +1,8 @@
+source = "research-recorder"
+source_ref = "research server ~/data/pmrec/r2_20261108 (every 4th BTC window, 72 windows; 29 with a lead bid)"
+generator = "E:/trade/staging/fcev/lead_parity_dump.py (outside the repo) importing sim2.py md5 cbd16f02668f142b08bff4062452c412"
+captured_at = "2026-11-10"
+note = "every lead bid sim2.Strat PS1_mod05_pc_life1 placed (lead [300, 1, 1], perp + spot, model price m 0.5 maxtick 3 k 1): token, ret_bp, token bid/ask/mid (cents), Window.features(update=False) dist_up/sq/remf/sig and the placed price"
+reviewed_by = "pending-human-review"
+review_status = "draft; prices computed by the Python reference, not by the Rust code"
+case_id = "BMK-055"

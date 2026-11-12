@@ -1,0 +1,31 @@
+# clippy configuration of every `pure` crate (docs/hot-path-rules.md "检查机制"). Each pure crate keeps a
+# byte-identical copy as `<crate>/clippy.toml`; `cargo xtask hot-check` compares them. Edit this template,
+# then copy it over every pure crate's clippy.toml in the same commit.
+# `allow-invalid = true`: the path names a crate that is not (yet) in the dependency graph.
+
+disallowed-methods = [
+    # D2: randomness is seeded explicitly from events.
+    { path = "rand::thread_rng", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "rand::rng", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "rand::random", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "getrandom::getrandom", reason = "D2: seed explicitly", allow-invalid = true },
+]
+
+disallowed-types = [
+    # M5 / D4: no runtime hash or tree maps (allocation, iteration order).
+    { path = "std::collections::HashMap", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::HashSet", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::BTreeMap", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::BTreeSet", reason = "M5: index arrays or startup-built tables" },
+    { path = "hashbrown::HashMap", reason = "M5", allow-invalid = true },
+    { path = "hashbrown::HashSet", reason = "M5", allow-invalid = true },
+    # N7: per-message structs, no generic JSON values.
+    { path = "serde_json::Value", reason = "N7", allow-invalid = true },
+    { path = "sonic_rs::Value", reason = "N7", allow-invalid = true },
+    { path = "simd_json::OwnedValue", reason = "N7", allow-invalid = true },
+]
+
+disallowed-macros = [
+    # D3: no global mutable state.
+    { path = "std::thread_local", reason = "D3: no global mutable state" },
+]

@@ -23,18 +23,46 @@ impl SecretFiles {
     /// Read each distinct regular file once, then unlink it before configuration validation.
     /// Resolve all aliases first so a shared REST/session key or passphrase is read only once.
     pub fn read_and_unlink(config: &Config) -> Result<Self, Vec<Error>> {
+        Self::read_paths(config, true)
+    }
+
+    /// Only the market-data login files (`venues.<v>.md_login`): a `sim` instance or a
+    /// `--dry-run` holds no account key but may log in to a market-data feed.
+    pub fn read_and_unlink_md_login(config: &Config) -> Result<Self, Vec<Error>> {
+        Self::read_paths(config, false)
+    }
+
+    fn read_paths(config: &Config, accounts: bool) -> Result<Self, Vec<Error>> {
         let mut result = Self::default();
         let mut errors = Vec::new();
-        for keys in config.venues.values().flat_map(|v| &v.accounts) {
-            for path in [
-                &keys.api_key_path,
-                &keys.session_seed_path,
-                &keys.rest_api_key_path,
-                &keys.rest_secret_path,
-            ]
-            .into_iter()
-            .chain(keys.passphrase_path.iter())
-            {
+        let account_paths = config
+            .venues
+            .values()
+            .filter(|_| accounts)
+            .flat_map(|v| &v.accounts)
+            .flat_map(|keys| {
+                [
+                    &keys.api_key_path,
+                    &keys.session_seed_path,
+                    &keys.rest_api_key_path,
+                    &keys.rest_secret_path,
+                ]
+                .into_iter()
+                .chain(keys.passphrase_path.iter())
+            });
+        // Market-data login files (`venues.<v>.md_login`); a path shared with an account is
+        // read once.
+        let md_paths = config
+            .venues
+            .values()
+            .filter_map(|v| v.md_login.as_ref())
+            .flat_map(|m| {
+                [&m.api_key_path, &m.secret_path]
+                    .into_iter()
+                    .chain(m.passphrase_path.iter())
+            });
+        {
+            for path in account_paths.chain(md_paths) {
                 if result.aliases.contains_key(path) {
                     continue;
                 }

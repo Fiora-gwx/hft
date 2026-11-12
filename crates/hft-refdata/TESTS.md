@@ -308,7 +308,7 @@ spec: README.md
 |---|---|---|
 | REF-015.1 | 0 | `[{UnknownVenue, 2, 0}]` |
 | REF-015.2 | 7(保留的 `BINANCE_COINM`) | `[{UnknownVenue, 2, 4}]` |
-| REF-015.3 | 17 | `[{UnknownVenue, 2, 4}]` |
+| REF-015.3 | 18(17 = `POLYMARKET_PRICE` 已占用) | `[{UnknownVenue, 2, 4}]` |
 | REF-015.4 | 34 | `[{UnknownVenue, 2, 4}]` |
 | REF-015.5 | 3(`GATE_USDT_FUT`,optional) | `Ok` |
 | REF-015.6 | 33(`CHAIN_SOLANA`,optional) | `Ok` |

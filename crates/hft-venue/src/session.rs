@@ -97,6 +97,9 @@ use hft_venue_proto::valid_uid;
 pub struct SessionDriver<P: VenueProtocol, T: crate::AcctTransport = crate::AcctRestPools> {
     cfg: SessionCfg,
     creds: Vec<(AccountId, Credential)>,
+    /// Login credential of market-data connections (venues whose public feed needs a login,
+    /// README §1a "行情凭据"); `None` = market-data connections never log in.
+    md_cred: Option<Credential>,
     jobs: [Option<SJob>; JOBS],
     fds: Vec<(ConnId, i32)>,
     out: Vec<u8>,
@@ -121,6 +124,7 @@ impl<P: VenueProtocol, T: crate::AcctTransport> SessionDriver<P, T> {
         SessionDriver {
             cfg,
             creds,
+            md_cred: None,
             jobs: [None; JOBS],
             fds: Vec::with_capacity(256),
             out: Vec::with_capacity(4096),
@@ -343,6 +347,22 @@ impl<P: VenueProtocol, T: crate::AcctTransport> SessionDriver<P, T> {
         self.creds.iter().find(|(x, _)| *x == a).map(|(_, c)| c)
     }
 
+    /// Startup only: market-data connections log in with `cred` (`P::login(Role::Md, …)`) before
+    /// they are handed to the feed.
+    pub fn set_md_credential(&mut self, cred: Credential) {
+        self.md_cred = Some(cred);
+    }
+
+    /// The login credential of a connection: the market-data credential for `Md`, the account's
+    /// session credential otherwise.
+    fn login_cred(&self, role: ConnRole, a: Option<AccountId>) -> Option<&Credential> {
+        if role == ConnRole::Md {
+            self.md_cred.as_ref()
+        } else {
+            self.cred(a)
+        }
+    }
+
     /// Starts a session for `req` (steps 1–2): bootstrap check, `endpoint`, `Connector::submit`.
     pub fn start(
         &mut self,
@@ -500,7 +520,9 @@ impl<P: VenueProtocol, T: crate::AcctTransport> SessionDriver<P, T> {
 
     fn logged_in_or_login(&mut self, c: &mut Connector, i: usize, now_ns: i64) -> Option<SessEvent> {
         let j = self.jobs.get(i).copied().flatten()?;
-        if matches!(j.req.role, ConnRole::Order | ConnRole::UserStream) && self.cred(j.acct).is_some() {
+        if matches!(j.req.role, ConnRole::Order | ConnRole::UserStream) && self.cred(j.acct).is_some()
+            || j.req.role == ConnRole::Md && self.md_cred.is_some()
+        {
             return self.send_login(c, i, 0, now_ns);
         }
         self.identity_or_finish(c, i, now_ns)
@@ -509,7 +531,7 @@ impl<P: VenueProtocol, T: crate::AcctTransport> SessionDriver<P, T> {
     /// Sends login frame `step`; `NotNeeded` finishes the session.
     fn send_login(&mut self, c: &mut Connector, i: usize, step: u8, now_ns: i64) -> Option<SessEvent> {
         let j = self.jobs.get(i).copied().flatten()?;
-        let cred = self.cred(j.acct).copied()?;
+        let cred = self.login_cred(j.req.role, j.acct).copied()?;
         self.out.clear();
         let r = P::login(
             j.req.role,

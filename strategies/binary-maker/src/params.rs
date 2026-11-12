@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 38, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 44, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -389,6 +389,72 @@ hft_strategy_sdk::define_params! {
         /// the first's units − the first's mid), the unit ratio a running mean (1/64 per quote) of the
         /// two mids; needs the second (Coinbase) reference group; 0 = off (the first reference alone)
         ref_cb_w: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
+        /// auxiliary groups after the reference groups, in this order: bit 0 = a perpetual
+        /// reference (recorded only), bit 1 = a Chainlink group (Index = price, Mark = 60 s TWAP;
+        /// replaces the InjectWarmup samples); 0 = none (schema v41; v39/v40 belong to another line)
+        ref_aux: Count [min = 0, max = 3, default = 0, since = 41, relax = None],
+        /// rule 14 (fill-conditional EV, README "规则" 14): the model alone decides the bids of the
+        /// current window; needs the Chainlink group (ref_aux bit 1); false: rules 1–13
+        fc_on: Bool [default = 0, since = 41, relax = Down],
+        /// rule 14 tail factor s of sigma (1e-9)
+        fc_s: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 41, relax = None],
+        /// rule 14 adverse move per fill lambda, basis points (1e-9)
+        fc_lam: Rate [min = -10_000_000_000, max = 10_000_000_000, default = 100_000_000, since = 41, relax = None],
+        /// rule 14 fixed cost per fill c0, cents (1e-9)
+        fc_c0: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 1_000_000_000, since = 41, relax = None],
+        /// rule 14 price-dependent cost c1 (times |p − 50| / 50), cents (1e-9)
+        fc_c1: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 weight w of the model probability against the token mid (1e-9)
+        fc_w: Rate [min = 0, max = 1_000_000_000, default = 500_000_000, since = 41, relax = None],
+        /// rule 14 post a bid when its score exceeds this, cents (1e-9)
+        fc_m_post: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 cancel a resting bid whose score falls below this, cents (1e-9)
+        fc_m_cancel: Rate [min = -50_000_000_000, max = 50_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 14 pairing margin, cents (1e-9): the short leg is bought only by a pair bid at
+        /// most 100 − (long leg's average cost) − fc_m_pair; negative = no pairing
+        fc_m_pair: Rate [min = -1_000_000_000, max = 50_000_000_000, default = -1_000_000_000, since = 41, relax = None],
+        /// rule 14 implied-sigma samples (one per second) whose median is sigma
+        fc_iv_n: Count [min = 5, max = 600, default = 60, since = 41, relax = None],
+        /// rule 14 parameter version (the refit's tag; audit only, no effect)
+        fc_ver: Count [min = 0, max = 4_000_000_000, default = 0, since = 41, relax = None],
+        /// rule 15 (lead quote, README "规则" 15) look-back of the perpetual mid move; 0 = off;
+        /// needs the perpetual group (ref_aux bit 0)
+        lead_w_ms: DurationMs [min = 0, max = 2_000, default = 0, since = 42, relax = None],
+        /// rule 15 trigger: |perpetual mid return over lead_w_ms| at least this (1e-9 of one;
+        /// 1 bp = 100_000); 0 = off
+        lead_x_bp: Rate [min = 0, max = 100_000_000, default = 0, since = 42, relax = None],
+        /// rule 15 a lead bid not fully filled after this long is cancelled
+        lead_life_ms: DurationMs [min = 100, max = 60_000, default = 3_000, since = 42, relax = None],
+        /// rule 15 minimum time between two triggers in the same direction
+        lead_cool_ms: DurationMs [min = 0, max = 60_000, default = 2_000, since = 42, relax = None],
+        /// rule 15 shares per lead bid
+        lead_shares: Count [min = 1, max = 1_000, default = 5, since = 42, relax = None],
+        /// rule 15 perp cancel look-back; 0 = off
+        lead_pc_w_ms: DurationMs [min = 0, max = 2_000, default = 0, since = 42, relax = None],
+        /// rule 15 perp cancel: a move at least this against a token (1e-9 of one) cancels its lead
+        /// bid; 0 = off
+        lead_pc_x_bp: Rate [min = 0, max = 100_000_000, default = 0, since = 42, relax = None],
+        /// rule 15 perp cancel blocks rule-14 entries on the hurt token for this long
+        lead_pc_block_ms: DurationMs [min = 0, max = 60_000, default = 1_000, since = 42, relax = None],
+        /// rule 15 minimum time between two perp cancels in the same direction
+        lead_pc_cool_ms: DurationMs [min = 0, max = 60_000, default = 1_000, since = 42, relax = None],
+        /// true: rule 15 only — no other opening rule (rules 1–14, pairing, dip) places anything;
+        /// inventory is held to settlement
+        lead_only: Bool [default = 0, since = 42, relax = Down],
+        /// rule 15 trigger sources (bits): 1 = the perpetual reference, 2 = the fair-value (spot)
+        /// reference; each source and direction has its own cool-down
+        lead_src: Count [min = 0, max = 3, default = 1, since = 43, relax = None],
+        /// rule 15 bid price: 0 = best bid + 1 cent; 1 = the model price (mid + lead_k × Delta ×
+        /// |move| − lead_m, between 1 and lead_maxtick cents above the bid, below the ask)
+        lead_price: Count [min = 0, max = 1, default = 0, since = 43, relax = None],
+        /// rule 15 model price margin, cents (1e-9)
+        lead_m: Rate [min = -10_000_000_000, max = 50_000_000_000, default = 500_000_000, since = 43, relax = None],
+        /// rule 15 model price: at most this many cents above the best bid
+        lead_maxtick: Count [min = 1, max = 50, default = 3, since = 43, relax = None],
+        /// rule 15 model price: repricing factor k of the expected move (1e-9)
+        lead_k: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 43, relax = None],
+        /// rule 15 places no lead bid below this price (fraction of one, 1e-9; 0 = off)
+        lead_p_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 44, relax = None],
     }
 }
 
@@ -402,6 +468,8 @@ pub mod shape {
     pub const VENUE: u16 = 3;
     /// A leg's inst is not in refdata.
     pub const INST: u16 = 4;
+    /// The perpetual auxiliary group (`ref_aux` bit 0) is not on a perpetual venue.
+    pub const AUX: u16 = 5;
 }
 
 /// `ParamError::Invalid` codes.
@@ -423,8 +491,11 @@ impl BinaryMakerParams {
                 code: invalid::PRICE_BAND,
             });
         }
-        let refs = crate::fast::reference_count(groups).max(1);
-        if n < 3 || refs > 2 || (n - refs) < 2 || !(n - refs).is_multiple_of(2) {
+        let ref_aux = d.ref_aux;
+        let aux = crate::fast::aux_count(ref_aux);
+        let refs = crate::fast::reference_count(groups, aux).max(1);
+        let n_main = n.saturating_sub(aux);
+        if n_main < 3 || refs > 2 || (n_main - refs) < 2 || !(n_main - refs).is_multiple_of(2) {
             return Err(ParamError::GroupShape {
                 gix: 0,
                 code: shape::COUNT,
@@ -440,10 +511,16 @@ impl BinaryMakerParams {
             if rd.try_inst(l.inst).is_none() {
                 return Err(err(shape::INST));
             }
-            let reference = gix + refs >= n;
+            let reference = gix + refs >= n_main;
             let v = *slot_venue.get_or_insert(l.venue);
             if (l.venue == v) == reference {
                 return Err(err(shape::VENUE));
+            }
+            if gix == n_main
+                && ref_aux & crate::fast::AUX_PERP != 0
+                && rd.caps(l.venue).market != hft_strategy_sdk::prelude::MarketKind::LinearPerp
+            {
+                return Err(err(shape::AUX));
             }
         }
         Ok(())

@@ -200,6 +200,53 @@ fn ven_310_session_flow() {
     }
     assert_eq!(net.c().test_free_slots(), free0, "VEN-310.4: reclaimed");
     assert!(drv.log().any(|o| o == SessionOp::Reclaim(ConnId(113))));
+    // .6: Md with a market-data credential logs in with it (not with an account's).
+    stub::set_cfg(|c| c.login = LoginMode::One);
+    let mut net = Net::new(64, 16);
+    let md_key: &[u8] = b"MD-KEY-42";
+    let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![(A1, cred())]);
+    drv.set_md_credential(Credential {
+        api_key: ArrayBuf::from_bytes(md_key).unwrap(),
+        ..Credential::default()
+    });
+    let (job, mut peer) = start(&mut drv, &mut net, req(4, ConnRole::Md), None);
+    let mut seen = Vec::new();
+    let ev = run(&mut drv, net.c(), job, &mut peer, 300, |t| {
+        seen.push(t.to_string());
+        t.starts_with("LOGIN0|").then(|| "LOGIN_OK".into())
+    });
+    assert!(matches!(ev, SessEvent::Ready(_)), "VEN-310.6 {ev:?}");
+    assert_eq!(seen, vec!["LOGIN0|MD-KEY-42".to_string()], "VEN-310.6");
+    assert_eq!(
+        drv.log()
+            .filter(|o| matches!(o, SessionOp::LoginFrame(ConnId(4), _)))
+            .count(),
+        1,
+        "VEN-310.6"
+    );
+    if let SessEvent::Ready(h) = ev {
+        let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        p.install(h, None).unwrap();
+        net.c()
+            .reclaim(p.retire(ConnId(4), hft_net::ErrBits::empty()).unwrap());
+    }
+    // .7: Md without one: no login even though an account credential exists.
+    let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![(A1, cred())]);
+    let (job, mut peer) = start(&mut drv, &mut net, req(5, ConnRole::Md), None);
+    let mut seen = Vec::new();
+    let ev = run(&mut drv, net.c(), job, &mut peer, 400, |t| {
+        seen.push(t.to_string());
+        None
+    });
+    stub::set_cfg(|c| c.login = LoginMode::None);
+    assert!(matches!(ev, SessEvent::Ready(_)), "VEN-310.7 {ev:?}");
+    assert!(seen.is_empty(), "VEN-310.7 {seen:?}");
+    if let SessEvent::Ready(h) = ev {
+        let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        p.install(h, None).unwrap();
+        net.c()
+            .reclaim(p.retire(ConnId(5), hft_net::ErrBits::empty()).unwrap());
+    }
 }
 
 fn check_prepared_bootstrap_reconnect_authenticates_again() {

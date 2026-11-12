@@ -80,7 +80,8 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `AccountMismatch` | 2 | `[[accounts]]` 的 `id`/`label` 与 refdata `AccountMeta` 不一致,或引用 refdata 中没有的账户 |
 | `SecretsInSim` | 2 | `sim` 实例出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` |
 | `LiveFeed` | 2 | 网络模式(非 `--dry-run`)出现 `venues.<v>.live_feed` |
-| `ReadOnlyVenue` | 2 | 只读行情协议(`venues::READ_ONLY_PROTOCOLS`,当前 `coinbase-spot`)的 venue 配了 `accounts`:协议没有下单、回报与账户方法 |
+| `ReadOnlyVenue` | 2 | 只读行情协议(`venues::READ_ONLY_PROTOCOLS`,当前 `coinbase-spot`、`polymarket-price`)的 venue 配了 `accounts`:协议没有下单、回报与账户方法 |
+| `MdLoginRequired` / `MdLoginUnsupported` | 2 | 行情要登录的协议(`venues::MD_LOGIN_PROTOCOLS`,当前 `polymarket-price`)缺 `venues.<v>.md_login` / 其他协议配了它 |
 | `MissingCredential` | 2 | Live 账户在其交易的某个 venue 缺会话 key 或 REST key 的秘密名 |
 | `EndpointOverrideInProd` | 2 | `order_env = "prod"` 的配置出现 `endpoint_override` 或 `test.extra_ca` |
 | `SimSectionInProd` | 2 | `prod` 实例出现 `sim.*` 或 `[[sim.*_models]]` |
@@ -755,7 +756,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `[[threads]]` | 数组 `{name, core, idle, nice?, tasks}` | 线程计划 | 必填(deploy 按主机类模板生成) |
 | `rt.*` | 表 | 校准、PHC、`rt.host.mode` | 见 [hft-rt 配置项](../../crates/hft-rt/README.md) |
 | `journal.<name>.segment_bytes` / `.hot_keep`、`journal.page` | u64 / u8 / `huge`\|`normal` | 键由 hft-journal 定义 | 取值按[内存表](#内存与-journal-段按主机类唯一归属);tmpfs 主机类与 `sim` 实例必须 `normal` |
-| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp`、`polymarket-clob`(Cargo feature `polymarket`;当前只有行情)、`coinbase-spot`(只读行情:Bbo 与成交,不得有 `accounts`,[venue-coinbase](../../crates/venue-coinbase/README.md)) | 必填 |
+| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp`、`polymarket-clob`(Cargo feature `polymarket`;当前只有行情)、`polymarket-price`(只读行情:Chainlink 价格 → IndexPrice、60 s TWAP → MarkPrice,行情连接登录,须有 `md_login`,不得有 `accounts`,[venue-pmprice](../../crates/venue-pmprice/README.md))、`coinbase-spot`(只读行情:Bbo 与成交,不得有 `accounts`,[venue-coinbase](../../crates/venue-coinbase/README.md)) | 必填 |
 | `venues.<v>.max_sub_insts` | u16 | 该 venue 订阅 inst 上限;Σ ≤ 容量 `max_insts`(装配期交叉校验);装配时写进该 venue 每个行情任务的 `FeedCfg.max_sub_insts` | 必填(deploy 生成:`dev2` 按线程计划,其他按容量表) |
 | `venues.<v>.optional` | bool | true 时该 venue 起不来不阻塞其他 venue 的闸门 | 必填 |
 | `venues.<v>.live_feed` | bool | 只用于 `--dry-run`:该 venue 的行情取自交易所公共行情而不是 `sim.quotes`(订单仍进 sim-gw);网络模式出现即退出 2(`LiveFeed`) | false |
@@ -763,7 +764,8 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `venues.<v>.feed.*` / `venues.<v>.snap.*` / `venues.<v>.conn.*` / `venues.<v>.gw.*`(其余键) | — | hft-venue 的运行时配置(`feed.raw.bbo`/`feed.raw.md`、`feed.bbo_frames_per_poll`、`snap.parallel` 等;各 REST 连接数也在其中),键名、默认值与语义归 [hft-venue 配置项](../../crates/hft-venue/README.md#配置项) | raw 模式按[内存表](#内存与-journal-段按主机类唯一归属);`feed.depth_conns` 缺省时,有 Bbo 路由的协议取 hft-venue 默认 1,没有 Bbo 路由的协议(Polymarket:深度流就是整簿,交易所会单独断开连接)取 2;其余按 hft-venue 默认 |
 | `venues.<v>.gw.accounts` / `.gw.src_ip` | [string] / {account → ip} | 在该 venue 下单的 Live 账户(按 `AccountMeta.label`)与出口 IP(只能是 ENI-B 的地址);acct-fetch 对该账户的连接复用同一 `src_ip` | 有 Live 账户时必填 |
 | `venues.<v>.net.rest_timeout_ms` / `.net.rest_max_idle_ms` | u32 / u32 | 该 venue 全部 REST 池(gw、snap-fetch)的 hft-net `NetConfig` 键:请求超时与空闲连接回收时长(语义归 [hft-net 配置项](../../crates/hft-net/README.md#配置项));`rest_timeout_ms = 0` → `BadValue`;带账户的 venue 要求 `rest_timeout_ms` ≤ 该 venue 的 OMS `ack_timeout_ms`(EngineConfig),否则 `RestTimeoutAboveAck`。Polymarket 实盘配置(`pm_sim_config --live`)取 5 000 / 25 000,与 OMS `ack_timeout_ms[polymarket] = 5000` 相等 | hft-net 默认(2 000 / 0 = 不回收) |
-| `venues.<v>.presign` | 表 `{below: u8, above: u8, step: 字符串, max_age_ms: u32}` | 只用于 `polymarket-clob`:gw 空闲时预签名订单(锚价下 `below`、上 `above` 个 `step` 的价位,`step` 为 USDC 小数文本,签名后 `max_age_ms` 内可用;语义与范围归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名))。其他 protocol 出现、`below + above ≥ 8`、`step` 不是 > 0 且至多 6 位小数、`max_age_ms` 不在 1 000–240 000 → `BadValue`。Polymarket 实盘配置(`pm_sim_config --live`)默认写 (2, 2, `0.01`, 60 000),`--no-presign` 不写 | 无(关) |
+| `venues.<v>.md_login` | 表 `{api_key_path, secret_path, passphrase_path?}` | 只用于行情要登录的协议(`polymarket-price`):行情连接的登录凭据文件,与账户的 key 文件同样在启动时读入并解链(路径与账户相同的只读一次,例如直接指向 `pm` 账户的 `api_key`/`secret`/`passphrase`);conn-builder 用它登录行情连接([hft-venue §7](../../crates/hft-venue/README.md#7-会话建立warm-线程-conn-buildersessiondriver)),协议只取 secret 中第一个 `|` 之前的部分([venue-pmprice 登录](../../crates/venue-pmprice/README.md#登录)) | 无 |
+| `venues.<v>.presign` | 表 `{below: u8, above: u8, step: 字符串, max_age_ms: u32, grid_qty?: 字符串}` | 只用于 `polymarket-clob`:gw 空闲时预签名订单(锚价下 `below`、上 `above` 个 `step` 的价位,`step` 为 USDC 小数文本,签名后 `max_age_ms` 内可用;可选的 `grid_qty`(份数的小数文本)开启价格网格:每个已绑定 inst 在 `step` 的每个整数倍价位常备一张该数量的买单;语义与范围归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名))。其他 protocol 出现、`below + above ≥ 8`、`step` 不是 > 0 且至多 6 位小数、`max_age_ms` 不在 1 000–240 000、`grid_qty` 不是 > 0 且至多 6 位小数、或有 `grid_qty` 而 `step` 不能把 1 整除成 2–129 步 → `BadValue`。Polymarket 实盘配置(`pm_sim_config --live`)默认写 (2, 2, `0.01`, 60 000),`--no-presign` 不写;`grid_qty` 只在 `--presign-grid` 时写 | 无(关);`grid_qty` 缺省无(网格关) |
 | `venues.<v>.gw.rest_conns` / `.gw.rest_cancel_reserve` | u8 / u8 | gw 每个 REST 池的连接数与其中只给撤单用的空闲连接数(语义归 [hft-venue 配置项](../../crates/hft-venue/README.md#配置项));本装配按生效的连接数定该 venue `ConnArena` 的 `Rest` 槽数;生效值(缺省值归 hft-venue:协议的 `GW_REST_CONNS` / `GW_REST_CANCEL_RESERVE`)不在 1..=16、或保留数 ≥ 连接数 → `BadValue`;其他键 → `ConfigParse` | — |
 | `venues.<v>.gw.rest_endpoints` | [host] | gw REST 池连接的主机列表;请求以下标 `RestReqBuf.endpoint` 选择端点(语义归 [hft-venue](../../crates/hft-venue/README.md)),例:Binance USD-M 的身份查询走现货 REST 主机 | 该 `venue-*` 默认 |
 | `venues.<v>.endpoint_override` / `test.extra_ca` | string / path | 只在 `order_env = "testnet"` 或 `feed_env = "testnet"` 的配置,以及 `sim` 实例(只改行情与 REST 快照端点;不持 key、不下单)出现(交易所测试网、可选的 mock-exchange 或 CI 的假交易所);每个生效的 `endpoint_override`(测试网配置与 `sim` 实例)在步 5 写一条 `Note{EndpointOverride}`(P1,`v[0]` = venue;码由 hft-event 登记),防止误把实例指向假行情;额外 CA 只在存在 `endpoint_override` 时加载;`order_env = "prod"` 的配置出现任一项即退出 2(`EndpointOverrideInProd`) | 无 |
@@ -930,7 +932,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 网络模式只接受非正式 Live 账户与 testnet 账户端点。公共行情环境由 [可执行配置](config/README.md) 的 `instance.feed_env` 选择，私有链路保持 testnet。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
 
-凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 与 Sim 不读取文件；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
+凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 不读取文件，Sim 实例与 `--dry-run` 只读取 `venues.<v>.md_login` 的文件(行情登录,`read_and_unlink_md_login`;不读任何账户 key)；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
 
 `bitget` 默认启用，可与 Binance 同进程装配。两种 key 分别签名核验；非正式 Unverifiable 账户要求相同 API key，仍需人工确认身份闸门。Ed25519 文件支持原始 32 字节、PKCS#8 DER/PEM。周期余额/持仓只校验；REST 失败发布配置 UNREADABLE 后按 interval 重试。RateOnly 真实结算只与合成历史比较，不重复入现金；窗口与滞后取 LedgerConfig。操作见 [测试网 runbook](RUNBOOK-testnet.md)。
 

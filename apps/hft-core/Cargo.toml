@@ -30,6 +30,8 @@ hft-venue-proto.workspace = true
 venue-binance.workspace = true
 # Coinbase spot market data (read-only, no account; built always: pure and small).
 venue-coinbase.workspace = true
+# Polymarket live prices (Chainlink; read-only, logs in with md_login; built always: pure and small).
+venue-pmprice.workspace = true
 venue-bitget = { workspace = true, optional = true }
 venue-polymarket = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }

@@ -826,6 +826,7 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
             account_cap: l.account_cap,
             group_cap: l.group_cap,
             presign: l.presign,
+            presign_grid: None,
             cancel_race: l.cancel_race,
             extra_accounts: l
                 .extra_accounts
@@ -833,6 +834,9 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
                 .map(|(uid, dir)| hft_pmcfg::LiveAccount::shorthand(uid.clone(), dir.clone()))
                 .collect(),
             coinbase: true,
+            perp: true,
+            chainlink: true,
+            cl_keys: None,
         }
     }
 }

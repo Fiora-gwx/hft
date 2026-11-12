@@ -4627,8 +4627,35 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 | 行 | 方案 | 期望 |
 |---|---|---|
-| CORE-453.1 | `pin` | 加载无错误;`sequencer` 核 1、`feed:*` 核 2、`gw:pm` 核 3、其余核 0;没有 `spin` |
-| CORE-453.2 | `spin` | 加载无错误(隔离在线程启动时才检查);`sequencer`、`gw:pm` 为 `spin`;`feed:*` 的 `park_us` = 20 |
+| CORE-453.1 | `pin` | 加载无错误;`sequencer` 核 1、`feed:*`(`feed:cl` 除外)核 2、`gw:pm` 核 3、`feed:cl` 与其余核 0(`feed:cl` 的 `park_us` = 1 000);没有 `spin` |
+| CORE-453.2 | `spin` | 加载无错误(隔离在线程启动时才检查);`sequencer`、`gw:pm` 为 `spin`;核 2 上 `feed:*` 的 `park_us` = 20,`feed:cl` 在核 0、`park_us` = 1 000 |
+
+### CORE-454 永续与 Chainlink 参考行情配置、行情登录凭据
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.md_login`)、错误码 `MdLoginRequired`/`MdLoginUnsupported`/`ReadOnlyVenue`
+- 级别:table
+- 里程碑:M3
+- 前置:Cargo feature `polymarket`;`write_polymarket_maker_live`(缺省含 `[venues.bp]` 与 `[venues.cl]`,hft-pmcfg PMC-011);secrets 用 CORE-222 的夹具
+- 实现:`apps/hft-core/tests/config.rs::core_454_perp_and_chainlink_reference_config`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-454.1 | 实盘做市配置 | 加载无错误;`venues.bp` = (`binance-usdm`, 1),无账户、无 `md_login`;`venues.cl` = (`polymarket-price`, 17),无账户、有 `md_login` |
+| CORE-454.2 | 去掉 `venues.cl.md_login`;把它复制到 `venues.bn`;把 `venues.pm.accounts` 复制到 `venues.cl` | 分别含 `MdLoginRequired`、`MdLoginUnsupported`、`ReadOnlyVenue` |
+| CORE-454.5 | `public_market_endpoint("polymarket-price", …)` | `ws-live-v2.polymarket.com` 的行情与 REST 端点允许;旧 RTDS 主机、加后缀的主机、OrderWs 角色拒绝 |
+
+### CORE-455 行情登录凭据文件的读取
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.md_login`)
+- 级别:table
+- 里程碑:M3
+- 前置:CORE-222 的夹具(账户的 key、seed、passphrase 三个文件)
+- 实现:`apps/hft-core/tests/secrets.rs::core_455_md_login_secrets`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-455.1 | `md_login` 的 secret 为独立文件、key 与 passphrase 与账户共用路径;`read_and_unlink` | 全部文件被删除;共用路径只读一次,各路径取到各自内容 |
+| CORE-455.2 | 只有 `md_login` 的读取(`read_and_unlink_md_login`,sim 实例或 `--dry-run`) | `md_login` 文件被删除;账户文件保留、取不到 |
 
 ## 验收
 
@@ -4773,7 +4800,7 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 - 规则:[配置文件字段](README.md#配置文件字段);语义归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名)
 - 级别:table
 - 里程碑:M3
-- 前置:`support::write` 的离线配置;`write_polymarket_maker_live`(Cargo feature `polymarket`);表 = `{below, above, step, max_age_ms}`
+- 前置:`support::write` 的离线配置;`write_polymarket_maker_live`(Cargo feature `polymarket`);表 = `{below, above, step, max_age_ms}`,.5 另加 `grid_qty`
 - 实现:`apps/hft-core/tests/config.rs::core_445_venue_presign`
 
 | 行 | 输入 | 期望 |
@@ -4781,4 +4808,5 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-445.1 | `step` 文本 `0.01`、`1`、`.5`、`0`、`0.0000001`、`-1`、空、`0.0a` | 10 000、1 000 000、500 000(1e-6 USDC),其余无效 |
 | CORE-445.2 | 离线配置的 `venues.public.presign`(3, 1, `0.01`, 30 000) | 含 `BadValue` |
 | CORE-445.3 | 不带默认表的 Polymarket 实盘配置(`presign: false`)加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
-| CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000);后者的配置文本不含 `presign` |
+| CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000)、无 `grid_qty`;后者的配置文本不含 `presign` |
+| CORE-445.5 | 同 .3 的实盘配置,表 (3, 1, `step`, 30 000) 加 `grid_qty`:(`0.01`, `5`)、(`0.5`, `0.25`);再分别为 `grid_qty` `0`、`5.0000001`、`-5`、空,以及 `step` `0.03`、`0.005`、`1` 配 `grid_qty` `5` | 前两者加载成功,`grid_qty` 原样、`grid_qty_e6` = 5 000 000、250 000;其余含 `BadValue`(数量无效;1 不被 `step` 整除、199 个价位、0 个价位) |

@@ -37,6 +37,20 @@ pub fn settle_tag_of(gix: u16) -> u32 {
 /// the strike averaged over the `SETTLE_TWAP_S` before the window start.
 pub const SETTLE_TWAP_S: i64 = 60;
 
+/// Rule 15: triggers count from this age of the window and until `LEAD_END_MS` before its end; a
+/// lead bid is placed only until `LEAD_LAST_MS` before the end (ms).
+pub const LEAD_START_MS: i64 = 5_000;
+pub const LEAD_END_MS: i64 = 2_000;
+pub const LEAD_LAST_MS: i64 = 10_000;
+/// Rule 15 trigger sources (`lead_src` bits): the perpetual and the fair-value (spot) reference.
+pub const LEAD_SRC_PERP: u32 = 1;
+pub const LEAD_SRC_SPOT: u32 = 2;
+
+/// Rule 14: no new entry bid before this age of the window (ms).
+pub const FC_START_MS: i64 = 5_000;
+/// Rule 14: every bid is cancelled and none placed this close to the window end (ms).
+pub const FC_END_MS: i64 = 2_000;
+
 /// `InjectWarmup` local kind of a Chainlink BTC/USD sample (README "Chainlink").
 pub const CL_WARMUP_KIND: u16 = 1;
 /// A Chainlink sample older than this many seconds is not the current price.
@@ -179,8 +193,9 @@ impl RefFuse {
     }
 }
 
-/// Chainlink BTC/USD samples pushed by `InjectWarmup` (local kind 1): price (1e-8 USD) per Chainlink
-/// second and the latest sample; not in the snapshot.
+/// Chainlink BTC/USD samples: price (1e-8 USD) per Chainlink second and the latest sample, from
+/// the native Chainlink reference group (`ref_aux` bit 1: `Index` = price, `Mark` = 60 s TWAP) or,
+/// without one, from `InjectWarmup` (local kind 1, price only); not in the snapshot.
 #[derive(Clone, Debug, Default)]
 pub struct ClFeed {
     pub sec: Box<features::RefSecs>,
@@ -188,9 +203,45 @@ pub struct ClFeed {
     pub last_s: i64,
     pub last_px: i64,
     pub n: u64,
+    /// The official 60 s TWAP (1e-8 USD) per Chainlink second (native group only).
+    pub twap: Box<features::RefSecs>,
+    /// Chainlink second of the latest TWAP sample (`i64::MIN` before the first; `Default` = 0).
+    pub twap_s: i64,
+    pub n_twap: u64,
 }
 
 impl ClFeed {
+    /// One price sample: Chainlink time (ms) and price (1e-8 USD); a sample older than the latest
+    /// only fills its own second; non-positive prices are ignored.
+    pub fn on_sample(&mut self, ts_ms: i64, px: i64) {
+        if px <= 0 {
+            return;
+        }
+        let s = ts_ms.div_euclid(1_000);
+        self.sec.put(s, px);
+        if self.n == 0 || s >= self.last_s {
+            self.last_s = s;
+            self.last_px = px;
+        }
+        self.n = self.n.saturating_add(1);
+    }
+    /// One TWAP sample (same units).
+    pub fn on_twap(&mut self, ts_ms: i64, px: i64) {
+        if px <= 0 {
+            return;
+        }
+        let s = ts_ms.div_euclid(1_000);
+        self.twap.put(s, px);
+        if self.n_twap == 0 || s >= self.twap_s {
+            self.twap_s = s;
+        }
+        self.n_twap = self.n_twap.saturating_add(1);
+    }
+    /// The TWAP of the latest sample at or before UTC second `sec`, looking back at most
+    /// `CL_FRESH_S` seconds.
+    pub fn twap_at(&self, sec: i64) -> Option<i64> {
+        (0..=CL_FRESH_S).find_map(|k| self.twap.exact(sec - k))
+    }
     /// Payload v1 (17 bytes, little endian): version u8 = 1, Chainlink timestamp ms i64, price
     /// 1e-8 USD i64. Other versions, short payloads and non-positive prices are ignored; a sample
     /// older than the latest only fills its own second.
@@ -207,16 +258,7 @@ impl ClFeed {
         let (Some(ts), Some(px)) = (field(1), field(9)) else {
             return;
         };
-        if px <= 0 {
-            return;
-        }
-        let s = ts.div_euclid(1_000);
-        self.sec.put(s, px);
-        if self.n == 0 || s >= self.last_s {
-            self.last_s = s;
-            self.last_px = px;
-        }
-        self.n = self.n.saturating_add(1);
+        self.on_sample(ts, px);
     }
     /// The latest price if it is at most `CL_FRESH_S` older than UTC second `sec`.
     pub fn now(&self, sec: i64) -> Option<i64> {
@@ -224,10 +266,21 @@ impl ClFeed {
     }
 }
 
-/// Reference groups at the end of the table: the trailing groups not on the first group's (slot)
-/// venue, at most two counted (the fair-value reference, then the fast Coinbase reference).
-pub fn reference_count(groups: &GroupTable) -> u16 {
-    let n = usize::from(groups.len());
+/// `ref_aux` bit 0: a perpetual reference group (recorded, not read by the rules).
+pub const AUX_PERP: u32 = 1;
+/// `ref_aux` bit 1: a Chainlink group (`Index` = price, `Mark` = 60 s TWAP).
+pub const AUX_CL: u32 = 2;
+
+/// Auxiliary groups of `ref_aux` (bits 0 and 1), placed in that order after the reference groups.
+pub fn aux_count(ref_aux: u32) -> u16 {
+    u16::from(ref_aux & AUX_PERP != 0) + u16::from(ref_aux & AUX_CL != 0)
+}
+
+/// Reference groups at the end of the table before the last `aux` (auxiliary) groups: the
+/// trailing groups not on the first group's (slot) venue, at most three counted (two allowed:
+/// the fair-value reference, then the fast Coinbase reference).
+pub fn reference_count(groups: &GroupTable, aux: u16) -> u16 {
+    let n = usize::from(groups.len()).saturating_sub(usize::from(aux));
     let slot_venue = groups
         .iter()
         .next()
@@ -248,13 +301,27 @@ pub fn reference_count(groups: &GroupTable) -> u16 {
 }
 
 /// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
-/// ignores them) and the BBO of the reference legs (the last one or two groups).
-pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
+/// ignores them), the BBO of the reference legs (the one or two groups before the auxiliary
+/// ones), BBO, book and trades of the perpetual group and price and TWAP of the Chainlink group
+/// (`ref_aux`).
+pub fn subscribe(groups: &GroupTable, ref_aux: u32, out: &mut SubsBuilder<'_>) {
     let n = groups.len();
-    let refs = reference_count(groups).max(1);
+    let aux = aux_count(ref_aux);
+    let refs = reference_count(groups, aux).max(1);
+    let perp_gix = if ref_aux & AUX_PERP != 0 {
+        n.wrapping_sub(aux)
+    } else {
+        u16::MAX
+    };
     for (gix, g) in groups.iter() {
         let Some(l) = g.legs.first() else { continue };
-        let mask = if gix + refs >= n {
+        let mask = if gix + aux >= n {
+            if gix == perp_gix {
+                EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0)
+            } else {
+                EvMask(EvMask::INDEX.0 | EvMask::MARK.0)
+            }
+        } else if gix + refs + aux >= n {
             EvMask::BBO
         } else {
             EvMask(EvMask::BOOK.0 | EvMask::TRADE.0)
@@ -664,6 +731,19 @@ pub struct Fast {
     /// The second reference group's inst (native Coinbase BBO for the v37 guard); `INST_NONE`
     /// without one (then the guard reads the sidecar's InjectWarmup samples).
     pub reference2: InstId,
+    /// v41 auxiliary groups (`ref_aux`): the perpetual reference (recorded only) and the native
+    /// Chainlink group; `INST_NONE` without them. Their events never run the rules.
+    pub perp: InstId,
+    pub clref: InstId,
+    /// Chainlink price units (the Chainlink inst's px) per 1e-8 USD, as a multiplier (10^(8 + px_exp));
+    /// 0 = unknown (no native samples are used).
+    pub cl_mul: i64,
+    /// Rule 14 state (implied-σ ring, reference mid per second); not in the snapshot.
+    pub fc: crate::fcev::FcState,
+    /// Rule 14, per slot leg (quote order): its current order is a pair bid; not in the snapshot.
+    pub fc_pair: Vec<bool>,
+    /// Rule 15 state (perpetual mid ring, triggers, lead orders per leg); not in the snapshot.
+    pub lead: crate::lead::LeadState,
     /// v38 reference fusion (`ref_cb_w`; not in the snapshot): the latest second-reference mid × 2
     /// and its engine time, the unit ratio first / second (1e9), and the fused reference mid × 2
     /// the fair value reads (0 = off or not ready: the first reference's own mid).
@@ -719,6 +799,12 @@ impl Fast {
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
             reference2: INST_NONE,
+            perp: INST_NONE,
+            clref: INST_NONE,
+            cl_mul: 0,
+            fc: crate::fcev::FcState::default(),
+            fc_pair: Vec::new(),
+            lead: crate::lead::LeadState::default(),
             fuse: RefFuse::default(),
             feat: MakerFeatures::new(p.defaults().vol_window_s as usize, cap),
             fv: FvAnchor {
@@ -759,12 +845,24 @@ impl Fast {
         let old_kind = std::mem::take(&mut self.skind);
         let mut kind = Vec::with_capacity(usize::from(groups.len()));
         let n = groups.len();
-        let refs = reference_count(groups).max(1);
+        let ref_aux = p.defaults().ref_aux;
+        let aux = aux_count(ref_aux);
+        let refs = reference_count(groups, aux).max(1);
         self.reference2 = INST_NONE;
+        self.perp = INST_NONE;
+        self.clref = INST_NONE;
         for (gix, g) in groups.iter() {
             let Some(l) = g.legs.first() else { continue };
-            if gix + refs >= n {
-                if gix + refs == n {
+            if gix + aux >= n {
+                if ref_aux & AUX_PERP != 0 && gix + aux == n {
+                    self.perp = l.inst;
+                } else {
+                    self.clref = l.inst;
+                }
+                continue;
+            }
+            if gix + refs + aux >= n {
+                if gix + refs + aux == n {
                     self.reference = l.inst;
                 } else {
                     self.reference2 = l.inst;
@@ -807,6 +905,30 @@ impl Fast {
         self.trd.resize(self.quotes.len(), TrdRing::default());
         self.cb_until.clear();
         self.cb_until.resize(self.quotes.len(), i64::MIN);
+        self.fc_pair.clear();
+        self.fc_pair.resize(self.quotes.len(), false);
+        self.lead
+            .legs
+            .resize(self.quotes.len(), crate::lead::LeadLeg::default());
+        self.lead.block.resize(self.quotes.len(), i64::MIN);
+    }
+
+    /// Rule 15 on (README "规则" 15).
+    pub fn lead_on(&self) -> bool {
+        let d = self.p.defaults();
+        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0) || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+    }
+
+    /// Slot leg `i`'s current order `q` is its rule-15 lead bid.
+    pub fn is_lead(&self, i: usize, q: &Quote) -> bool {
+        let Some(l) = self.lead.legs.get(i) else {
+            return false;
+        };
+        match q.state {
+            QState::Placing => l.handle == Some(q.handle),
+            QState::Live | QState::Cancelling => l.r.is_some() && l.r == q.r,
+            QState::None => false,
+        }
     }
 
     /// Composite score on (`comp_skip` or `comp_dir` set).
@@ -969,10 +1091,58 @@ impl Fast {
 
     pub fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
         self.outcomes(ctx);
+        // v41 auxiliary groups: Chainlink samples are stored, perpetual events only recorded;
+        // neither runs the features or the rules (decisions as without them).
+        if self.clref != INST_NONE || self.perp != INST_NONE {
+            match *ev {
+                EventRef::Index {
+                    inst, px, ex_ts_ns, ..
+                } if inst == self.clref => {
+                    if self.cl_mul > 0 {
+                        self.cl
+                            .on_sample(ex_ts_ns.div_euclid(1_000_000), px.0.saturating_mul(self.cl_mul));
+                    }
+                    return;
+                }
+                EventRef::Mark {
+                    inst, px, ex_ts_ns, ..
+                } if inst == self.clref => {
+                    if self.cl_mul > 0 {
+                        self.cl
+                            .on_twap(ex_ts_ns.div_euclid(1_000_000), px.0.saturating_mul(self.cl_mul));
+                    }
+                    return;
+                }
+                EventRef::Bbo { inst, b, .. } if inst == self.perp => {
+                    if self.lead_on() {
+                        self.lead_perp(b.bid_px.0.saturating_add(b.ask_px.0), v, ctx);
+                    }
+                    return;
+                }
+                EventRef::Book { inst, .. } | EventRef::Trade { inst, .. } if inst == self.perp => {
+                    return;
+                }
+                // The sidecar's samples are ignored once the native group exists.
+                EventRef::Warmup { local_kind, .. }
+                    if local_kind == CL_WARMUP_KIND && self.clref != INST_NONE =>
+                {
+                    return;
+                }
+                _ => {}
+            }
+        }
         let cfg = self.plan_cfg();
         self.feat.on_event(ev, v, self.reference, cfg);
         match *ev {
             EventRef::Bbo { inst, .. } if inst == self.reference => {
+                if self.lead_on() && self.p.defaults().lead_src & LEAD_SRC_SPOT != 0 {
+                    let mid_x2 = self.feat.top.mid_x2;
+                    self.lead_quote(LEAD_SRC_SPOT, mid_x2, v, ctx);
+                }
+                if self.feat.top.mid_x2 > 0 {
+                    self.fc
+                        .on_spot(v.now().utc_ns.div_euclid(1_000_000_000), self.feat.top.mid_x2);
+                }
                 let w = self.p.defaults().ref_cb_w.0;
                 if w > 0 {
                     self.fuse.on_first(self.feat.top.mid_x2, v.now().engine_ns, w);
@@ -1077,16 +1247,308 @@ impl Fast {
 
     /// Outcomes of the previous event's places.
     fn outcomes(&mut self, ctx: &Ctx<'_>) {
-        for q in self.quotes.iter_mut().filter(|q| q.state == QState::Placing) {
+        for (k, q) in self
+            .quotes
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, q)| q.state == QState::Placing)
+        {
+            let lead = self.lead.legs.get_mut(k).filter(|l| l.handle == Some(q.handle));
             match ctx.outcome(IntentHandle(q.handle)) {
                 Some(IntentOutcome::Placed(r)) => {
                     q.state = QState::Live;
                     q.r = Some(r);
+                    if let Some(l) = lead {
+                        l.handle = None;
+                        l.r = Some(r);
+                    }
                 }
                 _ => {
                     q.state = QState::None;
                     q.r = None;
+                    if let Some(l) = lead {
+                        l.handle = None;
+                    }
                 }
+            }
+        }
+    }
+
+    /// Rule 15 on a perpetual BBO (2 × mid `mid_x2`): the perp-cancel and the lead triggers over
+    /// the ring of perpetual mids, then the lead orders' lifetime (README "规则" 15).
+    fn lead_perp<V: Views>(&mut self, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
+        self.lead_quote(LEAD_SRC_PERP, mid_x2, v, ctx);
+    }
+
+    /// Rule 15 on a quote of trigger source `src` (`LEAD_SRC_PERP` or `LEAD_SRC_SPOT`, 2 × mid
+    /// `mid_x2`): the perp cancel (perpetual only), the lead trigger of that source (own ring and
+    /// cool-downs) and the lead orders' lifetime.
+    fn lead_quote<V: Views>(&mut self, src: u32, mid_x2: i64, v: &V, ctx: &mut Ctx<'_>) {
+        use crate::lead::ret;
+        let now = v.now();
+        let ens = now.engine_ns;
+        if mid_x2 <= 0 {
+            return;
+        }
+        let perp = src == LEAD_SRC_PERP;
+        if perp {
+            self.lead.ring.push(ens, mid_x2);
+        } else {
+            self.lead.spot.push(ens, mid_x2);
+        }
+        let d = *self.p.defaults();
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 || !now.clock_ok {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let start = utc_ms.div_euclid(1_000).div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let age_ms = w * 1_000 - left_ms;
+        self.lead.window(start);
+        // Triggers count only inside [start + 5 s, end − 2 s] (the research's trigger range).
+        let in_range = age_ms >= LEAD_START_MS && left_ms >= LEAD_END_MS;
+        let ms = 1_000_000i64;
+        // Model price (lead_price 1): the rule-14 features, with one implied-σ sample per second.
+        let model = d.lead_price == 1;
+        if model {
+            self.fc.window(start);
+            let sec = utc_ms.div_euclid(1_000);
+            if self.fc.iv_due(sec) {
+                let _ = self.fc_features(v, sec, start, w, left_ms, up);
+            }
+        }
+        if in_range
+            && perp
+            && d.lead_pc_w_ms > 0
+            && d.lead_pc_x_bp.0 > 0
+            && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.lead_pc_w_ms) * ms)
+            && let Some(sg) = self.lead.pc.fire(
+                ret(mid_x2, base),
+                d.lead_pc_x_bp.0,
+                ens,
+                i64::from(d.lead_pc_cool_ms) * ms,
+            )
+        {
+            // The token the move is against: its lead bid (and a rule-14 entry bid) is cancelled;
+            // rule-14 entries on it are blocked for lead_pc_block_ms.
+            let hurt = if sg > 0 { up + 1 } else { up };
+            if let Some(b) = self.lead.block.get_mut(hurt) {
+                *b = ens.saturating_add(i64::from(d.lead_pc_block_ms) * ms);
+            }
+            if let Some(q) = self.quotes.get(hurt).copied()
+                && q.state == QState::Live
+                && (self.is_lead(hurt, &q) || (d.fc_on && self.fc_pair.get(hurt) == Some(&false)))
+                && let Some(r) = q.r
+                && ctx.cancel(r).is_ok()
+                && let Some(m) = self.quotes.get_mut(hurt)
+            {
+                m.state = QState::Cancelling;
+                m.last_ens = ens;
+            }
+        }
+        let ring = if perp { &self.lead.ring } else { &self.lead.spot };
+        let move_ = ring
+            .at_or_before(ens - i64::from(d.lead_w_ms) * ms)
+            .map(|base| ret(mid_x2, base));
+        let trigger = if perp {
+            &mut self.lead.lead
+        } else {
+            &mut self.lead.lead_spot
+        };
+        if in_range
+            && d.lead_src & src != 0
+            && d.lead_w_ms > 0
+            && d.lead_x_bp.0 > 0
+            && let Some(r) = move_
+            && let Some(sg) = trigger.fire(r, d.lead_x_bp.0, ens, i64::from(d.lead_cool_ms) * ms)
+        {
+            let i = if sg > 0 { up } else { up + 1 };
+            if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
+                let feat = if model {
+                    self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)
+                } else {
+                    None
+                };
+                self.lead_place(i, start, r.abs(), feat, v, ctx);
+            }
+        }
+        self.lead_maint(v, ctx, d.lead_only);
+    }
+
+    /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
+    /// favoured token of window `start`) when the leg has no order, the spread is at least two
+    /// cents and the leg's net shares stay within `inv_max_shares`.
+    fn lead_place<V: Views>(
+        &mut self,
+        i: usize,
+        start: i64,
+        move_abs: i64,
+        feat: Option<(i64, i64, i64, i64)>,
+        v: &V,
+        ctx: &mut Ctx<'_>,
+    ) {
+        let d = *self.p.defaults();
+        let Some(q) = self.quotes.get(i).copied() else {
+            return;
+        };
+        if q.state != QState::None {
+            return;
+        }
+        let hot = *v.inst(q.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        let (Some(bid), Some(ask)) = (
+            book.best(Side::Buy).map(|l| l.px.0),
+            book.best(Side::Sell).map(|l| l.px.0),
+        ) else {
+            return;
+        };
+        if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
+            return;
+        }
+        // lead_price 1: the model price; without features (or 0) one cent above the bid.
+        let px = match (d.lead_price, feat) {
+            (1, Some((dist_up, sq, remf, sig))) => {
+                let dist = if i.is_multiple_of(2) { dist_up } else { -dist_up };
+                crate::lead::model_px(
+                    bid,
+                    ask,
+                    cent,
+                    crate::fcev::delta(dist, sq, remf, sig),
+                    move_abs,
+                    d.lead_k.0,
+                    d.lead_m.0,
+                    i64::from(d.lead_maxtick),
+                )
+            }
+            (1, None) => bid + cent,
+            _ => bid.div_euclid(cent) * cent + cent,
+        };
+        if px >= ask || px <= bid {
+            return;
+        }
+        // lead_p_min: no lead bid below the minimum price (fraction of one, 1e-9 of `unit_px`).
+        if d.lead_p_min.0 > 0
+            && i128::from(px) * 1_000_000_000 < i128::from(d.lead_p_min.0) * i128::from(unit_px)
+        {
+            return;
+        }
+        let pos = |k: usize| {
+            self.quotes
+                .get(k)
+                .and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
+                .unwrap_or(0)
+        };
+        let qty = i64::from(d.lead_shares).saturating_mul(unit_qty);
+        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+        if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
+            return;
+        }
+        let it = OrderIntent {
+            venue: q.venue,
+            account: self.account,
+            side: Side::Buy,
+            tif: Tif::PostOnly,
+            class: IntentClass::Open,
+            flags: 0,
+            _pad: [0; 2],
+            inst: q.inst,
+            group: q.id,
+            px: Px(px),
+            qty: Qty(qty),
+            link: LegLinkOpt::NONE,
+            tag: tag_of(i as u16),
+            max_rest_ms: d.max_rest_ms,
+        };
+        let ens = v.now().engine_ns;
+        if let Ok(h) = ctx.place(it)
+            && let Some(m) = self.quotes.get_mut(i)
+        {
+            m.state = QState::Placing;
+            m.handle = h.0;
+            m.px = px;
+            m.last_ens = ens;
+            m.win = start;
+            if let Some(l) = self.lead.legs.get_mut(i) {
+                *l = crate::lead::LeadLeg {
+                    handle: Some(h.0),
+                    r: None,
+                    placed: ens,
+                };
+            }
+            if let Some(x) = self.fc_pair.get_mut(i) {
+                *x = false;
+            }
+            if let Some(x) = self.skind.get_mut(i) {
+                *x = false;
+            }
+        }
+    }
+
+    /// Rule 15 order lifetime: a lead bid is cancelled `lead_life_ms` after its place, 2 s before
+    /// the window end or with `enabled` off. `all` (`lead_only`): every leg's stale state is reset
+    /// as in rule 8 and any other resting bid is cancelled.
+    fn lead_maint<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>, all: bool) {
+        let now = v.now();
+        let d = *self.p.defaults();
+        let ens = now.engine_ns;
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let start = utc_ms.div_euclid(1_000).div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let life = i64::from(d.lead_life_ms) * 1_000_000;
+        let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
+        for i in 0..n {
+            let Some(q) = self.quotes.get(i).copied() else {
+                continue;
+            };
+            let lead = self.is_lead(i, &q);
+            if all {
+                let old_window = i / 2 == up / 2 && q.win != start;
+                let stale = match q.state {
+                    QState::Live => old_window,
+                    QState::Cancelling => old_window || ens.saturating_sub(q.last_ens) >= stuck,
+                    QState::None | QState::Placing => false,
+                };
+                if stale {
+                    if let Some(r) = q.r {
+                        let _ = ctx.cancel(r);
+                    }
+                    if let Some(m) = self.quotes.get_mut(i) {
+                        m.state = QState::None;
+                        m.r = None;
+                    }
+                    continue;
+                }
+            }
+            if q.state != QState::Live {
+                continue;
+            }
+            let placed = self.lead.legs.get(i).map_or(i64::MIN / 2, |l| l.placed);
+            let cancel = if lead {
+                !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
+            } else {
+                all
+            };
+            if cancel
+                && let Some(r) = q.r
+                && ctx.cancel(r).is_ok()
+                && let Some(m) = self.quotes.get_mut(i)
+            {
+                m.state = QState::Cancelling;
+                m.last_ens = ens;
             }
         }
     }
@@ -1198,7 +1660,300 @@ impl Fast {
     }
 
     /// README "规则": decides every slot leg's quote.
+    /// Rule 14 features at UTC second `sec` of window `start` (`left_ms` before its end), Up leg
+    /// `up`: `(dist_up, sq, remf, sigma)`, 1e-9 (bp, √s, fraction, bp/√s). `None` without the
+    /// Chainlink group, the strike TWAP at the window start or a fresh Chainlink price. Takes the
+    /// second's implied-σ sample (once per second).
+    fn fc_features<V: Views>(
+        &mut self,
+        v: &V,
+        sec: i64,
+        start: i64,
+        w: i64,
+        left_ms: i64,
+        up: usize,
+    ) -> Option<(i64, i64, i64, i64)> {
+        use crate::fcev;
+        if self.clref == INST_NONE {
+            return None;
+        }
+        let d = *self.p.defaults();
+        let k = self.cl.twap_at(start)?;
+        let cl_now = self.cl.now(sec)?;
+        // S = the latest Chainlink price moved by the reference since that sample's second.
+        let spot_now = self.feat.top.mid_x2;
+        let s_now = match self.fc.spot_before(self.cl.last_s) {
+            Some(then) if then > 0 && spot_now > 0 => {
+                (i128::from(cl_now) * i128::from(spot_now) / i128::from(then)) as i64
+            }
+            _ => cl_now,
+        };
+        // Realized Chainlink seconds of the final average.
+        let (mut n_real, mut real_sum) = (0i64, 0i128);
+        if left_ms < fcev::AVG_S * 1_000 {
+            let end = start + w;
+            for s in end - fcev::AVG_S..=sec.min(end - 1) {
+                if let Some(x) = self.cl.sec.exact(s) {
+                    n_real += 1;
+                    real_sum += i128::from(x);
+                }
+            }
+        }
+        let (sq, remf) = fcev::time_factors(left_ms, n_real);
+        let dist = fcev::dist_up(k, s_now, left_ms, real_sum, n_real)?;
+        if self.fc.iv_due(sec) {
+            let up_mid = self.quotes.get(up).and_then(|q| {
+                let b = v.book(q.inst);
+                let unit = 10i64.saturating_pow(u32::from(v.inst(q.inst).px_exp.unsigned_abs()));
+                match (b.best(Side::Buy), b.best(Side::Sell)) {
+                    (Some(x), Some(y)) if unit > 0 && x.px.0 < y.px.0 => Some(
+                        ((i128::from(x.px.0) + i128::from(y.px.0)) * i128::from(ONE) / (2 * i128::from(unit)))
+                            as i64,
+                    ),
+                    _ => None,
+                }
+            });
+            let iv = up_mid.and_then(|m| fcev::implied_sigma(m, dist, sq));
+            self.fc.push_iv(sec, iv, d.fc_iv_n as usize);
+        }
+        let sig = self
+            .fc
+            .iv_median()
+            .or_else(|| {
+                self.feat
+                    .vol
+                    .sigma(d.vol_min_samples as usize)
+                    .map(|s| s.saturating_mul(10_000))
+            })
+            .unwrap_or(fcev::SIG_DEFAULT);
+        Some((dist, sq, remf, sig))
+    }
+
+    /// Rule 14 (`fc_on`, README "规则" 14): the fill-conditional EV score decides the bids of the
+    /// current window's two legs; rules 1–13 do not run.
+    fn fc_run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
+        use crate::fcev;
+        let now = v.now();
+        let d = *self.p.defaults();
+        let n = self.quotes.len();
+        let pairs = (n / 2) as i64;
+        let w = i64::from(d.window_s);
+        if pairs == 0 || w <= 0 {
+            return;
+        }
+        let utc_ms = now.utc_ns.div_euclid(1_000_000);
+        let sec = utc_ms.div_euclid(1_000);
+        let start = sec.div_euclid(w) * w;
+        let up = usize::try_from((start / w).rem_euclid(pairs) * 2).unwrap_or(0);
+        let left_ms = (start + w) * 1_000 - utc_ms;
+        let age_ms = w * 1_000 - left_ms;
+        let ok = d.enabled && now.clock_ok;
+        self.fc.window(start);
+        let feat = if ok {
+            self.fc_features(v, sec, start, w, left_ms, up)
+        } else {
+            None
+        };
+        let model = fcev::Model {
+            s: d.fc_s.0,
+            lam: d.fc_lam.0,
+            c0: d.fc_c0.0,
+            c1: d.fc_c1.0,
+            w: d.fc_w.0,
+        };
+        let pos = |k: usize| {
+            self.quotes
+                .get(k)
+                .and_then(|q| {
+                    v.group_pos(self.account, q.id)
+                        .legs
+                        .first()
+                        .map(|l| (l.qty.0, l.entry_px.0))
+                })
+                .unwrap_or((0, 0))
+        };
+        let (qu, cu) = pos(up);
+        let (qd, cd) = pos(up + 1);
+        let cost_full = d.max_window_cost.0 > 0
+            && self.quotes.get(up).is_some_and(|q| {
+                let hot = v.inst(q.inst);
+                let e = i32::from(hot.qty_exp) + i32::from(hot.px_exp) + 6;
+                let raw = i128::from(qu) * i128::from(cu) + i128::from(qd) * i128::from(cd);
+                let cost = if e >= 0 {
+                    raw * 10i128.pow(e.unsigned_abs())
+                } else {
+                    raw / 10i128.pow(e.unsigned_abs())
+                };
+                cost >= i128::from(d.max_window_cost.0)
+            });
+        let pairing = d.fc_m_pair.0 >= 0;
+        let requote = i64::from(d.requote_ms) * 1_000_000;
+        let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
+        let ens = now.engine_ns;
+        let one = i128::from(ONE);
+        for i in 0..n {
+            let Some(mut q) = self.quotes.get(i).copied() else {
+                continue;
+            };
+            // Stale state as in rule 8.
+            let old_window = i / 2 == up / 2 && q.win != start;
+            let stale = match q.state {
+                QState::Live => old_window,
+                QState::Cancelling => old_window || ens.saturating_sub(q.last_ens) >= stuck,
+                QState::None | QState::Placing => false,
+            };
+            if stale {
+                if let Some(r) = q.r {
+                    let _ = ctx.cancel(r);
+                }
+                q.state = QState::None;
+                q.r = None;
+                if let Some(m) = self.quotes.get_mut(i) {
+                    m.state = QState::None;
+                    m.r = None;
+                }
+            }
+            if i / 2 != up / 2 || self.is_lead(i, &q) {
+                continue;
+            }
+            let is_up = i % 2 == 0;
+            let hot = *v.inst(q.inst);
+            let unit_px = i128::from(10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs())).max(1));
+            let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+            let book = v.book(q.inst);
+            let bid = book.best(Side::Buy).map(|l| l.px.0);
+            let ask = book.best(Side::Sell).map(|l| l.px.0);
+            // Cents (1e-9) of a raw price, and the raw price of whole cents.
+            let cents = |px: i64| (i128::from(px) * 100 * one / unit_px) as i64;
+            let raw_of_cents = |c: i128| (c * unit_px / (100 * one)) as i64;
+            let mid_c = match (bid, ask) {
+                (Some(b), Some(a)) if b < a => Some(cents(b + a) / 2),
+                _ => None,
+            };
+            let score = |px: i64| -> Option<i64> {
+                let (dist_up, sq, remf, sig) = feat?;
+                let dist = if is_up { dist_up } else { -dist_up };
+                Some(fcev::score(&model, dist, sq, remf, sig, mid_c?, cents(px)))
+            };
+            let (own_q, oth_q, oth_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
+            let excess = oth_q.saturating_sub(own_q);
+            let short = pairing && excess > 0;
+            // Pair bid: at most 100 − the long leg's average cost − fc_m_pair (whole cents) and
+            // the best bid floored to a whole cent.
+            let pair_px = if short && oth_q > 0 {
+                let target =
+                    (100 * one - i128::from(cents(oth_c)) - i128::from(d.fc_m_pair.0)).div_euclid(one) * one;
+                let floor_bid = bid.map(|b| i128::from(cents(b)).div_euclid(one) * one);
+                match floor_bid {
+                    Some(fb) if target >= one => Some(raw_of_cents(target.min(fb))).filter(|p| *p > 0),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let is_pair = self.fc_pair.get(i) == Some(&true);
+            match q.state {
+                QState::Live => {
+                    let end = !ok || left_ms <= FC_END_MS;
+                    let cancel = end
+                        || if is_pair {
+                            pair_px != Some(q.px)
+                        } else {
+                            short
+                                || bid.is_some_and(|b| b > q.px)
+                                || score(q.px).is_none_or(|s| s < d.fc_m_cancel.0)
+                        };
+                    if cancel
+                        && let Some(r) = q.r
+                        && ctx.cancel(r).is_ok()
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Cancelling;
+                        m.last_ens = ens;
+                    }
+                }
+                QState::None => {
+                    if !ok
+                        || left_ms <= FC_END_MS
+                        || ens.saturating_sub(q.last_ens) < requote
+                        || cost_full
+                        || (!short && self.lead.block.get(i).is_some_and(|b| ens < *b))
+                    {
+                        continue;
+                    }
+                    let (px, qty, pair) = if short {
+                        let Some(px) = pair_px else { continue };
+                        let lot = hot.lot.max(1);
+                        let qty = excess / lot * lot;
+                        if qty < hot.min_qty.0 || qty <= 0 {
+                            continue;
+                        }
+                        (px, qty, true)
+                    } else {
+                        let Some(b) = bid else { continue };
+                        let clip = i64::from(d.clip_shares).saturating_mul(unit_qty);
+                        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+                        let in_band = i128::from(b) * one >= i128::from(d.p_min.0) * unit_px
+                            && i128::from(b) * one <= i128::from(d.p_max.0) * unit_px;
+                        if age_ms < FC_START_MS
+                            || left_ms <= i64::from(d.stop_before_ms)
+                            || !in_band
+                            || own_q.saturating_sub(oth_q).saturating_add(clip) > cap
+                            || score(b).is_none_or(|s| s <= d.fc_m_post.0)
+                        {
+                            continue;
+                        }
+                        (b, clip, false)
+                    };
+                    let it = OrderIntent {
+                        venue: q.venue,
+                        account: self.account,
+                        side: Side::Buy,
+                        tif: Tif::PostOnly,
+                        class: IntentClass::Open,
+                        flags: 0,
+                        _pad: [0; 2],
+                        inst: q.inst,
+                        group: q.id,
+                        px: Px(px),
+                        qty: Qty(qty),
+                        link: LegLinkOpt::NONE,
+                        tag: tag_of(i as u16),
+                        max_rest_ms: d.max_rest_ms,
+                    };
+                    if let Ok(h) = ctx.place(it)
+                        && let Some(m) = self.quotes.get_mut(i)
+                    {
+                        m.state = QState::Placing;
+                        m.handle = h.0;
+                        m.px = px;
+                        m.last_ens = ens;
+                        m.win = start;
+                        if let Some(x) = self.fc_pair.get_mut(i) {
+                            *x = pair;
+                        }
+                        if let Some(x) = self.skind.get_mut(i) {
+                            *x = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
+        if self.p.defaults().lead_only {
+            self.lead_maint(v, ctx, true);
+            return;
+        }
+        if self.lead_on() {
+            self.lead_maint(v, ctx, false);
+        }
+        if self.p.defaults().fc_on {
+            self.fc_run(v, ctx);
+            return;
+        }
         let now = v.now();
         let d = *self.p.defaults();
         let pairs = (self.quotes.len() / 2) as i64;
@@ -1474,8 +2229,10 @@ impl Fast {
                     m.r = None;
                 }
             }
-            // Rule 12 decides its own bids while it runs.
-            if settling && q.state != QState::None && self.skind.get(i) == Some(&true) {
+            // Rule 12 decides its own bids while it runs; rule 15 manages its lead bids.
+            if (settling && q.state != QState::None && self.skind.get(i) == Some(&true))
+                || self.is_lead(i, &q)
+            {
                 continue;
             }
             let hot = *v.inst(q.inst);

@@ -1,0 +1,8 @@
+source = "research-recorder"
+source_ref = "research server ~/data/pmrec/20261109 (company recorder: PM CLOB WS, Binance spot, PolyBolt price.crypto + twap), windows 1794193200 1794197700 1794202200 1794209700"
+generator = "E:/trade/staging/fcev/parity_dump.py (outside the repo) importing sim2.py md5 87017c2d5837941091b2ba11119e3555"
+captured_at = "2026-11-09"
+note = "one row per decision second: Rust function inputs (left_ms, K/S/realized sum in 1e-8 USD, n_real, Up mid) and the Python reference outputs (dist_up, sq, remf, sig, implied-sigma count, both tokens' best bid, mid and score with s 1.25 lam 0.35 c0 1.3 c1 0.5 w 0.5)"
+reviewed_by = "pending-human-review"
+review_status = "draft; values computed by the Python reference, not by the Rust code"
+case_id = "BMK-052"

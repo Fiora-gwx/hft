@@ -288,3 +288,44 @@ fn test_malformed_secret_removes_files_and_redacts_errors() {
     assert!(paths.iter().all(|p| !p.exists()));
     assert!(!format!("{errors:?}").contains("test-api"));
 }
+
+#[test]
+fn core_455_md_login_secrets() {
+    // .1 the md_login files are read and unlinked with the account files; a path shared with an
+    // account is read once.
+    let (d, mut c, paths) = fixture();
+    let own = d.path().join("md-secret");
+    std::fs::write(&own, b"md-secret-value|wallet").unwrap();
+    c.venues.values_mut().next().unwrap().md_login = Some(hft_core::config::MdLogin {
+        api_key_path: paths[0].clone(),
+        secret_path: own.clone(),
+        passphrase_path: Some(paths[2].clone()),
+    });
+    let secrets = SecretFiles::read_and_unlink(&c).unwrap();
+    assert!(paths.iter().all(|p| !p.exists()) && !own.exists(), "CORE-455.1");
+    assert_eq!(
+        secrets.get(&own).unwrap(),
+        b"md-secret-value|wallet",
+        "CORE-455.1"
+    );
+    assert_eq!(secrets.get(&paths[0]).unwrap(), b"test-api", "CORE-455.1");
+    // .2 md_login only (sim instance or dry run): the account files stay.
+    let (d, mut c, paths) = fixture();
+    let own = d.path().join("md-secret");
+    std::fs::write(&own, b"s").unwrap();
+    let key = d.path().join("md-key");
+    std::fs::write(&key, b"k").unwrap();
+    c.venues.values_mut().next().unwrap().md_login = Some(hft_core::config::MdLogin {
+        api_key_path: key.clone(),
+        secret_path: own.clone(),
+        passphrase_path: None,
+    });
+    let secrets = SecretFiles::read_and_unlink_md_login(&c).unwrap();
+    assert!(!own.exists() && !key.exists(), "CORE-455.2");
+    assert!(
+        paths.iter().all(|p| p.exists()),
+        "CORE-455.2 account files untouched"
+    );
+    assert!(secrets.get(&paths[1]).is_err(), "CORE-455.2");
+    assert_eq!(secrets.get(&key).unwrap(), b"k", "CORE-455.2");
+}

@@ -9,8 +9,9 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
-         [--account LABEL:UID:ROLE KEYS_DIR ...]] [--no-coinbase] [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
+         [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] \
+         [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
 }
@@ -38,6 +39,12 @@ pub struct Cmd {
     /// `[venues.cb]` (Coinbase BTC-USD reference) in the maker and live configurations; false =
     /// `--no-coinbase`.
     pub coinbase: bool,
+    /// `[venues.bp]` (perpetual reference) in the maker and live configurations; false =
+    /// `--no-perp`.
+    pub perp: bool,
+    /// `--cl-keys DIR`: Chainlink login files (maker: enables `[venues.cl]`; live: replaces
+    /// `KEYS_DIR` for the Chainlink login).
+    pub cl_keys: Option<PathBuf>,
     /// `--cpu-plan none|pin|spin` (README "绑核"); default none.
     pub cpu_plan: crate::CpuPlan,
     pub root: PathBuf,
@@ -111,8 +118,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut account_cap = None;
     let mut group_cap = None;
     let mut no_presign = false;
+    let mut presign_grid: Option<String> = None;
     let mut no_cancel_race = false;
     let mut no_coinbase = false;
+    let mut no_perp = false;
+    let mut no_chainlink = false;
+    let mut cl_keys: Option<PathBuf> = None;
     let mut cpu_plan: Option<crate::CpuPlan> = None;
     let mut extra = Vec::new();
     let mut params = Vec::new();
@@ -208,6 +219,14 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_presign, "--no-presign")?;
                 no_presign = true;
             }
+            "--presign-grid" => {
+                once(presign_grid.is_some(), "--presign-grid")?;
+                let v = next("--presign-grid", "SHARES")?;
+                if crate::presign_grid_e6(&v).is_none() {
+                    return Err("--presign-grid: SHARES must be a decimal > 0 (at most 6 places)".into());
+                }
+                presign_grid = Some(v);
+            }
             "--no-cancel-race" => {
                 once(no_cancel_race, "--no-cancel-race")?;
                 no_cancel_race = true;
@@ -223,6 +242,18 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             "--no-coinbase" => {
                 once(no_coinbase, "--no-coinbase")?;
                 no_coinbase = true;
+            }
+            "--no-perp" => {
+                once(no_perp, "--no-perp")?;
+                no_perp = true;
+            }
+            "--no-chainlink" => {
+                once(no_chainlink, "--no-chainlink")?;
+                no_chainlink = true;
+            }
+            "--cl-keys" => {
+                once(cl_keys.is_some(), "--cl-keys")?;
+                cl_keys = Some(PathBuf::from(next("--cl-keys", "DIR")?));
             }
             "--param" => {
                 let p = next("--param", "NAME=RAW")?;
@@ -243,7 +274,9 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let needs_live = [
         (probe, "--taker-probe"),
         (no_presign, "--no-presign"),
+        (presign_grid.is_some(), "--presign-grid"),
         (no_cancel_race, "--no-cancel-race"),
+        (no_chainlink, "--no-chainlink"),
         (!extra.is_empty(), "--live-account/--account"),
         (carry.is_some(), "--day-loss-carry"),
         (daily_loss.is_some(), "--daily-loss"),
@@ -264,6 +297,18 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     }
     if no_coinbase && !maker && live.is_none() {
         return Err("--no-coinbase needs --maker or --live".into());
+    }
+    if no_perp && !maker && live.is_none() {
+        return Err("--no-perp needs --maker or --live".into());
+    }
+    if cl_keys.is_some() && !maker && live.is_none() {
+        return Err("--cl-keys needs --maker or --live".into());
+    }
+    if cl_keys.is_some() && no_chainlink {
+        return Err("--cl-keys and --no-chainlink are exclusive".into());
+    }
+    if presign_grid.is_some() && no_presign {
+        return Err("--presign-grid and --no-presign are exclusive".into());
     }
     if extra.len() > MAX_EXTRA_ACCOUNTS {
         return Err(format!(
@@ -288,9 +333,13 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 account_cap,
                 group_cap,
                 presign: !no_presign,
+                presign_grid,
                 cancel_race: !no_cancel_race,
                 extra_accounts: extra,
                 coinbase: !no_coinbase,
+                perp: !no_perp,
+                chainlink: !no_chainlink,
+                cl_keys: cl_keys.clone(),
             };
             l.check()?;
             if probe { Mode::LiveProbe(l) } else { Mode::Live(l) }
@@ -304,6 +353,8 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         mode,
         params,
         coinbase: !no_coinbase,
+        perp: !no_perp,
+        cl_keys,
         cpu_plan: cpu_plan.unwrap_or_default(),
         root: PathBuf::from(take()),
         hot: PathBuf::from(take()),
@@ -332,7 +383,7 @@ fn write(cmd: &Cmd) -> Result<PathBuf, String> {
         Mode::LiveProbe(l) => {
             crate::write_polymarket_taker_probe_live(root, hot, user, pipeline, ip, dev, l, &cmd.params)
         }
-        Mode::Maker => crate::write_polymarket_maker_sim_opts(
+        Mode::Maker => crate::write_polymarket_maker_sim_refs(
             root,
             hot,
             user,
@@ -340,7 +391,11 @@ fn write(cmd: &Cmd) -> Result<PathBuf, String> {
             ip,
             dev,
             &cmd.params,
-            cmd.coinbase,
+            &crate::Refs {
+                coinbase: cmd.coinbase,
+                perp: cmd.perp,
+                chainlink: cmd.cl_keys.clone(),
+            },
         ),
         Mode::Sim => crate::write_polymarket_sim(root, hot, user, pipeline, ip, dev),
     }

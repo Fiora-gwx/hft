@@ -282,9 +282,23 @@ pub struct Venue {
     /// this assembly.
     #[serde(default)]
     pub gw: GwOpts,
+    /// `venues.<v>.md_login`: the credential files market-data connections log in with
+    /// (`venues::MD_LOGIN_PROTOCOLS` only); read and unlinked at startup like account keys.
+    #[serde(default)]
+    pub md_login: Option<MdLogin>,
+}
+/// `venues.<v>.md_login` (README "配置文件字段"): key, secret and optional passphrase files. A path
+/// shared with an account's key files is read once.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MdLogin {
+    pub api_key_path: PathBuf,
+    pub secret_path: PathBuf,
+    pub passphrase_path: Option<PathBuf>,
 }
 /// `venues.<v>.presign` (venue-polymarket "预签名"): prices `below`/`above` the last place's in
-/// `step`s (decimal USDC text), each order used within `max_age_ms` of its signing.
+/// `step`s (decimal USDC text), each order used within `max_age_ms` of its signing; `grid_qty`
+/// (decimal shares text) turns the price grid on: a buy of that size at every `step`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PresignOpts {
@@ -292,25 +306,36 @@ pub struct PresignOpts {
     pub above: u8,
     pub step: String,
     pub max_age_ms: u32,
+    /// Absent = no price grid.
+    #[serde(default)]
+    pub grid_qty: Option<String>,
 }
 impl PresignOpts {
     /// `step` in 1e-6 USDC: positive, at most six decimals.
     pub fn step_e6(&self) -> Option<u32> {
-        let (int, frac) = self.step.split_once('.').unwrap_or((self.step.as_str(), ""));
-        if int.is_empty() && frac.is_empty()
-            || frac.len() > 6
-            || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit())
-        {
-            return None;
-        }
-        let int: u32 = if int.is_empty() { 0 } else { int.parse().ok()? };
-        let frac: u32 = if frac.is_empty() {
-            0
-        } else {
-            format!("{frac:0<6}").parse().ok()?
-        };
-        int.checked_mul(1_000_000)?.checked_add(frac).filter(|v| *v > 0)
+        decimal_e6(&self.step)
     }
+    /// `grid_qty` in 1e-6 shares: positive, at most six decimals; `None` when absent or not so.
+    pub fn grid_qty_e6(&self) -> Option<u32> {
+        decimal_e6(self.grid_qty.as_deref()?)
+    }
+}
+/// A decimal text in 1e-6 units: positive, at most six decimals.
+fn decimal_e6(text: &str) -> Option<u32> {
+    let (int, frac) = text.split_once('.').unwrap_or((text, ""));
+    if int.is_empty() && frac.is_empty()
+        || frac.len() > 6
+        || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let int: u32 = if int.is_empty() { 0 } else { int.parse().ok()? };
+    let frac: u32 = if frac.is_empty() {
+        0
+    } else {
+        format!("{frac:0<6}").parse().ok()?
+    };
+    int.checked_mul(1_000_000)?.checked_add(frac).filter(|v| *v > 0)
 }
 /// `venues.<v>.gw.{rest_conns,rest_cancel_reserve}` (hft-venue "配置项"): absent = the protocol's
 /// `GW_REST_CONNS` / `GW_REST_CANCEL_RESERVE`.
@@ -756,6 +781,9 @@ pub fn load_timed(
             errors.push(e);
         }
         if let Some(e) = crate::venues::read_only_error(name, v) {
+            errors.push(e);
+        }
+        if let Some(e) = crate::venues::md_login_error(name, v) {
             errors.push(e);
         }
         if v.net.rest_timeout_ms == Some(0) {

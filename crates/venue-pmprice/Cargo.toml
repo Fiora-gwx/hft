@@ -1,0 +1,30 @@
+[package]
+name = "venue-pmprice"
+description = "Polymarket live price stream (PolyBolt) market data, read-only: Chainlink price -> IndexPrice and 60 s TWAP -> MarkPrice per symbol, authenticated market-data login, snapshot backfill on subscribe, app-level ping; no orders, no accounts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+autotests = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-venue-proto.workspace = true
+# Per-message structs over borrowed strings (README "解码"); no generic JSON values.
+sonic-rs = "0.5"
+serde = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+hft-venue-proto = { workspace = true, features = ["testkit"] }
+# Golden comparison only (never in [dependencies]).
+serde_json = "1"
+
+[[test]]
+name = "pmprice"
+path = "tests/main.rs"

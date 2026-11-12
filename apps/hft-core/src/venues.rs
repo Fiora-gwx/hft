@@ -189,12 +189,51 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        // Market data only, logged in with `md_login` (`md_login_error`).
+        "polymarket-price" => build::<venue_pmprice::PolymarketPrice>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            utc,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_pmprice::FeedCtx::default(),
+            || (),
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
 }
 
 /// Protocols without order entry or accounts (market data only).
-pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot"];
+pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot", "polymarket-price"];
+
+/// Protocols whose market-data connections log in (`venues.<v>.md_login` required).
+pub const MD_LOGIN_PROTOCOLS: &[&str] = &["polymarket-price"];
+
+/// Load-time check of `venues.<v>.md_login`: required by a protocol whose market data needs a
+/// login (`MD_LOGIN_PROTOCOLS`), refused elsewhere.
+pub fn md_login_error(name: &str, v: &Venue) -> Option<Error> {
+    let needs = MD_LOGIN_PROTOCOLS.contains(&v.protocol.as_str());
+    match (needs, v.md_login.is_some()) {
+        (true, false) => Some(Error::config(
+            "MdLoginRequired",
+            format!("venues.{name}: {} market data needs md_login", v.protocol),
+        )),
+        (false, true) => Some(Error::config(
+            "MdLoginUnsupported",
+            format!("venues.{name}: {} market data takes no login", v.protocol),
+        )),
+        _ => None,
+    }
+}
 
 /// Load-time check: a read-only protocol takes no `accounts` (it has no order, report or account
 /// methods; venue-coinbase README "账户").
@@ -260,6 +299,7 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
         ("coinbase-spot", EndpointRole::Rest) => host == "api.exchange.coinbase.com",
         ("coinbase-spot", _) => host == "ws-feed.exchange.coinbase.com",
+        ("polymarket-price", _) => host == "ws-live-v2.polymarket.com",
         _ => false,
     }
 }
@@ -641,6 +681,15 @@ where
         },
         creds,
     );
+    if let Some(m) = &v.md_login {
+        session.set_md_credential(credential(
+            &m.api_key_path,
+            &m.secret_path,
+            m.passphrase_path.as_deref(),
+            SignAlg::HmacSha256,
+            secrets,
+        )?);
+    }
     let (mut fh_tx, fh_rx) = ring(256)?;
     let (fb_tx, mut fb_rx) = ring(256)?;
     let (fr_tx, mut fr_rx) = ring(256)?;
@@ -727,20 +776,25 @@ where
             ..FeedCfg::default()
         }
     } else {
-        let levels = P::routes()
+        // A protocol without a depth route either (polymarket-price: Index/Mark only) runs its
+        // Md streams on one connection; `topn_levels` is then unused.
+        let depth_levels = P::routes()
             .iter()
             .filter(|r| r.kind == RouteKind::DepthTopN)
             .flat_map(|r| r.topn_levels.iter().copied())
-            .max()
-            .ok_or_else(|| Error::config("Feed", "protocol has neither Bbo nor DepthTopN routes"))?;
+            .max();
         FeedCfg {
             routes: hft_venue::FeedRoutes::Md,
             max_sub_insts: v.max_sub_insts,
             depth: hft_venue::DepthMode::TopN,
-            topn_levels: levels,
+            topn_levels: depth_levels.unwrap_or(FeedCfg::default().topn_levels),
             snapshot_part_levels: 256,
-            // Two connections per group: the exchange closes single connections (WS 1013).
-            depth_conns: v.feed.depth_conns.unwrap_or(2),
+            // Two connections per group for a book (the exchange closes single connections,
+            // WS 1013); one for a price-only stream.
+            depth_conns: v
+                .feed
+                .depth_conns
+                .unwrap_or(if depth_levels.is_some() { 2 } else { 1 }),
             raw_bbo,
             raw_md,
             venue: feed_venue,
@@ -1133,10 +1187,22 @@ fn pm_presign(v: &Venue) -> Result<Option<venue_polymarket::Presign>, Error> {
     let Some(p) = &v.presign else {
         return Ok(None);
     };
-    p.step_e6()
-        .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
+    pm_presign_of(p)
         .map(Some)
         .ok_or_else(|| Error::config("BadValue", "venues.<v>.presign"))
+}
+
+/// `p` as venue-polymarket's `Presign`, with the price grid when `grid_qty` is present; `None`
+/// when a value is out of range.
+#[cfg(feature = "polymarket")]
+fn pm_presign_of(p: &crate::config::PresignOpts) -> Option<venue_polymarket::Presign> {
+    let base = p
+        .step_e6()
+        .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))?;
+    if p.grid_qty.is_none() {
+        return Some(base);
+    }
+    base.with_grid(p.grid_qty_e6()?)
 }
 
 /// Load-time check of `venues.<name>.presign` (README "配置文件字段"): only `polymarket-clob`
@@ -1149,11 +1215,11 @@ pub fn presign_error(name: &str, v: &Venue) -> Option<Error> {
     }
     #[cfg(feature = "polymarket")]
     {
-        if p.step_e6()
-            .and_then(|step| venue_polymarket::Presign::new(p.below, p.above, step, p.max_age_ms))
-            .is_none()
-        {
-            return bad("below + above < 8, step > 0 with at most 6 decimals, max_age_ms 1000-240000");
+        if pm_presign_of(p).is_none() {
+            return bad(
+                "below + above < 8, step > 0 with at most 6 decimals, max_age_ms 1000-240000; \
+                 grid_qty > 0 with at most 6 decimals and a step that divides 1 into 2-129 steps",
+            );
         }
     }
     #[cfg(not(feature = "polymarket"))]
@@ -1177,6 +1243,7 @@ pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
         "coinbase-spot" => of::<venue_coinbase::CoinbaseSpot>(),
+        "polymarket-price" => of::<venue_pmprice::PolymarketPrice>(),
         _ => return None,
     })
 }
@@ -1205,6 +1272,7 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
             ));
         }
         "coinbase-spot" => VenueId::COINBASE_SPOT,
+        "polymarket-price" => VenueId::POLYMARKET_PRICE,
         _ => return Err(Error::config("UnknownVenue", protocol)),
     };
     if id != expected {
@@ -1255,6 +1323,7 @@ pub fn shared_egress_ip(protocol: &str) -> bool {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
         "coinbase-spot" => venue_coinbase::CoinbaseSpot::SHARED_EGRESS_IP,
+        "polymarket-price" => venue_pmprice::PolymarketPrice::SHARED_EGRESS_IP,
         _ => false,
     }
 }

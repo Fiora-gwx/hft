@@ -58,7 +58,12 @@ fn fixture() -> (BinaryMaker, MockViews) {
 
 /// `fixture()` with parameters `p`.
 fn fixture_with(p: &BinaryMakerParams) -> (BinaryMaker, MockViews) {
-    let groups = groups();
+    fixture_groups(p, &groups())
+}
+
+/// `fixture_with` on the group table `groups`.
+fn fixture_groups(p: &BinaryMakerParams, groups: &GroupTable) -> (BinaryMaker, MockViews) {
+    let groups = groups.clone();
     let mut views = MockViews::new(common::fixture());
     let mut strategy = BinaryMaker::new(
         StrategyInstance {
@@ -190,6 +195,23 @@ fn on_event(c: &mut Criterion) {
         event,
         1,
     );
+
+    // Rule 14 (fc_on) on the table with the auxiliary groups: both quotes live, the reference quote
+    // re-scores both legs (Chainlink price, strike TWAP, implied σ ring).
+    let fc = params_with(&[("ref_aux", 3), ("fc_on", 1), ("fc_m_cancel", -50_000_000_000)]);
+    let (mut strategy, mut views) = fixture_groups(&fc, &GroupTable::new(&specs3(), CAPACITY));
+    let mut bufs = CtxBufs::new();
+    for e in [
+        ev::mark_at(RC, 9, Px(10_000_000), 300_000_000_000),
+        ev::index_at(RC, 9, Px(10_000_500), 398_000_000_000),
+    ] {
+        bufs.begin();
+        strategy.on_event(&e.as_ref(), &views, &mut bufs.ctx());
+    }
+    views.at_engine_ns(399_500_000_000);
+    live(&mut strategy);
+    let event = ev::bbo(R, 6, views.bbo_of(R));
+    measure(c, "strategies/binary-maker/tick_fc", strategy, views, event, 0);
 
     // A risk event: only the pending place outcomes are read.
     let (mut strategy, views) = fixture();

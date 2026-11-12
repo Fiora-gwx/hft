@@ -128,11 +128,18 @@ fn key_text(key: u64, buf: &mut [u8; 20]) -> &[u8] {
 impl GwCtx {
     pub(crate) fn bind(&mut self, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
         self.pre.unbind(inst);
-        self.tokens.bind_wire(inst, id).map_err(|_| ProtoErr::Cfg)
+        self.tokens.bind_wire(inst, id).map_err(|_| ProtoErr::Cfg)?;
+        // The price grid follows the binding: a row for a bound inst, none for an unbound one.
+        self.pre.grid_bind(inst, self.tokens.token_of(inst).is_some());
+        Ok(())
     }
-    /// Startup only: pre-sign orders in the gw's idle time (README "预签名"; default off).
+    /// Startup only: pre-sign orders in the gw's idle time (README "预签名"; default off). Insts
+    /// bound before the call are in the price grid like those bound after it.
     pub fn set_presign(&mut self, p: Presign) {
         self.pre.enable(p);
+        for inst in self.tokens.bound() {
+            self.pre.grid_bind(inst, true);
+        }
     }
     /// Pre-signed orders held now.
     pub fn presigned(&self) -> usize {

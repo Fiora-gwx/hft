@@ -495,10 +495,12 @@ pub(crate) enum MarketEv {
     Mark {
         inst: InstId,
         px: hft_types::Px,
+        ex_ts_ns: i64,
     },
     Index {
         inst: InstId,
         px: hft_types::Px,
+        ex_ts_ns: i64,
     },
     Liq {
         inst: InstId,
@@ -837,15 +839,17 @@ fn market_ev<'a>(m: &'a MarketEv, gix: u16, market: &'a crate::market::Market) -
                 f: market.funding.get(inst.0 as usize).unwrap_or(&EMPTY),
             }
         }
-        MarketEv::Mark { inst, px } => EventRef::Mark {
+        MarketEv::Mark { inst, px, ex_ts_ns } => EventRef::Mark {
             inst: *inst,
             gix,
             px: *px,
+            ex_ts_ns: *ex_ts_ns,
         },
-        MarketEv::Index { inst, px } => EventRef::Index {
+        MarketEv::Index { inst, px, ex_ts_ns } => EventRef::Index {
             inst: *inst,
             gix,
             px: *px,
+            ex_ts_ns: *ex_ts_ns,
         },
         MarketEv::Liq { inst, l } => EventRef::Liquidation { inst: *inst, gix, l },
     }

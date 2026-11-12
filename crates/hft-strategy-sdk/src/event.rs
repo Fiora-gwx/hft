@@ -48,12 +48,16 @@ pub enum EventRef<'a> {
         inst: InstId,
         gix: u16,
         px: Px,
+        /// Exchange time of the mark (`MarketHdr.ex_ts_ns`; 0 when the venue gives none).
+        ex_ts_ns: i64,
     },
     /// `IndexPrice` (subscribe `EvMask::INDEX`).
     Index {
         inst: InstId,
         gix: u16,
         px: Px,
+        /// Exchange time of the index sample (`MarketHdr.ex_ts_ns`; 0 when the venue gives none).
+        ex_ts_ns: i64,
     },
     /// Public-market liquidations (subscribe `EvMask::LIQUIDATION`).
     Liquidation {

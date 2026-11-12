@@ -21,6 +21,7 @@ pub const VENUE_NAMES: &[(VenueId, &str)] = &[
     (VenueId::HYPERLIQUID_PERP, "hyperliquid-perp"),
     (VenueId::POLYMARKET_CLOB, "polymarket-clob"),
     (VenueId::COINBASE_SPOT, "coinbase-spot"),
+    (VenueId::POLYMARKET_PRICE, "polymarket-price"),
 ];
 
 /// Protocol name of a venue id; unassigned → `None`.

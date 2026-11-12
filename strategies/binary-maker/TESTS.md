@@ -17,12 +17,12 @@ spec: README.md
 | 概要 | BMK-003 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| group 形态 | BMK-001, BMK-049 |
+| group 形态 | BMK-001, BMK-049, BMK-051 |
 | 参数 | BMK-003, BMK-004, BMK-008, BMK-016, BMK-022, BMK-024, BMK-033 |
-| 订阅 | BMK-003、BMK-009、BMK-026 |
+| 订阅 | BMK-003、BMK-009、BMK-026、BMK-051 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
+| 规则 | BMK-052、BMK-053、BMK-054、BMK-055、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,9 +382,13 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 38;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 44;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
+| BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
+| BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
+| BMK-024.37 | schema v43 的字段 | 依次 `lead_src` 1、`lead_price` 0、`lead_m` 0.5 c、`lead_maxtick` 3、`lead_k` 1,`since` 43;`n_fields_at(42)` = 总数 − 5 |
+| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 1 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -699,3 +703,84 @@ spec: README.md
 | BMK-050.4 | 第二参考超过 5 s 未更新 | 未就绪(0) |
 | BMK-050.5 | 策略内:`ref_cb_w` 0.5 / 0,第二参考报价在第一参考之后上涨 | 0.5:`ref_mid_x2` 偏离 Binance 中间价;0:等于 Binance 中间价 |
 
+
+### BMK-051 辅助组(schema v41 `ref_aux`):永续参考与原生 Chainlink
+
+- 规则:[group 形态](README.md#group-形态)、[订阅](README.md#订阅)、[规则](README.md#规则)(Chainlink)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3` = `specs2` + 永续组(`RP`,`BINANCE_USDM`,`LinearPerp`)+ Chainlink 组(`RC`,`POLYMARKET_PRICE`,BTC px_exp −2)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_051_auxiliary_groups`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-051.1 | `ref_aux` 3 + `specs3`;`ref_aux` 0 + `specs3`;`ref_aux` 3 + 最后两组对调 | `Ok`;`GroupShape` 码 1(参考组多于 2);码 5(位 0 的组不是永续) |
+| BMK-051.2 | `subscriptions` | 槽位 `BOOK | TRADE`、`R`/`R2` `BBO`、`RP` `BBO | BOOK | TRADE`、`RC` `INDEX | MARK`;`reference`/`reference2`/`perp`/`clref` = `R`/`R2`/`RP`/`RC`;`cl_mul` = 10^6 |
+| BMK-051.3 | BMK-034 的第 1、4 对参数加 `ref_aux` 3,`specs3`,另以独立随机流穿插永续 BBO/簿/成交与 Chainlink 价格/TWAP 事件 | 辅助事件无输出;轨迹哈希与计数等于不带辅助组的同一轨迹 |
+| BMK-051.4 | 同一组 Chainlink 样本:旁路(`InjectWarmup` local_kind 1)/ 原生 `Index`;原生表上再发旁路样本;原生 `Mark` | 两者的逐秒价格、最新秒与价格、样本数相同;旁路样本被忽略;`twap_at` 取到该 TWAP,之前的秒为 `None` |
+
+### BMK-052 规则 14 与 Python 参照逐秒平价
+
+- 规则:[规则](README.md#规则)(规则 14)
+- 级别:table
+- 里程碑:M3
+- 前置:`fixtures/binary-maker-fcev/parity_20261109.jsonl`(公司收数机 2026-11-09 的 4 个 BTC 窗口,1 195 个判定秒;由仓外 `parity_dump.py` 以 `sim2.py` 计算);模型 s 1.25、λ 0.35、c0 1.3、c1 0.5、w 0.5
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_052_fcev_parity_with_the_python_reference`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| BMK-052.1 | `time_factors` 的 sq 与 remf | 与 Python 差 ≤ 1e-6 |
+| BMK-052.2 | `dist_up` | 差 ≤ 2e-4 bp |
+| BMK-052.3 | 隐含 σ 样本数与中位数(Python 已有 ≥ 5 个样本的行) | 样本数不同的行 ≤ 1 %;σ 相对差 ≤ 5e-4 |
+| BMK-052.4 | 两个代币在买一的分数(σ 不足 5 个样本时用 Python 的回退 σ) | 差 ≤ 0.002 美分 |
+
+### BMK-053 规则 14 的挂单、撤单与配对
+
+- 规则:[规则](README.md#规则)(规则 14)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3`,`ref_aux` 3、`fc_on` 1,其余缺省;窗口 600 s(第 2 对槽位):Up 0.450/0.470、Down 0.530/0.550,参考与 Chainlink 100 100.00,起点 TWAP 100 000.00
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_053_rule14_decisions`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-053.1 | 没有起点 TWAP | 不挂 |
+| BMK-053.2 | 有 TWAP,641 s 的簿事件 | 只在 Up 的买一 0.450 挂单 |
+| BMK-053.3 | `fc_m_post` 40 美分 | 不挂 |
+| BMK-053.4 | Up 挂在 0.450:Chainlink 跌到 −10 bp;或 Up 买一升到 0.460 | 撤单 |
+| BMK-053.5 | `fc_m_pair` 0.5 美分,Up 持 10 份均价 0.450 | Down 只挂配对单:0.530(min(54 美分, 买一 53 美分)),10 份 |
+| BMK-053.6 | `fc_on` 0 | 不挂;隐含 σ 环从未取样 |
+
+### BMK-054 规则 15 领先挂单
+
+- 规则:[规则](README.md#规则)(规则 15)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3`,`ref_aux` 3、`lead_w_ms` 300、`lead_x_bp` 1 bp、`lead_only` 1、`inv_max_shares` 20;窗口 600 s(第 2 对槽位):Up 0.450/0.470、Down 0.530/0.550;永续中间价 100 000.00
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_054_rule15_lead_quote`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-054.1 | 400 ms 内 +1.5 bp | 第一条永续报价不挂;之后 Up 挂 5 份 @ 0.460 |
+| BMK-054.2 | 400 ms 内 −1.5 bp | Down 挂 5 份 @ 0.540 |
+| BMK-054.3 | +0.9 bp;Up 价差 1 美分;Up 已持 20 份;窗口第 2 s;结束前 9 s | 都不挂 |
+| BMK-054.4 | 第一次触发后 1 s 再涨(该腿已空)/ 2.1 s 后再涨 | 冷却内不挂 / 再挂一张 |
+| BMK-054.5 | 挂着的领先单 2.9 s / 3.0 s;`lead_only` 下 Down 上挂着一张非领先单 | 不撤 / 撤;非领先单立即撤 |
+| BMK-054.6 | 永续撤单 1 000 ms / 0.5 bp,1 s 内 −0.6 bp | Up 的领先单撤掉 |
+| BMK-054.7 | `lead_only` 下的簿事件;规则 15 关(同一 group 表)时永续 +5 bp | 都不挂 |
+
+### BMK-055 规则 15 的现货触发源与模型价(schema v43)
+
+- 规则:[规则](README.md#规则)(规则 15)
+- 级别:table
+- 里程碑:M3
+- 前置:同 BMK-054;.2 用 `fixtures/binary-maker-fcev/lead_px_20261108.jsonl`(公司收数机 2026-11-08 的 29 个窗口里 `PS1_mod05_pc_life1` 挂出的 116 张领先单,由仓外 `lead_parity_dump.py` 以 `sim2.py` 计算)
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_055_rule15_sources_and_model_price`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-055.1 | `model_px`:Up 0.450/0.500,E 3 c / 0.3 c / 0;0.450/0.470;m 10 c | 0.480(maxtick)/ 0.470 / 0.460(卖一 − 1)/ 0.460(不低于买一 + 1) |
+| BMK-055.2 | 116 张领先单的 sim2 特征、ret、买一卖一 | 挂单价与 sim2 逐笔相同 |
+| BMK-055.3 | `lead_src` 2 的现货 +1.5 bp;`lead_src` 1 的现货 +1.5 bp;`lead_src` 3 永续触发后 0.5 s 现货同向 +1.5 bp | Up 0.460;不挂;现货仍触发(冷却按源独立) |
+| BMK-055.4 | `lead_price` 1,没有 Chainlink 起点 TWAP | 买一 + 1 美分(0.460) |
+| BMK-055.5 | `lead_p_min` 0.50 / 0.46,模型价 0.46 | 0.50:不挂;0.46:挂 0.46 |
