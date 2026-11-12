@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 45, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 46, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -465,6 +465,17 @@ hft_strategy_sdk::define_params! {
         lead_cf_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 45, relax = None],
         /// rule 15 confirmation: the confirming move (1e-9 of one; 1 bp = 100_000)
         lead_cf_x_bp: Rate [min = 0, max = 100_000_000, default = 50_000, since = 45, relax = None],
+        /// rule 17 (fair-gap lead, schema v46): look-back of the perpetual move that confirms an
+        /// undervalued token; 0 (or fvl_x_bp 0) = rule 17 off
+        fvl_w_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 46, relax = None],
+        /// rule 17: the perpetual mid return over fvl_w_ms in the token's favour is at least this
+        /// (1e-9 of one; 1 bp = 100_000)
+        fvl_x_bp: Rate [min = 0, max = 100_000_000, default = 0, since = 46, relax = None],
+        /// rule 17: the token's model fair value Φ(d) is at least this above its mid (fraction of
+        /// one, 1e-9; 6 cents = 60_000_000)
+        fvl_gap: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 60_000_000, since = 46, relax = None],
+        /// rule 17: minimum time between two rule-17 bids of one token
+        fvl_cool_ms: DurationMs [min = 0, max = 60_000, default = 2_000, since = 46, relax = None],
     }
 }
 

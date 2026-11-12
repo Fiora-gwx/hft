@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 45, "BMK-024.1");
+    assert_eq!(schema.version(), 46, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1399,7 +1399,7 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
-    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 3), "BMK-024.38");
+    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 7), "BMK-024.38");
     // .39 v45 appends the confirmation of a Coinbase-triggered lead bid (0 = off keeps v44) and
     // widens ref_aux (bit 2) and lead_src (bits 2, 3).
     let v45: Vec<_> = (0..schema.n_fields())
@@ -1408,7 +1408,24 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v45, [("lead_cf_ms", 0), ("lead_cf_x_bp", 50_000)], "BMK-024.39");
-    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 2), "BMK-024.39");
+    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 6), "BMK-024.39");
+    // .40 v46 appends rule 17 (fvl_w_ms 0 = off keeps v45).
+    let v46: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 46)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v46,
+        [
+            ("fvl_w_ms", 0),
+            ("fvl_x_bp", 0),
+            ("fvl_gap", 60_000_000),
+            ("fvl_cool_ms", 2_000)
+        ],
+        "BMK-024.40"
+    );
+    assert_eq!(n_fields_at(schema, 45), Some(schema.n_fields() - 4), "BMK-024.40");
     let max_of = |name: &str| {
         (0..schema.n_fields())
             .filter_map(|i| schema.field(i))
@@ -4149,4 +4166,158 @@ fn bmk_057_rule15_coinbase_sources_and_confirmation() {
         cancels(&spot(&mut h, t0 + 650 * ms, 10_000_600)).is_empty(),
         "BMK-057.7 the spot reference confirms"
     );
+}
+
+/// BMK-058: rule 17 (fair-gap lead, schema v46).
+#[test]
+fn bmk_058_rule17_fair_gap_lead() {
+    use binary_maker::fast::{LEAD_SRC_FV, LEAD_SRC_PERP, QState};
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let fv = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 3),
+            ("lead_src", 0),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+            ("fvl_w_ms", 1_000),
+            ("fvl_x_bp", 30_000),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    // Window 600 s (slots 4 Up, 5 Down): Up 0.450 / 0.470, Down 0.530 / 0.550; the strike TWAP
+    // 100 000.00; reference and Chainlink at `cl` (100 100.00 = +10 bp: the fair value of the Up
+    // token is far above its mid 0.46, that of the Down token far below 0.54).
+    let setup = |p: &BinaryMakerParams, cl: i64, twap: bool| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        if twap {
+            h.feed(&ev::mark_at(RC, 9, Px(10_000_000), 600 * s).as_ref());
+        }
+        h.views_mut().at_engine_ns(639 * s + s / 2);
+        h.views_mut()
+            .bbo(R, (Px(cl - 1), Qty(1_000_000)), (Px(cl + 1), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref());
+        h.feed(&ev::index_at(RC, 9, Px(cl), 640 * s).as_ref());
+        slot_book(h.views_mut(), SLOTS[4], 450, 470);
+        slot_book(h.views_mut(), SLOTS[5], 530, 550);
+        h
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let t0 = 641 * s;
+    // .1 the perpetual +0.5 bp over 1.1 s for the undervalued Up token: one cent above its bid,
+    // marked as a rule-17 bid.
+    let mut h = setup(&fv(&[]), 10_010_000, true);
+    assert!(
+        placed(&perp(&mut h, t0, 10_000_000)).is_empty(),
+        "BMK-058.1 first quote"
+    );
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-058.1"
+    );
+    assert_eq!(
+        h.strategy().fast.lead.legs[4].src,
+        LEAD_SRC_FV,
+        "BMK-058.1 source"
+    );
+    // .2 the cool-down per token: 600 ms after the bid (leg free again) nothing; 2.1 s after it
+    // the next one.
+    {
+        let q = &mut h.strategy_mut().fast.quotes[4];
+        q.state = QState::None;
+        q.r = None;
+    }
+    assert!(
+        placed(&perp(&mut h, t0 + 1_700 * ms, 10_001_000)).is_empty(),
+        "BMK-058.2 inside the cool-down"
+    );
+    h.feed(&ev::index_at(RC, 9, Px(10_010_000), 644 * s).as_ref());
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 3_200 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-058.2 after the cool-down"
+    );
+    // .3 a move below fvl_x_bp (+0.2 bp): nothing.
+    let mut h = setup(&fv(&[]), 10_010_000, true);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_200)).is_empty(),
+        "BMK-058.3"
+    );
+    // .4 a move for the overvalued Down token (-0.5 bp): nothing.
+    let mut h = setup(&fv(&[]), 10_010_000, true);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 9_999_500)).is_empty(),
+        "BMK-058.4"
+    );
+    // .5 the gap: Chainlink at the strike (fair value 0.50, mid 0.46: 4 c) is below fvl_gap 6 c;
+    // with fvl_gap 3 c the bid is placed.
+    let mut h = setup(&fv(&[]), 10_000_000, true);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)).is_empty(),
+        "BMK-058.5 gap 4 c < 6 c"
+    );
+    let mut h = setup(&fv(&[("fvl_gap", 30_000_000)]), 10_000_000, true);
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-058.5 gap 4 c >= 3 c"
+    );
+    // .6 no strike TWAP (no model features): nothing; a one-cent spread: nothing.
+    let mut h = setup(&fv(&[]), 10_010_000, false);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)).is_empty(),
+        "BMK-058.6 no features"
+    );
+    let mut h = setup(&fv(&[]), 10_010_000, true);
+    slot_book(h.views_mut(), SLOTS[4], 460, 470);
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)).is_empty(),
+        "BMK-058.6 one-cent spread"
+    );
+    // .7 with rule 15 on (300 ms, 1 bp): a +1.5 bp move places the rule-15 bid only (the leg is
+    // taken when rule 17 looks at it).
+    let mut h = setup(
+        &fv(&[("lead_src", 1), ("lead_w_ms", 300), ("lead_x_bp", 100_000)]),
+        10_010_000,
+        true,
+    );
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_001_500)).len(),
+        1,
+        "BMK-058.7 one bid"
+    );
+    assert_eq!(
+        h.strategy().fast.lead.legs[4].src,
+        LEAD_SRC_PERP,
+        "BMK-058.7 source"
+    );
+    // .8 off (fvl_w_ms 0, the default): the same quotes place nothing and rule 15 is off.
+    let mut h = setup(
+        &params_with(&[("ref_aux", 3), ("lead_only", 1), ("fvl_x_bp", 30_000)]),
+        10_010_000,
+        true,
+    );
+    perp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&perp(&mut h, t0 + 1_100 * ms, 10_000_500)).is_empty(),
+        "BMK-058.8"
+    );
+    assert!(!h.strategy().fast.lead_on(), "BMK-058.8 lead_on");
 }
