@@ -197,6 +197,22 @@ pub struct Io<J: JournalSink> {
     pub cancels: u64,
     pub reports: u64,
 }
+impl<J: JournalSink> Io<J> {
+    /// The latest housekeeping `ClockStatus` pair, the boot pair before the first status.
+    fn latest_pair(&self) -> hft_rt::CalibPair {
+        let c = &self.clock_status;
+        if c.tsc.0 == 0 {
+            return self.clock.base;
+        }
+        hft_rt::CalibPair {
+            tsc: c.tsc,
+            realtime_ns: c.realtime_ns,
+            phc_ns: c.phc_ns,
+            err_ns: c.calib_err_ns,
+        }
+    }
+}
+
 impl<J: JournalSink> std::fmt::Debug for Io<J> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Io").finish_non_exhaustive()
@@ -432,7 +448,11 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     fn roll_info(&mut self) -> RollInfo {
         RollInfo {
             utc_ns: self.utc_of(hft_rt::tsc_now()),
-            calib: self.clock.base,
+            // The latest housekeeping pair (≤ one calibration tick old), not the boot pair: a
+            // reader converting a record's tsc with its segment's pair then stays within the
+            // counter's rate error over one segment, instead of drifting with the run's age
+            // (2026-11-09: 32 ppm, 1.9 s after 43 h on the live box).
+            calib: self.latest_pair(),
             tsc_hz_milli: self.clock.hz_milli,
         }
     }
@@ -446,17 +466,10 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     /// driver's UTC decisions (hourly roll, DayRoll, FundingSettle) do not inherit the boot
     /// calibration's rate error; the boot pair until the first status.
     fn utc_of(&self, t: Tsc) -> i64 {
-        let c = &self.clock_status;
-        if c.tsc.0 == 0 {
+        if self.clock_status.tsc.0 == 0 {
             return self.clock.to_utc_ns(t);
         }
-        let pair = hft_rt::CalibPair {
-            tsc: c.tsc,
-            realtime_ns: c.realtime_ns,
-            phc_ns: c.phc_ns,
-            err_ns: c.calib_err_ns,
-        };
-        self.clock.tsc_utc(&pair).utc_ns(t)
+        self.clock.tsc_utc(&self.latest_pair()).utc_ns(t)
     }
 }
 

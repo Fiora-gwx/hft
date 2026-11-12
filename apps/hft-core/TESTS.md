@@ -4349,7 +4349,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 行 | 输入 | 期望 |
 |---|---|---|
 | CORE-438.1 | 无 `ClockStatus`;`utc_of(1 000 + 5 × 10^9)` | B + 5 s(启动校准对) |
-| CORE-438.2 | hk 环交出 `ClockStatus{tsc 1 000 + 10^9, realtime B + 1 s + 30 µs}`;`utc_of(1 000 + 2 × 10^9)`;`roll_info()` | 交出的记录为 `ClockStatus`;B + 2 s + 30 µs;`roll_info().calib` 仍是启动校准对 |
+| CORE-438.2 | hk 环交出 `ClockStatus{tsc 1 000 + 10^9, realtime B + 1 s + 30 µs}`;`utc_of(1 000 + 2 × 10^9)`;`roll_info()` | 交出的记录为 `ClockStatus`;B + 2 s + 30 µs;`roll_info().calib` = 该 `ClockStatus` 的校准对(tsc 1 000 + 10^9,B + 1 s + 30 µs) |
 | CORE-438.3 | hk 环交出 `HkMsg::UtcAnchor` | 交出 Input `UtcAnchor`,体与消息逐字节相同 |
 
 ### CORE-419 `rt.host.mode` 决定 hard 位是拒绝启动还是只告警

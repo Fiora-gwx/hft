@@ -182,8 +182,8 @@ fn core_438_live_io_clock() {
         R0 + 5_000_000_000,
         "CORE-438.1"
     );
-    // .2 A newer ClockStatus (realtime 30 µs ahead of the boot line) re-bases the driver's UTC;
-    // the segment calibration pair stays the boot pair.
+    // .2 A newer ClockStatus (realtime 30 µs ahead of the boot line) re-bases the driver's UTC
+    // and becomes the calibration pair of the next segment.
     let mut c = hft_sequencer::snapshot::clock_status(
         CalibPair {
             tsc: Tsc(1_000 + 1_000_000_000),
@@ -201,7 +201,12 @@ fn core_438_live_io_clock() {
         R0 + 2_000_030_000,
         "CORE-438.2"
     );
-    assert_eq!(LiveIo::<S>::roll_info(&mut env).calib, base, "CORE-438.2");
+    let roll = LiveIo::<S>::roll_info(&mut env).calib;
+    assert_eq!(
+        (roll.tsc, roll.realtime_ns),
+        (Tsc(1_000 + 1_000_000_000), R0 + 1_000_030_000),
+        "CORE-438.2"
+    );
     // .3 HkMsg::UtcAnchor becomes the Input UtcAnchor with the same body.
     let mut a = hft_event::UtcAnchor::new_zeroed();
     a.tsc = Tsc(7);
