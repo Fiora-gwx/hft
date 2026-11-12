@@ -1385,6 +1385,7 @@ impl Fast {
                 } else {
                     None
                 };
+                self.lead.cur_src = src;
                 // lead_arm_ms: a trigger that cannot place now (one-cent spread, or the leg has
                 // an order) stays armed with its move and the token mid of this moment.
                 if let LeadTry::Wait(mid_x2) = self.lead_place(i, start, r.abs(), feat, None, v, ctx)
@@ -1570,6 +1571,8 @@ impl Fast {
                     handle: Some(h.0),
                     r: None,
                     placed: ens,
+                    src: self.lead.cur_src,
+                    confirmed: false,
                 };
             }
             if let Some(x) = self.fc_pair.get_mut(i) {
@@ -1629,8 +1632,39 @@ impl Fast {
                 continue;
             }
             let placed = self.lead.legs.get(i).map_or(i64::MIN / 2, |l| l.placed);
+            // Research (lead_cf_ms): a bid of the Coinbase trigger needs a Binance reference to
+            // show the move (since lead_w_ms before the place) within lead_cf_ms, else it goes.
+            let mut unconfirmed = false;
+            if lead
+                && d.lead_cf_ms > 0
+                && self
+                    .lead
+                    .legs
+                    .get(i)
+                    .is_some_and(|l| l.src == LEAD_SRC_CB && !l.confirmed)
+            {
+                let base_t = placed - i64::from(d.lead_w_ms.max(1)) * 1_000_000;
+                let sg = if i == up { 1 } else { -1 };
+                let seen = [&self.lead.ring, &self.lead.spot].iter().any(|ring| {
+                    match (ring.at_or_before(base_t), ring.at_or_before(ens)) {
+                        (Some(b), Some(m)) => crate::lead::ret(m, b).saturating_mul(sg) >= d.lead_cf_x_bp.0,
+                        _ => false,
+                    }
+                });
+                if seen {
+                    if let Some(l) = self.lead.legs.get_mut(i) {
+                        l.confirmed = true;
+                    }
+                } else {
+                    unconfirmed = ens.saturating_sub(placed) >= i64::from(d.lead_cf_ms) * 1_000_000;
+                }
+            }
             let cancel = if lead {
-                !d.enabled || !now.clock_ok || ens.saturating_sub(placed) >= life || left_ms <= FC_END_MS
+                !d.enabled
+                    || !now.clock_ok
+                    || ens.saturating_sub(placed) >= life
+                    || left_ms <= FC_END_MS
+                    || unconfirmed
             } else {
                 all
             };

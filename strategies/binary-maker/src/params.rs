@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 45, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 46, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -466,6 +466,11 @@ hft_strategy_sdk::define_params! {
         lead_hi_exp: Rate [min = 0, max = 100_000_000_000, default = 0, since = 45, relax = None],
         /// rule 15 shares of a lead bid whose expected repricing is at least lead_hi_exp
         lead_hi_shares: Count [min = 1, max = 1_000, default = 5, since = 45, relax = None],
+        /// research: a lead bid placed by the Coinbase trigger is cancelled this long after its
+        /// place unless a Binance reference confirmed the move; 0 = off
+        lead_cf_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 46, relax = None],
+        /// research: the confirming move of the perpetual or the spot reference (1e-9)
+        lead_cf_x_bp: Rate [min = 0, max = 1_000_000_000, default = 50_000, since = 46, relax = None],
     }
 }
 

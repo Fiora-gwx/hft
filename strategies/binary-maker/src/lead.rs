@@ -106,6 +106,10 @@ pub struct LeadLeg {
     pub r: Option<OrderRef>,
     /// Engine time of the place.
     pub placed: i64,
+    /// Trigger source that placed it (`lead_src` bit); research.
+    pub src: u32,
+    /// A Binance reference confirmed the move (research, `lead_cf_ms`).
+    pub confirmed: bool,
 }
 
 /// A trigger that could not place (`lead_arm_ms`): it places as soon as the leg can, until
@@ -142,6 +146,8 @@ pub struct LeadState {
     /// The second (Coinbase) reference's mids and its own lead trigger (`lead_src` bit 2; research).
     pub cb: PerpRing,
     pub lead_cb: Trigger,
+    /// Source of the trigger being placed (research, `lead_cf_ms`).
+    pub cur_src: u32,
     pub win: i64,
     /// Per slot leg (quote order).
     pub legs: Vec<LeadLeg>,
