@@ -146,6 +146,15 @@ pub fn delta(dist: i64, sq: i64, remf: i64, sig: i64) -> i64 {
     x.clamp(0, i128::from(i64::MAX / 4)) as i64
 }
 
+/// Model probability Φ(d) (1e-9) of a token at distance `dist` (bp, the token's orientation):
+/// d = clip(dist / (max(σ, 0.03) · sq), ±8) (rule 17's fair value).
+pub fn fair(dist: i64, sq: i64, sig: i64) -> i64 {
+    let one = i128::from(ONE);
+    let den = (i128::from(sig).max(i128::from(SIG_FLOOR)) * i128::from(sq) / one).max(1);
+    let d = (i128::from(dist) * one / den).clamp(-i128::from(D_CLIP), i128::from(D_CLIP)) as i64;
+    cdf(d)
+}
+
 /// Time factors `(sq, remf)` of the final average at `left_ms` before the window end, with
 /// `n_real` realized Chainlink samples of the last 60 s. τ ≥ 60 s: sq = √(τ − 40), remf = 1.
 /// τ < 60 s: rem = 60 − n_real, sq = max(rem/60 · √(max(rem, 1)/3), 0.001), remf = rem/60.

@@ -48,6 +48,8 @@ pub const LEAD_SRC_SPOT: u32 = 2;
 /// The second (Coinbase spot) reference and the Coinbase perpetual (`ref_aux` bit 2); schema v45.
 pub const LEAD_SRC_CB: u32 = 4;
 pub const LEAD_SRC_CBP: u32 = 8;
+/// Rule 17 (fair-gap lead): the source mark of its bids (not a `lead_src` bit).
+pub const LEAD_SRC_FV: u32 = 16;
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -936,7 +938,9 @@ impl Fast {
     /// Rule 15 on (README "规则" 15).
     pub fn lead_on(&self) -> bool {
         let d = self.p.defaults();
-        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0) || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+        (d.lead_w_ms > 0 && d.lead_x_bp.0 > 0)
+            || (d.lead_pc_w_ms > 0 && d.lead_pc_x_bp.0 > 0)
+            || (d.fvl_w_ms > 0 && d.fvl_x_bp.0 > 0)
     }
 
     /// Slot leg `i`'s current order `q` is its rule-15 lead bid.
@@ -1344,7 +1348,8 @@ impl Fast {
         let in_range = age_ms >= LEAD_START_MS && left_ms >= LEAD_END_MS;
         let ms = 1_000_000i64;
         // Model price (lead_price 1): the rule-14 features, with one implied-σ sample per second.
-        let model = d.lead_price == 1;
+        let fvl = d.fvl_w_ms > 0 && d.fvl_x_bp.0 > 0;
+        let model = d.lead_price == 1 || fvl;
         if model {
             self.fc.window(start);
             let sec = utc_ms.div_euclid(1_000);
@@ -1414,7 +1419,66 @@ impl Fast {
                 self.lead_place(i, start, r.abs(), feat, v, ctx);
             }
         }
+        // Rule 17 (fair-gap lead): on a perpetual quote, the perpetual moved fvl_x_bp over
+        // fvl_w_ms for a token whose model fair value is at least fvl_gap above its mid -> the
+        // rule-15 bid one cent above the best bid (same size, life, perp cancel, inventory cap),
+        // at most one per token every fvl_cool_ms.
+        if perp
+            && fvl
+            && d.enabled
+            && age_ms >= LEAD_START_MS
+            && left_ms >= LEAD_LAST_MS
+            && let Some(base) = self.lead.ring.at_or_before(ens - i64::from(d.fvl_w_ms) * ms)
+        {
+            let r = ret(mid_x2, base);
+            let k = usize::from(r < 0);
+            let i = up + k;
+            if r.abs() >= d.fvl_x_bp.0
+                && self
+                    .lead
+                    .fv_last
+                    .get(k)
+                    .is_some_and(|t| ens.saturating_sub(*t) >= i64::from(d.fvl_cool_ms) * ms)
+                && self.quotes.get(i).is_some_and(|q| q.state == QState::None)
+                && self.fv_gap(i, utc_ms.div_euclid(1_000), start, w, left_ms, up, v) >= Some(d.fvl_gap.0)
+            {
+                self.lead.cur_src = LEAD_SRC_FV;
+                self.lead_place(i, start, 0, None, v, ctx);
+                if self.quotes.get(i).is_some_and(|q| q.state == QState::Placing)
+                    && let Some(t) = self.lead.fv_last.get_mut(k)
+                {
+                    *t = ens;
+                }
+            }
+        }
         self.lead_maint(v, ctx, d.lead_only);
+    }
+
+    /// Rule 17: slot leg `i`'s model fair value Φ(d) less its book mid (fraction of one, 1e-9);
+    /// `None` without the rule-14 features, a two-sided book or a spread of two cents.
+    #[allow(clippy::too_many_arguments)]
+    fn fv_gap<V: Views>(
+        &mut self,
+        i: usize,
+        sec: i64,
+        start: i64,
+        w: i64,
+        left_ms: i64,
+        up: usize,
+        v: &V,
+    ) -> Option<i64> {
+        let q = self.quotes.get(i).copied()?;
+        let unit_px = 10i64.saturating_pow(u32::from(v.inst(q.inst).px_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        let (bid, ask) = (book.best(Side::Buy)?.px.0, book.best(Side::Sell)?.px.0);
+        if bid <= 0 || ask >= unit_px || ask - bid < 2 * cent {
+            return None;
+        }
+        let (dist_up, sq, _, sig) = self.fc_features(v, sec, start, w, left_ms, up)?;
+        let dist = if i.is_multiple_of(2) { dist_up } else { -dist_up };
+        let mid = ((i128::from(bid) + i128::from(ask)) * i128::from(ONE) / (2 * i128::from(unit_px))) as i64;
+        Some(crate::fcev::fair(dist, sq, sig).saturating_sub(mid))
     }
 
     /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the

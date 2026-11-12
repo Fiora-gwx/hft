@@ -113,6 +113,9 @@ status: impl
 | `lead_only` | Bool | 0 | 规则 15 独占:其他开仓规则都不运行,持仓到结算 | Down |
 | `lead_src` | Count | 1 | 规则 15 触发源(位):1 = 永续,2 = 公允价参考(现货),4 = 第二参考(Coinbase 现货),8 = Coinbase 永续(`ref_aux` 位 2);范围 0–15;schema v43(位 4、8 为 v45) | None |
 | `lead_cf_ms` / `lead_cf_x_bp` | DurationMs / Rate | 0(关)/ 0.5 bp | 规则 15 的确认:由 Coinbase 触发源(`lead_src` 位 4、8)挂出的领先单,挂出后 `lead_cf_ms` 仍没有被币安参考确认就撤;确认 = 永续或现货参考相对"挂出前 `lead_w_ms`"的中间价、朝该单方向的变动 ≥ `lead_cf_x_bp`;schema v45 | None |
+| `fvl_w_ms` / `fvl_x_bp` | DurationMs / Rate | 0 / 0(关) | 规则 17(公允价差领先单):永续中间价的回看时长(0–10 000)与朝该代币有利方向的最小变动(占 1 的比例;1 bp = 100 000);两者都 > 0 才开;schema v46 | None |
+| `fvl_gap` | Rate | 0.06 | 规则 17:代币的模型公允价 Φ(d) 至少比它的盘口中间价高这么多(占 1 的比例;6 美分 = 60 000 000;可为负) | None |
+| `fvl_cool_ms` | DurationMs | 2 000 | 规则 17:同一代币两张规则 17 挂单的最短间隔(从挂出起算) | None |
 | `lead_price` | Count | 0 | 规则 15 挂单价:0 = 买一 + 1 美分;1 = 模型价 | None |
 | `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
 | `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
@@ -211,6 +214,13 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - **Coinbase 触发源与确认(schema v45,缺省关)**:`lead_src` 位 2(值 4)= 第二参考(Coinbase 现货 BTC-USD 的 BBO 中间价),位 3(值 8)= Coinbase 永续(`ref_aux` 位 2 的辅助组,[venue-coinbase](../../crates/venue-coinbase/README.md) `coinbase-adv` 的 level2 最优报价);各有自己的环与(源, 方向)冷却,W/X、挂单条件、价格与寿命同其他源。研究(仓外,2026-11-10/11):到达实盘机时 Coinbase 现货在 25% 的实盘单之前约 100 ms 已经出现同向 1 bp 变动,Coinbase 永续 51%;但它们的触发有相当一部分币安并不跟(永续 37% 单独触发,最小变动 0.34 bp)。`lead_cf_ms` > 0 时,由这两个源挂出的领先单需要确认:自挂出起,只要永续或现货参考相对"挂出前 `lead_w_ms`"的中间价、朝该单方向的变动达到 `lead_cf_x_bp`,该单即记为已确认,此后与普通领先单相同;挂出满 `lead_cf_ms` 仍未确认就撤(撤单不等下单确认)。币安源挂出的单不受此约束。
 - **触发源与模型价(schema v43)**:`lead_src` 的位 0 = 永续(缺省)、位 1 = 公允价参考(现货 BTCUSDT 的 BBO 中间价,自己的环);两个源用同样的 W/X,冷却按(源, 方向)各自独立,任一源触发都走同一个挂单判定(每个代币仍只有一张领先单);永续撤单只看永续。`lead_price` 1:挂单价 = max(买一 + 1 美分, min(买一 + `lead_maxtick` 美分, ⌊代币中间价 + E − `lead_m`⌋, 卖一 − 1 美分)),E = `lead_k` × Δ × |move bp|,Δ = 100·φ(d)/(max(σ, 0.03)·sq)·remf、d = dist/(max(σ, 0.03)·sq)(规则 14 的同一组特征,不乘 `fc_s`;dist 按代币方向);特征不可用(无 Chainlink 组、无起点 TWAP、无新鲜价格)时为买一 + 1 美分。`lead_price` 1 时每秒取一个隐含 σ 样本(与规则 14 同一个环)。`lead_src` 1、`lead_price` 0(缺省)与 v42 逐位相同。与 Python 参照 `Strat.on_lead`(`lead_src`/`lead_price`/`lead_m`/`lead_maxtick`/`lead_k`)的挂单价逐笔相同(BMK-055.2)。
 - 时间常量(研究里的固定值):`LEAD_START_MS` 5 000、`LEAD_END_MS` 2 000、`LEAD_LAST_MS` 10 000。
+
+**规则 17:公允价差领先单(schema v46,缺省关;规则 16 属于另一条已存档的研究线,本线没有)**。研究(仓外,2026-11-12):9 个录制日的吃单流研究里,价差内买单唯一有量级的条件是"代币相对模型公允价被低估";逆着吃单方向接单(OFI、吃单量失衡、连续单、反转)都是负的。策略级模拟(入簿 300 / 400 ms)在规则 15 之上每天多 14–18 USD;引擎日志回放(2026-11-09 至 11-12 共 2.68 天,规则 15 每单 10 份)多 145 / 123 USD、成交份数多约 70%。需要永续辅助组与 Chainlink 组(`ref_aux` 位 0、1);`fvl_w_ms` > 0 且 `fvl_x_bp` > 0 时开。实现 `Fast::lead_quote` 与 `Fast::fv_gap`:
+
+- 每条永续 `Bbo`(在规则 15 的触发判定之后):ret = 永续中间价 / (不晚于 t − `fvl_w_ms` 的最近一条) − 1;|ret| ≥ `fvl_x_bp` 时看有利的代币(上涨 Up、下跌 Down)。
+- 该代币同时满足:该腿没有任何订单;距它上一张规则 17 挂单的挂出 ≥ `fvl_cool_ms`(每个窗口重新开始);`enabled`;窗口年龄 ≥ 5 s 且距结束 ≥ 10 s;卖一 − 买一 ≥ 2 美分、买一 > 0 且卖一 < 1;规则 14 的特征可得(起点 TWAP 与新鲜的 Chainlink 价格),且公允价 Φ(d) − 盘口中间价 ≥ `fvl_gap`,d = clip(dist / (max(σ, 0.03) · sq), ±8)(`fcev::fair`;dist、sq、σ 同规则 15 的模型价)。
+- 满足时按规则 15 的挂单判定在(买一取整到美分)+ 1 美分挂 `lead_shares` 份 post-only 买单:`lead_p_min`、净份数上限 `inv_max_shares`、寿命 `lead_life_ms`、永续撤单、`lead_only` 都与规则 15 的领先单相同;该腿记录的源为 `LEAD_SRC_FV`(16,不是 `lead_src` 的位)。规则 15 先判定:同一报价上规则 15 已挂出时该腿已被占用,规则 17 不再挂。
+- 开启时每秒取一次隐含 σ 样本(与 `lead_price` 1 相同);`fvl_w_ms` = 0(缺省)时与 v45 逐位相同。
 
 ### Note 码表与报表字段
 

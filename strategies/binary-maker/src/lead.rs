@@ -128,6 +128,9 @@ pub struct LeadState {
     /// The Coinbase perpetual's mids and its lead trigger (`lead_src` bit 3).
     pub cbp: PerpRing,
     pub lead_cbp: Trigger,
+    /// Rule 17: engine time of the last fair-gap bid placed for the Up (index 0) and the Down
+    /// (index 1) token of the window.
+    pub fv_last: [i64; 2],
     /// Source of the trigger being placed.
     pub cur_src: u32,
     pub win: i64,
@@ -147,6 +150,7 @@ impl LeadState {
             self.lead_spot = Trigger::default();
             self.lead_cb = Trigger::default();
             self.lead_cbp = Trigger::default();
+            self.fv_last = [i64::MIN / 2; 2];
         }
     }
 }
