@@ -10,7 +10,7 @@ pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
          [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
-         [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] \
+         [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] [--cb-perp] \
          [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
     )
@@ -45,6 +45,9 @@ pub struct Cmd {
     /// `--cl-keys DIR`: Chainlink login files (maker: enables `[venues.cl]`; live: replaces
     /// `KEYS_DIR` for the Chainlink login).
     pub cl_keys: Option<PathBuf>,
+    /// `--cb-perp`: `[venues.cp]` (Coinbase perpetual reference) in the maker and live
+    /// configurations; default off.
+    pub cb_perp: bool,
     /// `--cpu-plan none|pin|spin` (README "绑核"); default none.
     pub cpu_plan: crate::CpuPlan,
     pub root: PathBuf,
@@ -123,6 +126,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut no_coinbase = false;
     let mut no_perp = false;
     let mut no_chainlink = false;
+    let mut cb_perp = false;
     let mut cl_keys: Option<PathBuf> = None;
     let mut cpu_plan: Option<crate::CpuPlan> = None;
     let mut extra = Vec::new();
@@ -251,6 +255,10 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 once(no_chainlink, "--no-chainlink")?;
                 no_chainlink = true;
             }
+            "--cb-perp" => {
+                once(cb_perp, "--cb-perp")?;
+                cb_perp = true;
+            }
             "--cl-keys" => {
                 once(cl_keys.is_some(), "--cl-keys")?;
                 cl_keys = Some(PathBuf::from(next("--cl-keys", "DIR")?));
@@ -304,6 +312,9 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     if cl_keys.is_some() && !maker && live.is_none() {
         return Err("--cl-keys needs --maker or --live".into());
     }
+    if cb_perp && !maker && live.is_none() {
+        return Err("--cb-perp needs --maker or --live".into());
+    }
     if cl_keys.is_some() && no_chainlink {
         return Err("--cl-keys and --no-chainlink are exclusive".into());
     }
@@ -340,6 +351,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 perp: !no_perp,
                 chainlink: !no_chainlink,
                 cl_keys: cl_keys.clone(),
+                cb_perp,
             };
             l.check()?;
             if probe { Mode::LiveProbe(l) } else { Mode::Live(l) }
@@ -355,6 +367,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         coinbase: !no_coinbase,
         perp: !no_perp,
         cl_keys,
+        cb_perp,
         cpu_plan: cpu_plan.unwrap_or_default(),
         root: PathBuf::from(take()),
         hot: PathBuf::from(take()),
@@ -395,6 +408,7 @@ fn write(cmd: &Cmd) -> Result<PathBuf, String> {
                 coinbase: cmd.coinbase,
                 perp: cmd.perp,
                 chainlink: cmd.cl_keys.clone(),
+                cb_perp: cmd.cb_perp,
             },
         ),
         Mode::Sim => crate::write_polymarket_sim(root, hot, user, pipeline, ip, dev),

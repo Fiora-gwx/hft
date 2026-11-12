@@ -1327,16 +1327,24 @@ fn core_433_venue_rest_timeout_and_max_idle() {
     let net_of = |o: &hft_core::config::NetOpts| {
         let mut n = hft_net::NetConfig::default();
         o.apply(&mut n);
-        (n.rest_timeout_ms, n.rest_max_idle_ms)
+        (n.rest_timeout_ms, n.rest_max_idle_ms, n.rest_keepalive_ms)
     };
     // .1 absent: the NetConfig defaults.
     let c = hft_core::config::parse(&path).unwrap();
-    assert_eq!(net_of(&c.venues["public"].net), (2000, 0), "CORE-433.1");
+    assert_eq!(net_of(&c.venues["public"].net), (2000, 0, 0), "CORE-433.1");
     // .2 configured values replace them.
     let with = |extra: &str| text.replace("[sim]", &format!("[venues.public.net]\n{extra}\n[sim]"));
-    std::fs::write(&path, with("rest_timeout_ms = 3000\nrest_max_idle_ms = 20000")).unwrap();
+    std::fs::write(
+        &path,
+        with("rest_timeout_ms = 3000\nrest_max_idle_ms = 20000\nrest_keepalive_ms = 4000"),
+    )
+    .unwrap();
     let c = hft_core::config::parse(&path).unwrap();
-    assert_eq!(net_of(&c.venues["public"].net), (3000, 20_000), "CORE-433.2");
+    assert_eq!(
+        net_of(&c.venues["public"].net),
+        (3000, 20_000, 4000),
+        "CORE-433.2"
+    );
     // .3 a zero timeout or an unknown key is refused.
     for (extra, code) in [
         ("rest_timeout_ms = 0", "BadValue"),
@@ -1346,7 +1354,8 @@ fn core_433_venue_rest_timeout_and_max_idle() {
         let e = hft_core::config::load(&path, true).unwrap_err();
         assert!(e.iter().any(|e| e.code == code), "CORE-433.3 {extra}: {e:?}");
     }
-    // .4 the live Polymarket configuration: 5000 ms (= OMS ack timeout) and 25 s idle age.
+    // .4 the live Polymarket configuration: 5000 ms (= OMS ack timeout), 25 s idle age and a
+    // keep-alive every 5 s.
     #[cfg(feature = "polymarket")]
     {
         let v = hft_types::VenueId::POLYMARKET_CLOB;
@@ -1376,7 +1385,7 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             Err(e) => panic!("CORE-433.4 {e:?}"),
         };
         let o = l.cfg.venues["pm"].net;
-        assert_eq!(net_of(&o), (5000, 25_000), "CORE-433.4");
+        assert_eq!(net_of(&o), (5000, 25_000, 5000), "CORE-433.4");
         assert_eq!(l.setup.oms.ack_timeout_ms.get(v), 5000, "CORE-433.4");
         // .5 a REST timeout above the OMS ack timeout of a venue with a gateway is refused.
         let t = std::fs::read_to_string(&pm).unwrap();
@@ -2278,4 +2287,115 @@ fn core_454_perp_and_chainlink_reference_config() {
             "CORE-454.5 {url}"
         );
     }
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_456_coinbase_adv_registration_and_config() {
+    use hft_core::venues::{
+        READ_ONLY_PROTOCOLS, gw_rest_defaults, public_market_endpoint as allowed, registered,
+        shared_egress_ip,
+    };
+    use hft_refdata::EndpointRole as R;
+    use hft_types::{InstId, VenueId};
+    // .1 protocol ↔ VenueId 18, read-only.
+    assert!(
+        registered("coinbase-adv", VenueId::COINBASE_ADV).is_ok(),
+        "CORE-456.1"
+    );
+    assert!(
+        registered("coinbase-adv", VenueId::COINBASE_SPOT).is_err(),
+        "CORE-456.1"
+    );
+    assert_eq!(gw_rest_defaults("coinbase-adv"), Some((2, 0)), "CORE-456.1");
+    assert!(!shared_egress_ip("coinbase-adv"), "CORE-456.1");
+    assert!(READ_ONLY_PROTOCOLS.contains(&"coinbase-adv"), "CORE-456.1");
+    // .2 public endpoint allowlist: the Advanced Trade websocket and the REST host only.
+    for (role, url) in [
+        (R::MdPublic, "wss://advanced-trade-ws.coinbase.com"),
+        (R::MdMarket, "wss://advanced-trade-ws.coinbase.com/"),
+        (R::Rest, "https://api.coinbase.com"),
+    ] {
+        assert!(allowed("coinbase-adv", role, url), "CORE-456.2 {url}");
+        for private in [R::OrderWs, R::UserData] {
+            assert!(!allowed("coinbase-adv", private, url), "CORE-456.2");
+        }
+        assert!(
+            !allowed("coinbase-adv", role, &url.replace(".com", ".com.evil.invalid")),
+            "CORE-456.2"
+        );
+    }
+    assert!(
+        !allowed("coinbase-adv", R::MdPublic, "wss://ws-feed.exchange.coinbase.com"),
+        "CORE-456.2"
+    );
+    assert!(
+        !allowed(
+            "coinbase-spot",
+            R::MdPublic,
+            "wss://advanced-trade-ws.coinbase.com"
+        ),
+        "CORE-456.2"
+    );
+    // .3 the live maker with `--cb-perp` and the Coinbase trigger sources loads: venue `cp`,
+    // InstId 11 on venue 18, binary-maker's group check passes (ref_aux 7, lead_src 15).
+    let d = tempfile::tempdir().unwrap();
+    let base = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
+        account_cap: None,
+        group_cap: None,
+        presign: true,
+        cancel_race: true,
+        extra_accounts: Vec::new(),
+    };
+    let live = hft_pmcfg::PmLive {
+        cb_perp: true,
+        ..(&base).into()
+    };
+    let params: Vec<(String, i64)> = [
+        ("lead_w_ms", 300),
+        ("lead_x_bp", 100_000),
+        ("lead_src", 15),
+        ("lead_cf_ms", 200),
+        ("lead_cf_x_bp", 50_000),
+    ]
+    .iter()
+    .map(|(k, v)| ((*k).to_string(), *v))
+    .collect();
+    let path = hft_pmcfg::write_polymarket_maker_live_with(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+        &params,
+    )
+    .unwrap_or_else(|e| panic!("CORE-456.3 {e}"));
+    let l = match hft_core::config::load(&path, false) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-456.3 {e:?}"),
+    };
+    assert_eq!(
+        l.rd.insts_of_venue(VenueId::COINBASE_ADV),
+        [InstId(11)],
+        "CORE-456.3"
+    );
+    let cp = &l.cfg.venues["cp"];
+    assert_eq!((cp.protocol.as_str(), cp.id), ("coinbase-adv", 18), "CORE-456.3");
+    // .4 accounts on it are refused.
+    let mut v: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let accounts = v["venues"]["pm"]["accounts"].clone();
+    v["venues"]["cp"]
+        .as_table_mut()
+        .unwrap()
+        .insert("accounts".into(), accounts);
+    std::fs::write(&path, toml::to_string(&v).unwrap()).unwrap();
+    let e = hft_core::config::load(&path, false).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "ReadOnlyVenue"), "CORE-456.4 {e:?}");
 }

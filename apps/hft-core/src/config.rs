@@ -383,13 +383,14 @@ impl GwOpts {
         }
     }
 }
-/// `venues.<v>.net.{rest_timeout_ms,rest_max_idle_ms}` (hft-net "配置项"): absent = the
+/// `venues.<v>.net.{rest_timeout_ms,rest_max_idle_ms,rest_keepalive_ms}` (hft-net "配置项"): absent = the
 /// `NetConfig` default; applies to every REST pool of the venue (gw, snap-fetch).
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NetOpts {
     pub rest_timeout_ms: Option<u32>,
     pub rest_max_idle_ms: Option<u32>,
+    pub rest_keepalive_ms: Option<u32>,
 }
 impl NetOpts {
     /// Overrides the configured keys in `net`.
@@ -399,6 +400,9 @@ impl NetOpts {
         }
         if let Some(ms) = self.rest_max_idle_ms {
             net.rest_max_idle_ms = ms;
+        }
+        if let Some(ms) = self.rest_keepalive_ms {
+            net.rest_keepalive_ms = ms;
         }
     }
     /// The REST request timeout in effect.

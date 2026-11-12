@@ -4720,7 +4720,7 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-432.2 | OMS `expire_window_ms[polymarket]` | `PolymarketClob::stale_guard()` 的 `default_ms`(300 000);`not_found_grace_of` = 300 500 |
 | CORE-432.3 | OMS `unknown_alarm_ms` | 30 000(不改;`ExpireAt` 非链接槽的告警由 OMS 顺延 grace) |
 
-### CORE-433 REST 请求超时与空闲回收按 venue 配置(`venues.<v>.net`)
+### CORE-433 REST 请求超时、空闲回收与保活按 venue 配置(`venues.<v>.net`)
 
 - 规则:[配置文件字段](README.md#配置文件字段);键的语义归 [hft-net 配置项](../../crates/hft-net/README.md#配置项)
 - 级别:table
@@ -4730,10 +4730,10 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| CORE-433.1 | 未配置 | `NetOpts::apply` 后 `rest_timeout_ms = 2000`、`rest_max_idle_ms = 0`(hft-net 默认) |
-| CORE-433.2 | `[venues.public.net] rest_timeout_ms = 3000`、`rest_max_idle_ms = 20000` | 3000、20 000 |
+| CORE-433.1 | 未配置 | `NetOpts::apply` 后 `rest_timeout_ms = 2000`、`rest_max_idle_ms = 0`、`rest_keepalive_ms = 0`(hft-net 默认) |
+| CORE-433.2 | `[venues.public.net] rest_timeout_ms = 3000`、`rest_max_idle_ms = 20000`、`rest_keepalive_ms = 4000` | 3000、20 000、4000 |
 | CORE-433.3 | `rest_timeout_ms = 0`;未知键 `idle_ms` | `BadValue`;`ConfigParse` |
-| CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000;OMS `ack_timeout_ms[polymarket]` = 5000 |
+| CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000、5000;OMS `ack_timeout_ms[polymarket]` = 5000 |
 | CORE-433.5 | 同上改 `rest_timeout_ms = 5001` | 含 `RestTimeoutAboveAck` |
 
 ### CORE-434 Polymarket 实盘配置按 USDC 计当日亏损
@@ -4810,3 +4810,18 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-445.3 | 不带默认表的 Polymarket 实盘配置(`presign: false`)加 (3, 1, `0.01`, 30 000);再分别为 (4, 4, …)、`step` `0`、`max_age_ms` 999、240 001 | 前者加载成功、值原样;其余含 `BadValue` |
 | CORE-445.4 | 默认的 Polymarket 实盘配置(`presign: true`,即 `pm_sim_config --live`);`presign: false`(`--no-presign`) | 前者加载成功,`presign` = (2, 2, 10 000, 60 000)、无 `grid_qty`;后者的配置文本不含 `presign` |
 | CORE-445.5 | 同 .3 的实盘配置,表 (3, 1, `step`, 30 000) 加 `grid_qty`:(`0.01`, `5`)、(`0.5`, `0.25`);再分别为 `grid_qty` `0`、`5.0000001`、`-5`、空,以及 `step` `0.03`、`0.005`、`1` 配 `grid_qty` `5` | 前两者加载成功,`grid_qty` 原样、`grid_qty_e6` = 5 000 000、250 000;其余含 `BadValue`(数量无效;1 不被 `step` 整除、199 个价位、0 个价位) |
+
+### CORE-456 `coinbase-adv` 的登记、公共端点白名单与带 Coinbase 永续参考的实盘配置
+
+- 规则:[配置文件字段](README.md#配置文件字段)(`venues.<v>.protocol`);协议归 [venue-coinbase](../../crates/venue-coinbase/README.md)
+- 级别:table
+- 里程碑:M3
+- 前置:直接调用 `hft_core::venues` 的登记函数;`hft_pmcfg::write_polymarket_maker_live_with`(`cb_perp = true`,参数 `lead_w_ms` 300、`lead_x_bp` 1 bp、`lead_src` 15、`lead_cf_ms` 200、`lead_cf_x_bp` 0.5 bp;Cargo feature `polymarket`)
+- 实现:`apps/hft-core/tests/config.rs::core_456_coinbase_adv_registration_and_config`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-456.1 | `registered("coinbase-adv", 18)`;与 `COINBASE_SPOT` 配对;`gw_rest_defaults`;`shared_egress_ip`;`READ_ONLY_PROTOCOLS` | `Ok`;`Err`;`(2, 0)`;假;含 `coinbase-adv` |
+| CORE-456.2 | `public_market_endpoint`:MdPublic/MdMarket `wss://advanced-trade-ws.coinbase.com`、Rest `https://api.coinbase.com`;同 URL 的 OrderWs/UserData;主机加 `.evil.invalid`;Exchange feed 主机;`coinbase-spot` 配 Advanced Trade 主机 | 允许;其余全部拒绝 |
+| CORE-456.3 | 带 `--cb-perp` 的实盘做市配置 | 加载成功;venue 18 只有 InstId 11;`venues.cp` = `coinbase-adv`、18 |
+| CORE-456.4 | 给 `venues.cp` 加 `accounts` | `ReadOnlyVenue` |

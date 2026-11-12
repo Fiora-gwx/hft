@@ -32,6 +32,7 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         perp: true,
         chainlink: true,
         cl_keys: None,
+        cb_perp: false,
     }
 }
 
@@ -463,6 +464,7 @@ fn pmc_008_coinbase_reference() {
         coinbase,
         perp: false,
         chainlink: None,
+        cb_perp: false,
     };
     hft_pmcfg::write_polymarket_maker_sim_refs(&with, &hot, None, None, "10.0.0.5", "ens5", &[], &refs(true))
         .unwrap();
@@ -818,4 +820,125 @@ fn pmc_013_presign_grid_output() {
         [Some(5_000_000), Some(500_000), None, None, None],
         "PMC-013.4"
     );
+}
+
+/// `--cb-perp`: `[venues.cp]` (Coinbase perpetual-style future, `coinbase-adv`, venue 18) as the
+/// last reference group, binary-maker `ref_aux` bit 2; off by default.
+#[test]
+fn pmc_014_coinbase_perp_reference() {
+    let d = tempfile::tempdir().unwrap();
+    let p = |s: &str| d.path().join(s);
+    let s = |p: &Path| p.display().to_string();
+    let hot = p("hot");
+    let core = |dir: &Path| std::fs::read_to_string(dir.join("core.toml")).unwrap();
+    let rd = |dir: &Path| RefData::load(&std::fs::read(dir.join("refdata.bin")).unwrap(), None).unwrap();
+    let spb = |dir: &Path| std::fs::read(dir.join("strategy_params.bin")).unwrap();
+    let cbp = VenueId::COINBASE_ADV;
+    // .1 default: nothing of it; the output is the one without the flag.
+    let (off, on) = (p("off"), p("on"));
+    hft_pmcfg::write_polymarket_maker_sim(&off, &hot, None, None, "10.0.0.5", "ens5").unwrap();
+    let t = core(&off);
+    assert!(!t.contains("venues.cp") && !t.contains("feed:cp"), "PMC-014.1");
+    assert!(rd(&off).insts_of_venue(cbp).is_empty(), "PMC-014.1");
+    // .2 maker with --cb-perp: venue 18 after the others, InstId 10 (after Coinbase 8 and the
+    // perpetual 9), tick 5 USD, quantities in contracts of 0.01 BTC, one more group, ref_aux 1 | 4.
+    let (code, _, err) = tool(&["--maker", "--cb-perp", &s(&on), &s(&hot), "10.0.0.5", "ens5"]);
+    assert_eq!(code, Some(0), "PMC-014.2: {err}");
+    let t = core(&on);
+    assert!(
+        t.contains("[venues.cp]\nprotocol = 'coinbase-adv'\nid = 18\nmax_sub_insts = 1\n"),
+        "PMC-014.2"
+    );
+    assert!(
+        t.contains("task = 'feed:cp'") && t.contains("task = 'conn-builder:cp'"),
+        "PMC-014.2"
+    );
+    let r = rd(&on);
+    let id = hft_types::InstId(10);
+    assert_eq!(r.insts_of_venue(cbp), &[id], "PMC-014.2");
+    assert_eq!(
+        &*r.inst_meta(id).symbol,
+        hft_pmcfg::PM_CB_PERP_SYMBOL,
+        "PMC-014.2"
+    );
+    assert_eq!(
+        (
+            r.inst_meta(id).market(),
+            r.inst(id).px_wire_exp,
+            r.inst(id).qty_wire_exp,
+            r.inst(id).asset
+        ),
+        (
+            hft_types::MarketKind::LinearPerp,
+            -4,
+            -6,
+            r.inst(hft_types::InstId(7)).asset
+        ),
+        "PMC-014.2"
+    );
+    let urls: Vec<&str> = r
+        .endpoints(cbp, hft_refdata::EndpointEnv::Prod)
+        .iter()
+        .map(|e| &*e.url)
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "wss://advanced-trade-ws.coinbase.com",
+            "wss://advanced-trade-ws.coinbase.com",
+            "https://api.coinbase.com"
+        ],
+        "PMC-014.2"
+    );
+    let (bo, bw) = (spb(&off), spb(&on));
+    let (so, sw) = (
+        hft_event::parse_spb1(&bo).unwrap(),
+        hft_event::parse_spb1(&bw).unwrap(),
+    );
+    assert_eq!((so.hdr.n_groups, sw.hdr.n_groups), (9, 10), "PMC-014.2");
+    assert_eq!(&sw.groups[..9], so.groups, "PMC-014.2");
+    let g = sw.groups[9];
+    assert_eq!(
+        (g.n_legs, g.open_allowed, g.legs[0].inst, g.legs[0].venue),
+        (1, 0, id, cbp),
+        "PMC-014.2"
+    );
+    // .3 live with it: the venue without `live_feed`, after Chainlink (InstId 11, 11 groups); the
+    // configuration loads the strategy's group check (the Coinbase perpetual group is on a
+    // perpetual venue).
+    let lv = p("lv");
+    let mut l = live(&p("k1"), vec![]);
+    l.cb_perp = true;
+    hft_pmcfg::write_polymarket_maker_live(&lv, &hot, None, None, "10.0.0.5", "ens5", &l).unwrap();
+    let v: toml::Value = toml::from_str(&core(&lv)).unwrap();
+    let cp = &v["venues"]["cp"];
+    assert_eq!(cp["protocol"].as_str(), Some("coinbase-adv"), "PMC-014.3");
+    assert!(
+        cp.get("live_feed").is_none() && cp.get("accounts").is_none(),
+        "PMC-014.3"
+    );
+    assert_eq!(cp["feed"]["race_rotate_s"].as_integer(), Some(600), "PMC-014.3");
+    assert_eq!(rd(&lv).insts_of_venue(cbp), &[hft_types::InstId(11)], "PMC-014.3");
+    assert_eq!(
+        hft_event::parse_spb1(&spb(&lv)).unwrap().hdr.n_groups,
+        11,
+        "PMC-014.3"
+    );
+    // .4 the flag needs a maker mode and is given once.
+    let (code, _, err) = tool(&["--cb-perp", &s(&p("x")), &s(&hot), "10.0.0.5", "ens5"]);
+    assert_eq!(code, Some(2), "PMC-014.4");
+    assert!(
+        err.contains("--cb-perp needs --maker or --live"),
+        "PMC-014.4: {err}"
+    );
+    let (code, _, _) = tool(&[
+        "--maker",
+        "--cb-perp",
+        "--cb-perp",
+        &s(&p("y")),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(2), "PMC-014.4");
 }

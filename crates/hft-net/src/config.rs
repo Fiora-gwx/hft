@@ -114,6 +114,10 @@ pub struct NetConfig {
     /// rebuilt off the hot thread before it is used again (one per check, only while the pool is
     /// full); 0 = never.
     pub rest_max_idle_ms: u32,
+    /// With a keep-alive path set on the pool (`RestPool::set_keepalive`): `idle_check` sends
+    /// the keep-alive request on a pooled REST connection that has not answered a request yet
+    /// or has been idle this long (one in flight per pool); 0 = never.
+    pub rest_keepalive_ms: u32,
     pub ts_expect_hw: bool,
     pub tls_mode: TlsMode,
 }
@@ -152,6 +156,7 @@ impl Default for NetConfig {
             warm_interval_ns: 0,
             rest_timeout_ms: 2000,
             rest_max_idle_ms: 0,
+            rest_keepalive_ms: 0,
             ts_expect_hw: true,
             tls_mode: TlsMode::Unbuffered,
         }

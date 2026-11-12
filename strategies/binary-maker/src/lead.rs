@@ -106,6 +106,10 @@ pub struct LeadLeg {
     pub r: Option<OrderRef>,
     /// Engine time of the place.
     pub placed: i64,
+    /// Trigger source that placed it (`lead_src` bit).
+    pub src: u32,
+    /// A Binance reference confirmed the move (`lead_cf_ms`).
+    pub confirmed: bool,
 }
 
 /// Rule 15 state; not in the snapshot.
@@ -118,6 +122,14 @@ pub struct LeadState {
     /// The fair-value (spot) reference's mids and its own lead trigger (`lead_src` bit 1).
     pub spot: PerpRing,
     pub lead_spot: Trigger,
+    /// The second (Coinbase spot) reference's mids and its lead trigger (`lead_src` bit 2).
+    pub cb: PerpRing,
+    pub lead_cb: Trigger,
+    /// The Coinbase perpetual's mids and its lead trigger (`lead_src` bit 3).
+    pub cbp: PerpRing,
+    pub lead_cbp: Trigger,
+    /// Source of the trigger being placed.
+    pub cur_src: u32,
     pub win: i64,
     /// Per slot leg (quote order).
     pub legs: Vec<LeadLeg>,
@@ -133,6 +145,8 @@ impl LeadState {
             self.lead = Trigger::default();
             self.pc = Trigger::default();
             self.lead_spot = Trigger::default();
+            self.lead_cb = Trigger::default();
+            self.lead_cbp = Trigger::default();
         }
     }
 }

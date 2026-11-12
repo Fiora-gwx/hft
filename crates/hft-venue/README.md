@@ -242,7 +242,7 @@ pub struct AcctDeps {
 | `gw.cmds_per_loop` | u16 | 16 | 每次 `drain_out()` 最多取的 `GwCmd` |
 | `gw.cmds_per_account_per_loop` | u16 | 8 | 每账户每轮最多发送的订单类 `GwCmd`(超出的下一轮先发) |
 | `gw.aux_every` | u16 | 8 | standby 下单连接与 gw 的 REST 池中**有在途请求**的连接每 N 圈 poll 一次;primary 与独立 UserStream 连接每圈都 poll(§4) |
-| `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建;hft-net `rest_max_idle_ms` 非 0 时同一次检查另退役一条空闲过久的连接,补建经 build 环交给 conn-builder,下单不在新建中的连接上发出)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
+| `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建;hft-net `rest_max_idle_ms` 非 0 时同一次检查另退役一条空闲过久的连接,补建经 build 环交给 conn-builder,下单不在新建中的连接上发出;池设了保活目标且 hft-net `rest_keepalive_ms` 非 0 时,同一次检查随后至多发出一个保活请求,所以保活的最小间隔也是这个节拍)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
 | `gw.rest_conns` | u8 | 2;hft-core 缺省取 `P::GW_REST_CONNS`([hft-venue-proto](../hft-venue-proto/README.md#venueprotocol静态分派);Polymarket 8,其余 2) | gw 每个 REST 池(每 (账户, 端点) 一个)的连接数,1..=`GW_REST_CONNS_MAX`;越界 → `InitErr::Cfg("gw.rest_conns")`。hft-core 按它定该 venue `ConnArena` 的 `Rest` 槽数并以 `GwCfg::rest_pool` 建池(hft-net `RestPool::with_lanes`) |
 | `gw.rest_cancel_reserve` | u8 | 0;hft-core 缺省取 `P::GW_REST_CANCEL_RESERVE`(Polymarket 1,其余 0) | 该池中只给撤单用的空闲连接数(hft-net 保留通道,§4 撤单优先):撤单以外的 REST 请求不占最后这几条空闲连接;≥ `gw.rest_conns` → `InitErr::Cfg("gw.rest_cancel_reserve")` |
 | `gw.cancel_race` | bool | false | 撤单赛跑(§4 "撤单赛跑"):每个 REST 撤单写出后,另在一条空闲连接上同时写出协议的伴随请求(`VenueProtocol::encode_rest_companion`);协议没有伴随请求时无效 |

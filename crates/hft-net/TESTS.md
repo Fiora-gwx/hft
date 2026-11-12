@@ -27,9 +27,9 @@ NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位�
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 类型总览 | NET-011、NET-287 |
-| 签名草案 | NET-001–NET-010、NET-026、NET-029、NET-042、NET-043、NET-060、NET-062–NET-066、NET-082、NET-084、NET-085、NET-100–NET-102、NET-122、NET-130、NET-150、NET-158–NET-161、NET-200、NET-202、NET-203、NET-220–NET-227、NET-240–NET-253、NET-271、NET-272、NET-274、NET-275、NET-362、NET-377、NET-378 |
+| 签名草案 | NET-001–NET-010、NET-026、NET-029、NET-042、NET-043、NET-060、NET-062–NET-066、NET-082、NET-084、NET-085、NET-100–NET-102、NET-122、NET-130、NET-150、NET-158–NET-161、NET-200、NET-202、NET-203、NET-220–NET-227、NET-240–NET-253、NET-271、NET-272、NET-274、NET-275、NET-362、NET-377–NET-379 |
 | 调用约束 | NET-011、NET-041、NET-065、NET-090、NET-155、NET-156、NET-180、NET-212、NET-220、NET-245、NET-287 |
-| 配置项 | NET-038、NET-044、NET-099、NET-121、NET-157、NET-199、NET-207、NET-209、NET-213、NET-250、NET-264、NET-265、NET-278、NET-279、NET-300–NET-302、NET-340–NET-342、NET-360、NET-375 |
+| 配置项 | NET-038、NET-044、NET-099、NET-121、NET-157、NET-199、NET-207、NET-209、NET-213、NET-250、NET-264、NET-265、NET-278、NET-279、NET-300–NET-302、NET-379、NET-340–NET-342、NET-360、NET-375 |
 | 实现说明 | 不适用:见子节 |
 | 1. 接收路径 | NET-020–NET-044、NET-080–NET-099、NET-120、NET-127、NET-335、NET-340、NET-374 |
 | 2. 发送路径 | NET-060、NET-061、NET-065、NET-066、NET-150–NET-163、NET-341、NET-342 |
@@ -2395,6 +2395,7 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
 | NET-300.14 | `ts_expect_hw` | true |
 | NET-300.15 | `tls_mode` | `Unbuffered` |
 | NET-300.16 | `rest_max_idle_ms` | 0 |
+| NET-300.17 | `rest_keepalive_ms` | 0 |
 
 ### NET-301 tcp_user_timeout_ms 原样写进 socket
 
@@ -2809,6 +2810,24 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
 | NET-378.3 | tag 1 的应答交出;`submit`(tag 12);`submit_urgent`(tag 13) | `Err(Busy)`;tag 13 在连接 1 上 |
 | NET-378.4 | `with_lanes(4, 1)`,没有交接任何连接;`submit`、`submit_urgent` | 都是 `Err(NoConn)` |
 | NET-378.5 | `with_lanes(2, 0)`,2 条连接;`submit` 3 次 | 前 2 个 `Ok`;第 3 个 `Err(Busy)` |
+
+### NET-379 保活请求:未应答过的连接先发,空闲到期再发,不占保留通道,应答不交出
+
+- 规则:[9. REST 客户端](README.md#9-rest-客户端)(保活)、[签名草案](README.md#签名草案)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`MemPeer`;测试时钟;`RestPool::<16>`;`rest_keepalive_ms = 5000`、`rest_max_idle_ms = 25000`;`with_lanes(3, 0)`,连接 1–3 已交接,`set_keepalive("/time")`(各行另述);`S` = 10⁹
+- 实现:`crates/hft-net/tests/rest.rs::net_379_keepalive_request`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| NET-379.1 | 没有 `set_keepalive`;或 `rest_keepalive_ms = 0` 而设了目标;`idle_check` 于 0、`20·S` | 都不发保活(`keepalives() = 0`,3 条通道空闲) |
+| NET-379.2 | `idle_check(0)`;再 `idle_check(1)` | 连接 1 上发出 `GET /time`(只有 `Host`、`Accept-Encoding`、`Connection`、`Content-Length: 0`),`free_lanes() = 2`;第二次不再发(一个在途) |
+| NET-379.3 | 连接 1 的应答到达并 `poll`;随后每次 `idle_check` 后送达应答 | `poll` 返回 `None`,通道恢复空闲;连接 2、3 依次各发一个;之后的 `idle_check` 不发(共 3 个) |
+| NET-379.4 | 连接 1 上普通请求 tag 7 于 `3·S` 应答;`idle_check` 于 `5·S + 1`、`5·S + 4`、`5·S + 6`(其间送达应答) | `5·S + 1` 不发;`5·S + 4` 发在连接 2(空闲最久);`5·S + 6` 发在连接 3,连接 1(`3·S` 才应答过)不发 |
+| NET-379.5 | 此后每 `S` 一次 `idle_check` 并送达应答,到 `60·S` | 没有连接被退役(空闲时长由保活应答重置);保活 ≥ 25 个 |
+| NET-379.6 | `with_lanes(2, 1)`;`with_lanes(3, 1)` 发保活后 `submit` 两次、`submit_urgent` 一次 | 2 条通道保留 1 条:不发;3 条:发 1 个,随后第一个 `submit` 成功、第二个 `Busy`、`submit_urgent` 成功 |
+| NET-379.7 | 保活在途时调用方 `submit` tag 0 并收到应答;保活到 `2·S`(`rest_timeout_ms`)仍无应答 | tag 0 在连接 2 上、应答正常交出;超时不交给调用方,连接 1 退役(`IDLE_TIMEOUT`),`next_build` = `Some(Fill)` |
 
 ## 验收
 

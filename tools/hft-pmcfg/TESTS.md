@@ -247,3 +247,17 @@ PMC-001–PMC-009 全部通过。2026-11-07 一次性对照:加入 Coinbase 之�
 | PMC-010.2 | `--live 12345 k1 --cpu-plan none` / `pin` / `spin` | 对应的 `CpuPlan` |
 | PMC-010.3 | `--cpu-plan fast`;`--cpu-plan pin --cpu-plan spin` | 拒绝:含 `none\|pin\|spin`;含 `given twice` |
 
+### PMC-014 Coinbase 永续参考行情 `[venues.cp]`(`--cb-perp`,缺省关)
+
+- 规则:[命令行](README.md#命令行)(`--cb-perp`)、[参考行情](README.md#参考行情)
+- 级别:unit
+- 里程碑:M6
+- 前置:`write_polymarket_maker_sim`;工具 `--maker --cb-perp`;`write_polymarket_maker_live`(`cb_perp = true`);工具 `--cb-perp` 无模式、重复
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_014_coinbase_perp_reference`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-014.1 | 缺省的挂单模拟 | 没有 `venues.cp`、`feed:cp`;venue 18 没有 inst |
+| PMC-014.2 | `--maker --cb-perp` | `[venues.cp]`(`coinbase-adv`、`id = 18`)与 `feed:cp`、`conn-builder:cp` 线程;venue 18 只有 InstId 10 `BIP-20DEC30-CDE`(永续,`px_wire_exp` −4、`qty_wire_exp` −6,与币安参考同一 BTC 资产);端点依次为两条 `wss://advanced-trade-ws.coinbase.com` 与 `https://api.coinbase.com`;10 个 group,前 9 个与不带该开关时相同,第 10 个是该 inst 的单腿组、不开仓 |
+| PMC-014.3 | 实盘配置 `cb_perp = true` | `venues.cp` 无 `live_feed`、无账户,`feed.race_rotate_s = 600`;venue 18 只有 InstId 11;11 个 group |
+| PMC-014.4 | `--cb-perp` 无模式;重复 | 退出 2(前者标准错误含 `--cb-perp needs --maker or --live`) |

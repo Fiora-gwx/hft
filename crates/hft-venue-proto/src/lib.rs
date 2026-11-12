@@ -214,6 +214,9 @@ pub trait VenueProtocol: Sized + 'static {
     /// Default free connections of that pool kept for cancels (hft-venue
     /// `gw.rest_cancel_reserve`); below `GW_REST_CONNS`.
     const GW_REST_CANCEL_RESERVE: u8 = 0;
+    /// Target of the keep-alive `GET` of the gw REST pools (hft-net `RestPool::set_keepalive`):
+    /// an unauthenticated, cheap request of the order endpoint; empty = none.
+    const REST_KEEPALIVE_PATH: &'static [u8] = b"";
 
     // ---- capability defaults (cold; hft-cfg only, never called by the runtime) ----
     /// Contract 15; asset names resolve through `asset` (unknown → `ASSET_NONE`).

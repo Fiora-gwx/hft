@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 44, "BMK-024.1");
+    assert_eq!(schema.version(), 45, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1399,7 +1399,27 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
-    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 1), "BMK-024.38");
+    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 3), "BMK-024.38");
+    // .39 v45 appends the confirmation of a Coinbase-triggered lead bid (0 = off keeps v44) and
+    // widens ref_aux (bit 2) and lead_src (bits 2, 3).
+    let v45: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 45)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(v45, [("lead_cf_ms", 0), ("lead_cf_x_bp", 50_000)], "BMK-024.39");
+    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 2), "BMK-024.39");
+    let max_of = |name: &str| {
+        (0..schema.n_fields())
+            .filter_map(|i| schema.field(i))
+            .find(|f| f.name == name)
+            .map(|f| f.max)
+    };
+    assert_eq!(
+        (max_of("ref_aux"), max_of("lead_src")),
+        (Some(7), Some(15)),
+        "BMK-024.39"
+    );
 }
 
 #[test]
@@ -3674,6 +3694,8 @@ fn bmk_054_rule15_lead_quote() {
             handle: None,
             r: Some(order_ref(slot)),
             placed,
+            src: 0,
+            confirmed: false,
         };
     };
     let mut h = setup(&lead(&[]));
@@ -3866,5 +3888,265 @@ fn bmk_055_rule15_sources_and_model_price() {
         placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)),
         vec![(SLOTS[4], Px(460))],
         "BMK-055.5 at"
+    );
+}
+
+#[test]
+fn bmk_057_rule15_coinbase_sources_and_confirmation() {
+    use binary_maker::fast::{LEAD_SRC_CB, LEAD_SRC_CBP, QState};
+    use binary_maker::params::shape;
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let rd = refdata();
+    let rv = fixture();
+    let g4 = GroupTable::new(&specs4(), CAPACITY);
+    let lead = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 7),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 100_000),
+            ("lead_life_ms", 750),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    // .1 group shape: the third auxiliary group needs ref_aux bit 2 and a perpetual venue.
+    let p7 = lead(&[]);
+    assert_eq!(p7.check(&g4, &rv.view()), Ok(()), "BMK-057.1");
+    let code = |p: &BinaryMakerParams, g: &GroupTable| match p.check(g, &rv.view()) {
+        Err(ParamError::GroupShape { code, .. }) => code,
+        r => panic!("{r:?}"),
+    };
+    assert_eq!(
+        code(&lead(&[("ref_aux", 3)]), &g4),
+        shape::COUNT,
+        "BMK-057.1 ref_aux 3"
+    );
+    let mut swapped = specs4();
+    let n = swapped.len();
+    swapped.swap(n - 1, n - 2);
+    assert_eq!(
+        code(&p7, &GroupTable::new(&swapped, CAPACITY)),
+        shape::AUX,
+        "BMK-057.1 the Coinbase perpetual group is not a perpetual"
+    );
+    // ref_aux 4 alone: the Coinbase perpetual is the only auxiliary group.
+    let mut only = specs2();
+    only.push(spec(gid(8), BTC, &[(RCP, VCP)]));
+    let g_only = GroupTable::new(&only, CAPACITY);
+    assert_eq!(
+        lead(&[("ref_aux", 4)]).check(&g_only, &rv.view()),
+        Ok(()),
+        "BMK-057.1 ref_aux 4"
+    );
+    // .2 subscriptions and insts: the Coinbase perpetual group gets its BBO only.
+    let h = StrategyHarness::<BinaryMaker>::new(&p7, &g4, fixture(), A1).expect("params");
+    let room = vec![16u16; 32];
+    let lim = SubsLimits {
+        rd: &rd,
+        feeds: VenueSet::EMPTY
+            .with(VB)
+            .with(VR)
+            .with(VR2)
+            .with(VP)
+            .with(VC)
+            .with(VCP),
+        room: &room,
+    };
+    let mut sb = SubsBuilder::new(lim, 16);
+    h.strategy().subscriptions(&g4, &mut sb);
+    let got: Vec<_> = sb.entries().iter().map(|e| (e.inst, e.gix, e.ev)).collect();
+    assert_eq!(
+        &got[6..],
+        &[
+            (R, 6, EvMask::BBO),
+            (R2, 7, EvMask::BBO),
+            (RP, 8, EvMask(EvMask::BBO.0 | EvMask::BOOK.0 | EvMask::TRADE.0)),
+            (RC, 9, EvMask(EvMask::INDEX.0 | EvMask::MARK.0)),
+            (RCP, 10, EvMask::BBO),
+        ],
+        "BMK-057.2"
+    );
+    let f = &h.strategy().fast;
+    assert_eq!(
+        (f.reference2, f.perp, f.clref, f.cbperp),
+        (R2, RP, RC, RCP),
+        "BMK-057.2"
+    );
+    let h = StrategyHarness::<BinaryMaker>::new(&lead(&[("ref_aux", 4)]), &g_only, fixture(), A1)
+        .expect("params");
+    let f = &h.strategy().fast;
+    assert_eq!(
+        (f.perp, f.clref, f.cbperp),
+        (InstId(0), InstId(0), RCP),
+        "BMK-057.2 ref_aux 4"
+    );
+    // Window 600 s (slots 4 Up, 5 Down): Up 0.450 / 0.470, Down 0.530 / 0.550; mids 100 000.00.
+    let setup = |p: &BinaryMakerParams| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g4, fixture(), A1).expect("params");
+        slot_book(h.views_mut(), SLOTS[4], 450, 470);
+        slot_book(h.views_mut(), SLOTS[5], 530, 550);
+        h
+    };
+    let quote = |h: &mut StrategyHarness<BinaryMaker>, inst: InstId, gix: u16, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(inst, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(inst);
+        h.feed(&ev::bbo(inst, gix, b).as_ref())
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| quote(h, RP, 8, t, mid);
+    let cb = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| quote(h, R2, 7, t, mid);
+    let cbp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| quote(h, RCP, 10, t, mid);
+    let t0 = 640 * s;
+    // .3 the Coinbase spot source (bit 2): its own quotes trigger; without the bit they do not.
+    let mut h = setup(&lead(&[("lead_src", i64::from(LEAD_SRC_CB))]));
+    cb(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cb(&mut h, t0 + 400 * ms, 10_001_500)),
+        vec![(SLOTS[4], Px(460))],
+        "BMK-057.3 Coinbase spot up"
+    );
+    assert_eq!(
+        h.strategy().fast.lead.legs[4].src,
+        LEAD_SRC_CB,
+        "BMK-057.3 source recorded"
+    );
+    let mut h = setup(&lead(&[("lead_src", 3)]));
+    cb(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&cb(&mut h, t0 + 400 * ms, 10_001_500)).is_empty(),
+        "BMK-057.3 bit off"
+    );
+    // .4 the Coinbase perpetual source (bit 3): a fall places the Down bid; each source has its
+    // own cool-down (the Coinbase spot trigger 0.5 s later in the same direction still fires).
+    let mut h = setup(&lead(&[("lead_src", 15)]));
+    cbp(&mut h, t0, 10_000_000);
+    cb(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cbp(&mut h, t0 + 400 * ms, 9_998_500)),
+        vec![(SLOTS[5], Px(540))],
+        "BMK-057.4 Coinbase perpetual down"
+    );
+    assert_eq!(h.strategy().fast.lead.legs[5].src, LEAD_SRC_CBP, "BMK-057.4");
+    {
+        let q = &mut h.strategy_mut().fast.quotes[5];
+        q.state = QState::None;
+        q.r = None;
+    }
+    assert_eq!(
+        placed(&cb(&mut h, t0 + 900 * ms, 9_998_500)).len(),
+        1,
+        "BMK-057.4 own cool-down"
+    );
+    let mut h = setup(&lead(&[("lead_src", 3)]));
+    cbp(&mut h, t0, 10_000_000);
+    assert!(
+        placed(&cbp(&mut h, t0 + 400 * ms, 9_998_500)).is_empty(),
+        "BMK-057.4 bit off"
+    );
+    // .5 confirmation (lead_cf_ms 200, 0.5 bp): a Coinbase-triggered bid whose move no Binance
+    // reference shows 200 ms after the place is cancelled; before that it stays.
+    let cf = lead(&[("lead_src", 15), ("lead_cf_ms", 200), ("lead_cf_x_bp", 50_000)]);
+    let live = |h: &mut StrategyHarness<BinaryMaker>, leg: usize, slot: u32| {
+        let q = &mut h.strategy_mut().fast.quotes[leg];
+        q.state = QState::Live;
+        q.r = Some(order_ref(slot));
+        let l = &mut h.strategy_mut().fast.lead.legs[leg];
+        l.handle = None;
+        l.r = Some(order_ref(slot));
+    };
+    let mut h = setup(&cf);
+    perp(&mut h, t0, 10_000_000);
+    cb(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cb(&mut h, t0 + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-057.5 placed"
+    );
+    live(&mut h, 4, 31);
+    assert!(
+        cancels(&perp(&mut h, t0 + 550 * ms, 10_000_200)).is_empty(),
+        "BMK-057.5 150 ms: waits"
+    );
+    assert_eq!(
+        cancels(&perp(&mut h, t0 + 600 * ms, 10_000_200)),
+        vec![31],
+        "BMK-057.5 200 ms without the move: cancelled"
+    );
+    // .6 the perpetual shows +0.6 bp (against its mid 300 ms before the place) inside the 200 ms:
+    // confirmed, the bid lives to lead_life_ms; a Binance-triggered bid is never subject to it.
+    let mut h = setup(&cf);
+    perp(&mut h, t0, 10_000_000);
+    cb(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cb(&mut h, t0 + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-057.6 placed"
+    );
+    live(&mut h, 4, 32);
+    assert!(
+        cancels(&perp(&mut h, t0 + 500 * ms, 10_000_600)).is_empty(),
+        "BMK-057.6 confirming quote"
+    );
+    assert!(h.strategy().fast.lead.legs[4].confirmed, "BMK-057.6 confirmed");
+    assert!(
+        cancels(&perp(&mut h, t0 + 700 * ms, 10_000_000)).is_empty(),
+        "BMK-057.6 stays after the confirmation, also when the move fades"
+    );
+    assert_eq!(
+        cancels(&perp(&mut h, t0 + 1_150 * ms, 10_000_000)),
+        vec![32],
+        "BMK-057.6 lead_life_ms"
+    );
+    let mut h = setup(&cf);
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-057.6 perpetual trigger"
+    );
+    live(&mut h, 4, 33);
+    assert!(
+        cancels(&cb(&mut h, t0 + 700 * ms, 10_000_000)).is_empty(),
+        "BMK-057.6 a Binance-triggered bid needs no confirmation"
+    );
+    // .7 the wrong direction does not confirm: a Down bid of the Coinbase perpetual with the
+    // Binance perpetual +0.6 bp is cancelled at 200 ms; the spot reference alone confirms too.
+    let mut h = setup(&cf);
+    perp(&mut h, t0, 10_000_000);
+    cbp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cbp(&mut h, t0 + 400 * ms, 9_998_500)).len(),
+        1,
+        "BMK-057.7 placed"
+    );
+    live(&mut h, 5, 34);
+    assert_eq!(
+        cancels(&perp(&mut h, t0 + 600 * ms, 10_000_600)),
+        vec![34],
+        "BMK-057.7 opposite move"
+    );
+    let spot = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        ref_quote(h.views_mut(), mid);
+        let b = h.views_mut().bbo_of(R);
+        h.feed(&ev::bbo(R, 6, b).as_ref())
+    };
+    let mut h = setup(&cf);
+    spot(&mut h, t0, 10_000_000);
+    cb(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&cb(&mut h, t0 + 400 * ms, 10_001_500)).len(),
+        1,
+        "BMK-057.7 placed"
+    );
+    live(&mut h, 4, 35);
+    spot(&mut h, t0 + 500 * ms, 10_000_600);
+    assert!(
+        cancels(&spot(&mut h, t0 + 650 * ms, 10_000_600)).is_empty(),
+        "BMK-057.7 the spot reference confirms"
     );
 }

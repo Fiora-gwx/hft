@@ -11,6 +11,7 @@ spec: README.md
 本文件的记号:
 
 - `RD-CB` = 测试内构建的 refdata(`tests/support/mod.rs`):`USD` = AssetId 1(Stable),`BTC` = AssetId 2(px_exp −4,qty_exp −8);`COINBASE_SPOT`(16)的 `BTC-USD` = InstId 1(tick 0.01、lot 1e-8);`BINANCE_SPOT`(2)上另有一个符号同为 `BTC-USD` 的 InstId 2(外来 inst)。
+- `RD-CB` 另有 `COINBASE_ADV`(18)的 `BIP-20DEC30-CDE` = InstId 3(永续,tick 5,`qty_unit_shift` −2:线上数量是 0.01 BTC 的合约张数,`qty_wire_exp` −6)。
 - `RX` = 固定接收元数据(`conn` 3、`rx_tsc` 0x12345678、`sw_rx_ns`、`rx_empty_gap_ns` 77)。
 - `TICKER`/`MATCH` = 2026-11-06 eu-west-1 实盘录制(`fixtures/coinbase-spot/`)中的一条 `ticker` 与一条 `match`;数值写法:价格 `"75750.28"` = 757502800(px_exp −4),数量 `"0.06203374"` = 6203374(qty_exp −8)。
 
@@ -30,6 +31,7 @@ spec: README.md
 | 限速默认值 | CBX-009 |
 | VenueCaps 默认值 | CBX-009 |
 | 账户 | CBX-015 |
+| Advanced Trade 衍生品行情(coinbase-adv) | CBX-019, CBX-020, CBX-021, CBX-022, CBX-023, CBX-024, CBX-025 |
 | 接入清单中不适用的步骤 | 不适用:说明 |
 | 实现说明 | CBX-006, CBX-008, CBX-016, CBX-018 |
 | 延迟与资源契约 | 不适用:未建基准(README 已知限制) |
@@ -308,6 +310,131 @@ spec: README.md
 
 期望:无 panic。
 
+### CBX-019 `coinbase-adv` 的分类
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:table
+- 里程碑:M3
+- 前置:`UPDATE`、`HEARTBEAT`、`SUBS`、`ERROR` = 2026-11-11 eu-west-1 录制的各一帧
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_019_adv_classify`
+
+| 行 | 输入(前 64 B) | 期望 |
+|---|---|---|
+| CBX-019.1 | `l2_data` 帧 | `L2` |
+| CBX-019.2 | `heartbeats` 帧 | `Heartbeat` |
+| CBX-019.3 | `subscriptions` 帧 | `Subscriptions` |
+| CBX-019.4 | `{"type":"error",…}` | `Error` |
+| CBX-019.5 | `{"channel":"ticker",…}` | `Unknown` |
+| CBX-019.6 | `l2_data` 帧,二进制帧 | `Unknown` |
+| CBX-019.7 | `channel` 不在最前 | `Unknown` |
+| CBX-019.8 | 空 | `Unknown` |
+
+### CBX-020 `coinbase-adv` 的路由、端点、订阅帧与保活帧
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:table
+- 里程碑:M3
+- 前置:`RD-CB`(`COINBASE_ADV` 的 `BIP-20DEC30-CDE` = InstId 3)
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_020_adv_route_frames_and_keepalive`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| CBX-020.1 | 路由;`stream_route`;`seq_rule` | 一条 `Bbo` 路由 `level2`、赛马;只有 `Bbo` 有路由;各类都是 `SeqRule::None` |
+| CBX-020.2 | `endpoint`(Md / Order);`login` | 路径 `/` / `Unsupported`;`NotNeeded` |
+| CBX-020.3 | `subscribe`:`BIP` 的 `Bbo`;退订;`Trade`;别的 venue 的 inst;空 | `{"type":"subscribe","product_ids":["BIP-20DEC30-CDE"],"channel":"level2"}` 覆盖 1 项;`unsubscribe` 同形;`Unsupported`;`Cfg`;`Cfg` |
+| CBX-020.4 | `bbo_probe`;`app_ping`;8 字节的缓冲 | `AppJson`;`{"type":"subscribe","channel":"heartbeats"}`;0 |
+
+### CBX-021 `coinbase-adv` 的控制帧与 peek
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:table
+- 里程碑:M3
+- 前置:同 CBX-019
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_021_adv_control_hints`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CBX-021.1 | 订阅 `level2` 的应答 | `SubAck{ok: true}` |
+| CBX-021.2 | 保活帧的应答(列出 `heartbeats` 与 `level2`) | `SubAck{ok: true}` |
+| CBX-021.3 | `heartbeats` 帧 | `Pong` |
+| CBX-021.4 | `error` 帧 | `SubAck{ok: false, code: 1}` |
+| CBX-021.5 | `l2_data` 帧 | 无 |
+| CBX-021.6 | `peek`:`l2_data` 帧;没有 inst 的产品;`Heartbeat` 类 | `BIP`、`Bbo`、`last_id` 0;InstId 0;`UnknownClass` |
+
+### CBX-022 level2 簿 → `Bbo`,两条连接的合并
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:table
+- 里程碑:M3
+- 前置:`RD-CB`;合成的 `l2_data` 帧(一个事件;档的时间 = 2026-11-11T06:00:SS);数值:价格 × 10⁴,数量 × 10⁶;每行依次作用在同一个 `AdvFeedCtx` 上(.7 起各用新的)
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_022_adv_book_to_bbo`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CBX-022.1 | 连接 1:快照之前的 `update` | 无事件 |
+| CBX-022.2 | 连接 1:快照(买 73755 × 6、73750 × 609、5 × 1;卖 73765 × 12、73770 × 40、100000000 × 5) | 一个 `Bbo`:73755 × 6 / 73765 × 12,交易所时间 = 档的时间 |
+| CBX-022.3 | 买 73750 的数量改 700;卖 73765 的数量改 9 | 无;一个 `Bbo`(卖量 9) |
+| CBX-022.4 | 同一帧:删买 73755(04.1)、加卖 73760 × 3(04.2) | 一个 `Bbo`:73750 × 700 / 73760 × 3,时间 04.2 |
+| CBX-022.5 | 连接 2:快照 = 已转发的状态;同一时间(04.2)把卖量改 4;04.3 改 5 | 无;无(不晚于上一个已转发的);一个 `Bbo`(连接 2,04.3) |
+| CBX-022.6 | 连接 1:04.3 卖量 5(与已转发的相同);04.4 加买 73755 × 2 | 无;一个 `Bbo`(连接 1) |
+| CBX-022.7 | 新簿:只有买的快照;加卖 100(与买同价);删卖 100、加卖 105 × 2 | 无;无(交叉);一个 `Bbo` 100 × 1 / 105 × 2 |
+| CBX-022.8 | 没有 inst 的产品的快照;该连接新的快照(90 / 95) | 无;一个 `Bbo`(簿被替换) |
+| CBX-022.9 | 卖方 `ADV_LEVELS` + 5 档的快照;再把保留的 `ADV_LEVELS` 档全部删掉 | 一个 `Bbo`(最优 1000);无(该边最优未知) |
+| CBX-022.10 | `ADV_BOOKS` + 1 条连接各发快照;连接 1 的 `update`;最后一条连接的 `update` | 连接 1 的簿已被回收:忽略;一个 `Bbo` |
+
+### CBX-023 `l2_data` 的解码错误
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:table
+- 里程碑:M3
+- 前置:`RD-CB`;参照帧 = 两档(买 10、卖 20)的快照
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_023_adv_decode_errors`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CBX-023.1 | 参照帧 | 1 个事件 |
+| CBX-023.2 | 去掉末尾 9 字节 | `Truncated` |
+| CBX-023.3 | `side` = `buy` | `Shape` |
+| CBX-023.4 | `type` = `resync` | `Shape` |
+| CBX-023.5 | 价格 `1x` | `Number` |
+| CBX-023.6 | 价格 `10.00001`(细于 `px_wire_exp`) | `Number` |
+| CBX-023.7 | 时间没有 `Z` | `Number` |
+| CBX-023.8 | 数量字符串里有反斜杠转义 | `Shape` |
+| CBX-023.9 | 最后一档没有 `new_quantity` | `Shape` |
+| CBX-023.10 | 没有 `events` | `Shape` |
+| CBX-023.11 | 成员顺序打乱并带未知成员(数组、对象、小数)的快照;`Heartbeat` 类 | 1 个事件;`UnknownClass` |
+
+### CBX-024 两条 level2 连接的录制回放
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)
+- 级别:golden
+- 里程碑:M3
+- 前置:`fixtures/coinbase-adv/race/level2_two_conns.jsonl`(2026-11-11 两条同主机连接按接收顺序的 462 帧,含每秒一次的保活订阅的应答与 `heartbeats`);逐帧按控制帧 / `peek` / `decode_md` 处理,连接号 = 录制的 `conn` + 1
+- 输入:`fixtures/coinbase-adv/race/level2_two_conns.jsonl`
+- 期望文件:`level2_two_conns.expected.jsonl`(独立脚本用字典簿与 `Decimal` 从线上值算出)
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_024_adv_golden_two_connections`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| CBX-024.1 | 转发的 `Bbo`(连接、交易所时间、买价、买量、卖价、卖量) | 与期望文件逐个相同(147 个) |
+| CBX-024.2 | `update_id`;每个事件 | 严格递增;买 < 卖,两边数量 > 0 |
+| CBX-024.3 | 首达连接 | 两条连接各转发 20 个以上 |
+| CBX-024.4 | 控制帧 | `SubAck{ok}` 与 `Pong` 各 40 条以上 |
+
+### CBX-025 `coinbase-adv` 的契约、默认值与截断冒烟
+
+- 规则:[Advanced Trade 衍生品行情(coinbase-adv)](README.md#advanced-trade-衍生品行情coinbase-adv)、[实现说明](README.md#实现说明)
+- 级别:property
+- 里程碑:M3
+- 前置:`RD-CB`;hft-venue-proto testkit 的 `check_default_caps`、`check_md_basics`
+- 实现:`crates/venue-coinbase/tests/adv.rs::cbx_025_adv_contracts_defaults_and_truncation`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| CBX-025.1 | `default_caps`;`NAME`、`VENUE`;`check_md_basics`(一帧快照) | 无能力位、`LinearPerp`、`StaleGuard::None`;`coinbase-adv`、18;通过 |
+| CBX-025.2 | `build_templates`、`private_subscribe`、`session_identity_request`、`account_request`、`account_decode`、`dead_man` | `Unsupported` × 4、`UnknownClass`、`None` |
+| CBX-025.3 | 一帧真实 `update` 与一帧快照的每个前缀(簿里先有一个快照) | 每个都是 `Truncated` / `Shape` / `Number` 之一,没有事件,不 panic |
+
 ## 验收
 
-CBX-001–CBX-017 全部通过;CBX-018 在有 cargo-fuzz 的环境运行。
+CBX-001–CBX-017 与 CBX-019–CBX-025 全部通过;CBX-018 在有 cargo-fuzz 的环境运行。

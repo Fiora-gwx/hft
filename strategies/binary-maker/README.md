@@ -35,7 +35,7 @@ status: impl
 
 全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;其后是一到两个参考市场(不在槽位 venue 上,只读,不下单):第一个是公允价参考,可选的第二个是 v37 快参考保护(`cb_*`)读的参考——有它时保护读它的 BBO(中间价 × 2,按该 inst 的价格单位;规则只用相对变化),并忽略 InjectWarmup local_kind 3 的旁路样本;没有时照旧读旁路样本。第二参考还可用于研究参数 `ref_cb_w`(schema v38,缺省 0 = 关):公允价及其锚点读的参考中间价改为第一参考中间价 + `ref_cb_w` × (第二参考中间价折成第一参考单位 − 第一参考中间价),单位比值取两者中间价之比的滑动均值(每个第一参考报价 1/64);第二参考 5 s 未更新或尚无比值时退回第一参考自己的中间价;结算模块、波动率与方向分数仍只读第一参考。参考组数 = 表尾不在槽位 venue 上的连续 group 数(至少按 1 计)。`check` 的 `GroupShape` 码:1 = 参考组多于 2,或槽位数不是 ≥ 2 的偶数(只有一个参考时即 group 总数不是 ≥ 3 的奇数);2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
 
-**辅助组(schema v41 `ref_aux`)**:参考组之后可再有至多两个辅助组,按 `ref_aux` 的位依次排列:位 0 = 永续参考(订阅 `BBO | BOOK | TRADE`,只为把永续行情记进 journal,规则不读),位 1 = Chainlink 组(订阅 `INDEX | MARK`:`Index` = Chainlink 价格样本,`Mark` = 官方 60 s TWAP,样本时间取事件的 `ex_ts_ns`)。辅助组的事件只读取上一事件的下单结果、写入 Chainlink 环,不跑特征也不跑规则:有无辅助组,其余事件序列相同则决定逐位相同(BMK-051.3)。参考组数改为表尾、辅助组之前不在槽位 venue 上的连续 group 数;`check`:`ref_aux` 的辅助组数从表尾扣除后照原规则核对,辅助组也须不在槽位 venue 上,位 0 的组所在 venue 的 `VenueCaps.market` 须是永续(`GroupShape` 码 5 = `shape::AUX`)。有 Chainlink 组时,`InjectWarmup` local_kind 1 的旁路样本被忽略;价格换算:1e-8 USD = 价格 × 10^(8 + 该 inst 的 px_exp)(px_exp 不在 −8..=0 内时不用原生样本)。`ref_aux` = 0(缺省)时与 v38 相同。
+**辅助组(schema v41 `ref_aux`)**:参考组之后可再有至多三个辅助组,按 `ref_aux` 的位依次排列(位 2 = Coinbase 永续参考,schema v45:只订阅 `BBO`,必须在永续 venue 上,是规则 15 的触发源 `lead_src` 位 8,其余规则不读):位 0 = 永续参考(订阅 `BBO | BOOK | TRADE`,只为把永续行情记进 journal,规则不读),位 1 = Chainlink 组(订阅 `INDEX | MARK`:`Index` = Chainlink 价格样本,`Mark` = 官方 60 s TWAP,样本时间取事件的 `ex_ts_ns`)。辅助组的事件只读取上一事件的下单结果、写入 Chainlink 环,不跑特征也不跑规则:有无辅助组,其余事件序列相同则决定逐位相同(BMK-051.3)。参考组数改为表尾、辅助组之前不在槽位 venue 上的连续 group 数;`check`:`ref_aux` 的辅助组数从表尾扣除后照原规则核对,辅助组也须不在槽位 venue 上,位 0 的组所在 venue 的 `VenueCaps.market` 须是永续(`GroupShape` 码 5 = `shape::AUX`)。有 Chainlink 组时,`InjectWarmup` local_kind 1 的旁路样本被忽略;价格换算:1e-8 USD = 价格 × 10^(8 + 该 inst 的 px_exp)(px_exp 不在 −8..=0 内时不用原生样本)。`ref_aux` = 0(缺省)时与 v38 相同。
 
 ### 参数
 
@@ -93,7 +93,7 @@ status: impl
 | `tilt_clip_shares` | Count | 0(关) | 上一行的单笔份数;0 = 关 | None |
 | `late_hedge_ms` | DurationMs | 0(关) | 最后一分钟止损:从 `stop_before_ms` 到窗口结束前 `late_hedge_ms`,只挂凑对的买单,由分数高于 `late_hedge_z` 的腿(信号与净持仓相反)在买一挂、不受对价上限;0 = 关 | None |
 | `late_hedge_z` | Rate | 0 | 止损凑对的腿需要的分数 | None |
-| `ref_aux` | Count | 0 | 辅助组(见 [group 形态](#group-形态)):位 0 = 永续参考,位 1 = Chainlink 组;范围 0–3;schema v41(v39/v40 属于另一条研究线,本线没有) | None |
+| `ref_aux` | Count | 0 | 辅助组(见 [group 形态](#group-形态)):位 0 = 永续参考,位 1 = Chainlink 组,位 2 = Coinbase 永续参考(schema v45);范围 0–7;schema v41(v39/v40 属于另一条研究线,本线没有) | None |
 | `fc_on` | Bool | 0(关) | 规则 14 开:成交条件 EV 模型独自决定当前窗口的买单;需要 Chainlink 组;schema v41 | Down |
 | `fc_s` | Rate | 1 | 规则 14:σ 的厚尾系数 s | None |
 | `fc_lam` | Rate | 0.1 | 规则 14:每次成交的不利移动 λ(bp) | None |
@@ -111,7 +111,8 @@ status: impl
 | `lead_pc_w_ms` / `lead_pc_x_bp` | DurationMs / Rate | 0 / 0(关) | 规则 15 永续撤单:回看时长与阈值 | None |
 | `lead_pc_block_ms` / `lead_pc_cool_ms` | DurationMs | 1 000 / 1 000 | 规则 15 永续撤单:规则 14 在被不利代币上的封锁时长;同方向两次的最短间隔 | None |
 | `lead_only` | Bool | 0 | 规则 15 独占:其他开仓规则都不运行,持仓到结算 | Down |
-| `lead_src` | Count | 1 | 规则 15 触发源(位):1 = 永续,2 = 公允价参考(现货);schema v43 | None |
+| `lead_src` | Count | 1 | 规则 15 触发源(位):1 = 永续,2 = 公允价参考(现货),4 = 第二参考(Coinbase 现货),8 = Coinbase 永续(`ref_aux` 位 2);范围 0–15;schema v43(位 4、8 为 v45) | None |
+| `lead_cf_ms` / `lead_cf_x_bp` | DurationMs / Rate | 0(关)/ 0.5 bp | 规则 15 的确认:由 Coinbase 触发源(`lead_src` 位 4、8)挂出的领先单,挂出后 `lead_cf_ms` 仍没有被币安参考确认就撤;确认 = 永续或现货参考相对"挂出前 `lead_w_ms`"的中间价、朝该单方向的变动 ≥ `lead_cf_x_bp`;schema v45 | None |
 | `lead_price` | Count | 0 | 规则 15 挂单价:0 = 买一 + 1 美分;1 = 模型价 | None |
 | `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
 | `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
@@ -207,6 +208,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - **生命周期**:挂单后 `lead_life_ms`(引擎时间)未完全成交即撤;距结束 ≤ 2 s、`enabled` 关或时钟不可用时撤;陈旧单按规则 8。每个永续报价与每次判定都检查。
 - 领先挂单占用该腿的订单槽:规则 1–14 不管理它(跳过该腿),它终结后该腿恢复正常。
 - **`lead_only`**:只有规则 15 下单——规则 1–14(含配对、反转、规则 12)都不运行,其余挂着的单撤掉;持仓到结算。
+- **Coinbase 触发源与确认(schema v45,缺省关)**:`lead_src` 位 2(值 4)= 第二参考(Coinbase 现货 BTC-USD 的 BBO 中间价),位 3(值 8)= Coinbase 永续(`ref_aux` 位 2 的辅助组,[venue-coinbase](../../crates/venue-coinbase/README.md) `coinbase-adv` 的 level2 最优报价);各有自己的环与(源, 方向)冷却,W/X、挂单条件、价格与寿命同其他源。研究(仓外,2026-11-10/11):到达实盘机时 Coinbase 现货在 25% 的实盘单之前约 100 ms 已经出现同向 1 bp 变动,Coinbase 永续 51%;但它们的触发有相当一部分币安并不跟(永续 37% 单独触发,最小变动 0.34 bp)。`lead_cf_ms` > 0 时,由这两个源挂出的领先单需要确认:自挂出起,只要永续或现货参考相对"挂出前 `lead_w_ms`"的中间价、朝该单方向的变动达到 `lead_cf_x_bp`,该单即记为已确认,此后与普通领先单相同;挂出满 `lead_cf_ms` 仍未确认就撤(撤单不等下单确认)。币安源挂出的单不受此约束。
 - **触发源与模型价(schema v43)**:`lead_src` 的位 0 = 永续(缺省)、位 1 = 公允价参考(现货 BTCUSDT 的 BBO 中间价,自己的环);两个源用同样的 W/X,冷却按(源, 方向)各自独立,任一源触发都走同一个挂单判定(每个代币仍只有一张领先单);永续撤单只看永续。`lead_price` 1:挂单价 = max(买一 + 1 美分, min(买一 + `lead_maxtick` 美分, ⌊代币中间价 + E − `lead_m`⌋, 卖一 − 1 美分)),E = `lead_k` × Δ × |move bp|,Δ = 100·φ(d)/(max(σ, 0.03)·sq)·remf、d = dist/(max(σ, 0.03)·sq)(规则 14 的同一组特征,不乘 `fc_s`;dist 按代币方向);特征不可用(无 Chainlink 组、无起点 TWAP、无新鲜价格)时为买一 + 1 美分。`lead_price` 1 时每秒取一个隐含 σ 样本(与规则 14 同一个环)。`lead_src` 1、`lead_price` 0(缺省)与 v42 逐位相同。与 Python 参照 `Strat.on_lead`(`lead_src`/`lead_price`/`lead_m`/`lead_maxtick`/`lead_k`)的挂单价逐笔相同(BMK-055.2)。
 - 时间常量(研究里的固定值):`LEAD_START_MS` 5 000、`LEAD_END_MS` 2 000、`LEAD_LAST_MS` 10 000。
 

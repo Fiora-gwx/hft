@@ -6,7 +6,7 @@ use hft_event::{
 };
 use hft_types::ClientOrderId;
 use hft_venue_proto::{ExchIdHint, MsgOp, ReportSink, VenueProtocol, testkit::VecSink};
-use venue_coinbase::{CoinbaseSpot, FeedCtx};
+use venue_coinbase::{AdvFeedCtx, CoinbaseAdv, CoinbaseSpot, FeedCtx};
 
 /// A `ReportSink` that drops everything (the venue has no reports).
 pub struct NullReports;
@@ -38,6 +38,13 @@ pub fn run(data: &[u8]) {
             let _ = CoinbaseSpot::control(c, payload);
             let _ = CoinbaseSpot::peek(rd(), &FeedCtx, c, payload);
             let _ = CoinbaseSpot::decode_md(rd(), &mut FeedCtx, c, payload, &RX, &mut md);
+        }
+        let mut adv = AdvFeedCtx::default();
+        for route in CoinbaseAdv::routes() {
+            let c = CoinbaseAdv::classify(route.id, MsgOp::Text, head);
+            let _ = CoinbaseAdv::control(c, payload);
+            let _ = CoinbaseAdv::peek(rd(), &adv, c, payload);
+            let _ = CoinbaseAdv::decode_md(rd(), &mut adv, c, payload, &RX, &mut md);
         }
         let c = CoinbaseSpot::classify_report(MsgOp::Text, head);
         let _ = CoinbaseSpot::decode_report(rd(), &mut (), c, payload, &RX, &mut rep);

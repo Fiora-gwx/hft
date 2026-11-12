@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 44, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 45, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -391,8 +391,9 @@ hft_strategy_sdk::define_params! {
         ref_cb_w: Rate [min = 0, max = 1_000_000_000, default = 0, since = 38, relax = None],
         /// auxiliary groups after the reference groups, in this order: bit 0 = a perpetual
         /// reference (recorded only), bit 1 = a Chainlink group (Index = price, Mark = 60 s TWAP;
-        /// replaces the InjectWarmup samples); 0 = none (schema v41; v39/v40 belong to another line)
-        ref_aux: Count [min = 0, max = 3, default = 0, since = 41, relax = None],
+        /// replaces the InjectWarmup samples), bit 2 = a Coinbase perpetual reference (rule 15
+        /// trigger source, schema v45); 0 = none (schema v41; v39/v40 belong to another line)
+        ref_aux: Count [min = 0, max = 7, default = 0, since = 41, relax = None],
         /// rule 14 (fill-conditional EV, README "规则" 14): the model alone decides the bids of the
         /// current window; needs the Chainlink group (ref_aux bit 1); false: rules 1–13
         fc_on: Bool [default = 0, since = 41, relax = Down],
@@ -442,8 +443,10 @@ hft_strategy_sdk::define_params! {
         /// inventory is held to settlement
         lead_only: Bool [default = 0, since = 42, relax = Down],
         /// rule 15 trigger sources (bits): 1 = the perpetual reference, 2 = the fair-value (spot)
-        /// reference; each source and direction has its own cool-down
-        lead_src: Count [min = 0, max = 3, default = 1, since = 43, relax = None],
+        /// reference, 4 = the second (Coinbase spot) reference, 8 = the Coinbase perpetual
+        /// reference (ref_aux bit 2) (4 and 8: schema v45); each source and direction has its own
+        /// cool-down
+        lead_src: Count [min = 0, max = 15, default = 1, since = 43, relax = None],
         /// rule 15 bid price: 0 = best bid + 1 cent; 1 = the model price (mid + lead_k × Delta ×
         /// |move| − lead_m, between 1 and lead_maxtick cents above the bid, below the ask)
         lead_price: Count [min = 0, max = 1, default = 0, since = 43, relax = None],
@@ -455,6 +458,13 @@ hft_strategy_sdk::define_params! {
         lead_k: Rate [min = 0, max = 10_000_000_000, default = 1_000_000_000, since = 43, relax = None],
         /// rule 15 places no lead bid below this price (fraction of one, 1e-9; 0 = off)
         lead_p_min: Rate [min = 0, max = 1_000_000_000, default = 0, since = 44, relax = None],
+        /// rule 15 confirmation of a lead bid placed by a Coinbase trigger (lead_src bits 4, 8):
+        /// cancelled this long after its place unless the perpetual or the fair-value (spot)
+        /// reference has moved lead_cf_x_bp in its direction since lead_w_ms before the place;
+        /// 0 = off (such a bid lives like any other)
+        lead_cf_ms: DurationMs [min = 0, max = 10_000, default = 0, since = 45, relax = None],
+        /// rule 15 confirmation: the confirming move (1e-9 of one; 1 bp = 100_000)
+        lead_cf_x_bp: Rate [min = 0, max = 100_000_000, default = 50_000, since = 45, relax = None],
     }
 }
 
@@ -468,7 +478,7 @@ pub mod shape {
     pub const VENUE: u16 = 3;
     /// A leg's inst is not in refdata.
     pub const INST: u16 = 4;
-    /// The perpetual auxiliary group (`ref_aux` bit 0) is not on a perpetual venue.
+    /// A perpetual auxiliary group (`ref_aux` bit 0 or bit 2) is not on a perpetual venue.
     pub const AUX: u16 = 5;
 }
 
@@ -516,8 +526,11 @@ impl BinaryMakerParams {
             if (l.venue == v) == reference {
                 return Err(err(shape::VENUE));
             }
-            if gix == n_main
-                && ref_aux & crate::fast::AUX_PERP != 0
+            if gix >= n_main
+                && matches!(
+                    crate::fast::aux_role(ref_aux, gix - n_main),
+                    crate::fast::AUX_PERP | crate::fast::AUX_CBP
+                )
                 && rd.caps(l.venue).market != hft_strategy_sdk::prelude::MarketKind::LinearPerp
             {
                 return Err(err(shape::AUX));

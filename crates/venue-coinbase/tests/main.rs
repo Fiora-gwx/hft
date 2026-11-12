@@ -1,6 +1,7 @@
 //! venue-coinbase tests (TESTS.md). One binary: unit tables, goldens from the 2026-11-06 capture,
 //! the two-connection race replay, contract checks and the fuzz truncation smoke.
 #![allow(clippy::disallowed_types)] // serde_json::Value: golden comparison in test code, not a hot path
+mod adv;
 mod support;
 
 #[path = "../fuzz/exercise.rs"]

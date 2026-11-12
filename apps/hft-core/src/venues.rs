@@ -189,6 +189,25 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        // Market data only (no accounts): the level-2 books live in the feed state.
+        "coinbase-adv" => build::<venue_coinbase::CoinbaseAdv>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            utc,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_coinbase::AdvFeedCtx::default(),
+            || (),
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         // Market data only, logged in with `md_login` (`md_login_error`).
         "polymarket-price" => build::<venue_pmprice::PolymarketPrice>(
             c,
@@ -213,7 +232,7 @@ pub fn assemble(
 }
 
 /// Protocols without order entry or accounts (market data only).
-pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot", "polymarket-price"];
+pub const READ_ONLY_PROTOCOLS: &[&str] = &["coinbase-spot", "coinbase-adv", "polymarket-price"];
 
 /// Protocols whose market-data connections log in (`venues.<v>.md_login` required).
 pub const MD_LOGIN_PROTOCOLS: &[&str] = &["polymarket-price"];
@@ -299,6 +318,8 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
         ("coinbase-spot", EndpointRole::Rest) => host == "api.exchange.coinbase.com",
         ("coinbase-spot", _) => host == "ws-feed.exchange.coinbase.com",
+        ("coinbase-adv", EndpointRole::Rest) => host == "api.coinbase.com",
+        ("coinbase-adv", _) => host == "advanced-trade-ws.coinbase.com",
         ("polymarket-price", _) => host == "ws-live-v2.polymarket.com",
         _ => false,
     }
@@ -914,9 +935,10 @@ where
         gw.set_rep_bulk(rep_bulk_tx);
         if let Some((endpoint, host)) = gateway_rest {
             for k in &v.accounts {
-                let pool = gwcfg
+                let mut pool = gwcfg
                     .rest_pool(host.as_bytes(), &net, clock)
                     .ok_or_else(|| Error::config("RestPool", name))?;
+                pool.set_keepalive(P::REST_KEEPALIVE_PATH);
                 gw.set_rest_pools(AccountId(k.account), vec![(endpoint, pool)])
                     .map_err(|_| Error::config("RestPool", name))?;
             }
@@ -1243,6 +1265,7 @@ pub fn gw_rest_defaults(protocol: &str) -> Option<(u8, u8)> {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => of::<venue_polymarket::PolymarketClob>(),
         "coinbase-spot" => of::<venue_coinbase::CoinbaseSpot>(),
+        "coinbase-adv" => of::<venue_coinbase::CoinbaseAdv>(),
         "polymarket-price" => of::<venue_pmprice::PolymarketPrice>(),
         _ => return None,
     })
@@ -1272,6 +1295,7 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
             ));
         }
         "coinbase-spot" => VenueId::COINBASE_SPOT,
+        "coinbase-adv" => VenueId::COINBASE_ADV,
         "polymarket-price" => VenueId::POLYMARKET_PRICE,
         _ => return Err(Error::config("UnknownVenue", protocol)),
     };
@@ -1323,6 +1347,7 @@ pub fn shared_egress_ip(protocol: &str) -> bool {
         #[cfg(feature = "polymarket")]
         "polymarket-clob" => venue_polymarket::PolymarketClob::SHARED_EGRESS_IP,
         "coinbase-spot" => venue_coinbase::CoinbaseSpot::SHARED_EGRESS_IP,
+        "coinbase-adv" => venue_coinbase::CoinbaseAdv::SHARED_EGRESS_IP,
         "polymarket-price" => venue_pmprice::PolymarketPrice::SHARED_EGRESS_IP,
         _ => false,
     }

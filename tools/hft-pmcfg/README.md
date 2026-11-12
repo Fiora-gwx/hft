@@ -35,7 +35,7 @@ status: impl
 hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
           [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES]
           [--live-account UID KEYS_DIR ...]
-          [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR]
+          [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] [--cb-perp]
           [--cpu-plan none|pin|spin] [--param NAME=RAW ...]
           OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]
 ```
@@ -54,6 +54,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
 | `--no-coinbase` | 只用于 `--maker` 或 `--live`:不写第二个参考行情 `[venues.cb]`(缺省写:`coinbase-spot`、`id = 16`、`max_sub_insts = 1`、模拟时 `live_feed = true`,线程 `feed-cb`/`build-cb`,`[venues.cb.feed] race_rotate_s = 600`(赛跑 BBO 连接每 10 分钟评估一次,长期落后的轮换,hft-venue §3a);refdata 加 `USD` 资产(Stable,ledger 按面值计价)、Coinbase venue(端点 `wss://ws-feed.exchange.coinbase.com`、`https://api.exchange.coinbase.com`,caps 与限速取 [venue-coinbase](../../crates/venue-coinbase/README.md) 默认)与 inst `BTC-USD` = InstId 8(与 Binance 参考同一 BTC 资产,tick 0.01、lot 1e-8);ECF1 的 feeds 加该 venue;binary-maker 多一个第 8 个 group(InstId 8、不开仓、不绑账户)作为第二参考——v37 `cb_*` 保护读它的 BBO,`cb_win_ms` = 0(缺省)时不影响决定)。带此选项的输出与加入 Coinbase 之前相同,只多 `[venues.bn.feed] race_rotate_s = 600`(2026-11-07 起 Binance 赛跑连接同样轮换慢连接) |
 | `--no-perp` | 只用于 `--maker` 或 `--live`:不写永续参考 `[venues.bp]`(见[参考行情](#参考行情)) |
+| `--cb-perp` | 只用于 `--maker` 或 `--live`:写 Coinbase 永续参考 `[venues.cp]`(见[参考行情](#参考行情));缺省不写 |
 | `--no-chainlink` | 只用于 `--live`:不写 Chainlink `[venues.cl]` |
 | `--cl-keys DIR` | 只用于 `--maker` 或 `--live`,与 `--no-chainlink` 互斥:Chainlink 登录用 `DIR/{api_key,secret,passphrase}`;`--maker` 只有给了它才写 `[venues.cl]`,`--live` 缺省用 `KEYS_DIR`(与 `pm-live` 同一组文件,hft-core 只读一次)。hft-core 启动时读入并删除这些文件(模拟实例同样,`--dry-run` 也读),给一份副本 |
 | `--cpu-plan none\|pin\|spin` | 线程绑核方案(见[绑核](#绑核)),缺省 `none`;任何模式都可用 |
@@ -86,8 +87,9 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `cb` | `coinbase-spot` / 16 | `BTC-USD`,InstId 8 | 有(`--no-coinbase` 去掉) | 第二参考(v37 保护、v38 融合) |
 | `bp` | `binance-usdm` / 1 | `BTCUSDT` 永续(`InstKind::Perp`,tick 0.10、lot 0.001,`min_notional` 5 USDT:从不交易),紧接其前的 InstId 之后 | 有(`--no-perp` 去掉) | 只记录:bookTicker(赛跑两路)、depth5@100ms、aggTrade 进 journal;binary-maker `ref_aux` 位 0 |
 | `cl` | `polymarket-price` / 17 | `btcusd`(资产 BTC、计价 USD),最后一个 InstId | `--live` 有(`--no-chainlink` 去掉),`--maker` 需 `--cl-keys` | Chainlink 价格(IndexPrice)与 60 s TWAP(MarkPrice),`[venues.cl.md_login]` 指向登录文件;binary-maker `ref_aux` 位 1,规则 12 改读原生样本、忽略旁路 |
+| `cp` | `coinbase-adv` / 18 | `BIP-20DEC30-CDE`(`PM_CB_PERP_SYMBOL`;`InstKind::Perp`,资产 BTC、计价 USD,tick 5、`qty_unit_shift` −2:数量是 0.01 BTC 的合约张数),排在 `cl` 之后 | 缺省没有(`--cb-perp` 加上) | level2 的最优报价(赛跑两路)进 journal;binary-maker `ref_aux` 位 2,规则 15 的触发源 `lead_src` 位 8;端点 `wss://advanced-trade-ws.coinbase.com`,线程 `feed-cp`/`build-cp`,`[venues.cp.feed] race_rotate_s = 600` |
 
-每个参考 venue 都只读(无账户)、`live_feed`(模拟)、自己的 `feed:<v>`/`conn-builder:<v>` 线程;refdata 加 `USD` 资产(有 `cb` 或 `cl` 时,ledger 按面值计价)。binary-maker 的 `ref_aux` 由生成器按 `bp`/`cl` 是否存在写入(位 0 / 位 1),`--param ref_aux=…` 在其后生效(与 group 表不符时 hft-core 加载期 `check` 拒绝)。全部去掉(`--no-coinbase --no-perp`,`--live` 另加 `--no-chainlink`)时 venue、inst 与 group 与加入它们之前的 `--no-coinbase` 相同(参数 blob 是 schema v41,`ref_aux` = 0)。
+每个参考 venue 都只读(无账户)、`live_feed`(模拟)、自己的 `feed:<v>`/`conn-builder:<v>` 线程;refdata 加 `USD` 资产(有 `cb`、`cl` 或 `cp` 时,ledger 按面值计价)。binary-maker 的 `ref_aux` 由生成器按 `bp`/`cl`/`cp` 是否存在写入(位 0 / 位 1 / 位 2),`--param ref_aux=…` 在其后生效(与 group 表不符时 hft-core 加载期 `check` 拒绝)。全部去掉(`--no-coinbase --no-perp`,`--live` 另加 `--no-chainlink`)时 venue、inst 与 group 与加入它们之前的 `--no-coinbase` 相同(参数 blob 是 schema v41,`ref_aux` = 0)。
 
 ### 库
 
