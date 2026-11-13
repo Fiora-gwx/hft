@@ -1544,6 +1544,12 @@ impl Fast {
         if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
             return;
         }
+        // One side per window: the other token is held, or its order is on the way.
+        if d.take_one_side
+            && (pos(i ^ 1) > 0 || self.quotes.get(i ^ 1).is_some_and(|o| o.state != QState::None))
+        {
+            return;
+        }
         let it = OrderIntent::spend_buy(
             q.venue,
             self.account,

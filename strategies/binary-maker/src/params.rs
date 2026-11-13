@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 47, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 48, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -490,6 +490,9 @@ hft_strategy_sdk::define_params! {
         take_max_win: Count [min = 1, max = 100, default = 1, since = 47, relax = None],
         /// rule 18: taker orders per rolling hour over all tokens (0 = no limit; at most 256)
         take_max_hour: Count [min = 0, max = 256, default = 0, since = 47, relax = None],
+        /// rule 18 (schema v48): true = no taker buy of a token while the window's other token is
+        /// held or being bought (one side per window)
+        take_one_side: Bool [default = 0, since = 48, relax = None],
     }
 }
 

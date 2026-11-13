@@ -382,16 +382,17 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 47;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 48;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
 | BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
 | BMK-024.37 | schema v43 的字段 | 依次 `lead_src` 1、`lead_price` 0、`lead_m` 0.5 c、`lead_maxtick` 3、`lead_k` 1,`since` 43;`n_fields_at(42)` = 总数 − 5 |
-| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 13 |
-| BMK-024.39 | schema v45 的字段与放宽的上限 | 依次 `lead_cf_ms` 0、`lead_cf_x_bp` 0.5 bp,`since` 45;`n_fields_at(44)` = 总数 − 12;`ref_aux` 上限 7,`lead_src` 上限 15 |
-| BMK-024.40 | schema v46 的字段 | 依次 `fvl_w_ms` 0、`fvl_x_bp` 0、`fvl_gap` 0.06、`fvl_cool_ms` 2 000,`since` 46;`n_fields_at(45)` = 总数 − 10 |
-| BMK-024.41 | schema v47 的字段 | 依次 `take_on` 0、`take_p_min` 0.55、`take_p_max` 0.85、`take_slip_c` 1、`take_max_win` 1、`take_max_hour` 0,`since` 47;`n_fields_at(46)` = 总数 − 6 |
+| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 14 |
+| BMK-024.39 | schema v45 的字段与放宽的上限 | 依次 `lead_cf_ms` 0、`lead_cf_x_bp` 0.5 bp,`since` 45;`n_fields_at(44)` = 总数 − 13;`ref_aux` 上限 7,`lead_src` 上限 15 |
+| BMK-024.40 | schema v46 的字段 | 依次 `fvl_w_ms` 0、`fvl_x_bp` 0、`fvl_gap` 0.06、`fvl_cool_ms` 2 000,`since` 46;`n_fields_at(45)` = 总数 − 11 |
+| BMK-024.41 | schema v47 的字段 | 依次 `take_on` 0、`take_p_min` 0.55、`take_p_max` 0.85、`take_slip_c` 1、`take_max_win` 1、`take_max_hour` 0,`since` 47;`n_fields_at(46)` = 总数 − 7 |
+| BMK-024.42 | schema v48 的字段 | `take_one_side` 0,`since` 48;`n_fields_at(47)` = 总数 − 1 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -841,3 +842,4 @@ spec: README.md
 | BMK-059.4 | `take_max_hour` 1:Up 吃单后 1 s 永续反向 −1.7 bp(Down 触发);`take_max_hour` 0 | 不发;发 |
 | BMK-059.5 | 另设 `lead_life_ms` 750、永续撤单 1 000 ms / 0.5 bp;吃单置为已挂,900 ms 后永续回落 1.2 bp | 不撤 |
 | BMK-059.6 | `take_on` 0(缺省),同样的触发 | 一张 `PostOnly` 领先挂单 0.610 |
+| BMK-059.7 | `take_one_side` 1:持有 5 份 Up,永续 −1.7 bp(Down 触发);同上但 `take_one_side` 0;持有 5 份 Down,Up 触发;无持仓,Down 触发 | 不发;发;不发;发 |

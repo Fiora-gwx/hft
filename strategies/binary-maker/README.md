@@ -121,6 +121,7 @@ status: impl
 | `take_slip_c` | Count | 1 | 规则 18:订单的最差价 = 卖一 + 这么多美分(0–10) | None |
 | `take_max_win` | Count | 1 | 规则 18:每个代币每个窗口至多吃这么多次 | None |
 | `take_max_hour` | Count | 0(不限) | 规则 18:所有代币合计每滚动一小时至多吃这么多次(至多 256) | None |
+| `take_one_side` | Bool | 0 | 规则 18:为真时,本窗口另一个代币有持仓或有在途订单就不吃(每窗口只买一边);schema v48 | None |
 | `lead_price` | Count | 0 | 规则 15 挂单价:0 = 买一 + 1 美分;1 = 模型价 | None |
 | `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
 | `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
@@ -232,6 +233,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - 规则 15 的触发在窗口年龄 ≥ 5 s 且距结束 ≥ 10 s、`enabled` 时不挂领先单,而是对被看好的代币:该腿没有任何订单、本窗口该代币已吃次数 < `take_max_win`、(`take_max_hour` > 0 时)过去一小时所有代币合计已吃次数 < `take_max_hour`、盘口两边都有且卖一 ∈ [`take_p_min`, `take_p_max`)、本腿净份数 + `lead_shares` ≤ `inv_max_shares` → 发一张 FAK 吃单买入(`OrderIntent::spend_buy`、`Tif::Ioc`,[venue-polymarket 吃单](../../crates/venue-polymarket/README.md#吃单):按金额买入),数量 `lead_shares`、最差价 = 卖一 + `take_slip_c` 美分(不超过 1 − 1 美分),标签 `take_tag_of(腿)`,该腿记录的源为 `LEAD_SRC_TAKE`(32)。
 - 吃单不由策略撤销:寿命 `lead_life_ms`、永续撤单、确认撤单都不作用于它;它成交、过期或被拒后该腿恢复空闲。持仓到结算。
 - 风控价格带:吃单是 Ioc 买单,最差价高于卖一的部分受 hft-risk 价格带的 `ioc_max_cross` 限制(超出 → 该意图被拒,`PX_BAND`)。[hft-pmcfg](../../tools/hft-pmcfg/README.md#命令行) 的缺省是 0.5%,对 0.55–0.85 的卖一不到 1 美分,所以 `take_slip_c` ≥ 1 的单全部被拒;要用滑点,配置须带 `--ioc-cross`(例如 0.1)。`take_slip_c` = 0 不受影响。
+- `take_one_side`(schema v48,缺省关)为真时:同一窗口的另一个代币净份数 > 0,或它的腿上有在途订单 → 不发。研究(仓外,2026-11-13):已买一边后反向触发再买另一边的单,9 个录制日扣费后 −5.3 美分/份(每天约 10 个窗口,t −1.1),四轮实盘 journal 回放为 +4.8(t 0.7),合计无优势;而两边都买等于付两次手续费锁定亏损。缺省 0 时与 v47 逐位相同。
 - `take_on` = 0(缺省)时与 v46 逐位相同。
 
 ### Note 码表与报表字段

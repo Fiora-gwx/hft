@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 47, "BMK-024.1");
+    assert_eq!(schema.version(), 48, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1401,7 +1401,7 @@ fn bmk_024_schema_v6() {
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
     assert_eq!(
         n_fields_at(schema, 43),
-        Some(schema.n_fields() - 13),
+        Some(schema.n_fields() - 14),
         "BMK-024.38"
     );
     // .39 v45 appends the confirmation of a Coinbase-triggered lead bid (0 = off keeps v44) and
@@ -1414,7 +1414,7 @@ fn bmk_024_schema_v6() {
     assert_eq!(v45, [("lead_cf_ms", 0), ("lead_cf_x_bp", 50_000)], "BMK-024.39");
     assert_eq!(
         n_fields_at(schema, 44),
-        Some(schema.n_fields() - 12),
+        Some(schema.n_fields() - 13),
         "BMK-024.39"
     );
     // .40 v46 appends rule 17 (fvl_w_ms 0 = off keeps v45).
@@ -1435,7 +1435,7 @@ fn bmk_024_schema_v6() {
     );
     assert_eq!(
         n_fields_at(schema, 45),
-        Some(schema.n_fields() - 10),
+        Some(schema.n_fields() - 11),
         "BMK-024.40"
     );
     // .41 v47 appends rule 18 (take_on 0 = off keeps v46).
@@ -1456,7 +1456,15 @@ fn bmk_024_schema_v6() {
         ],
         "BMK-024.41"
     );
-    assert_eq!(n_fields_at(schema, 46), Some(schema.n_fields() - 6), "BMK-024.41");
+    assert_eq!(n_fields_at(schema, 46), Some(schema.n_fields() - 7), "BMK-024.41");
+    // .42 v48 appends rule 18's one side per window (0 = off keeps v47).
+    let v48: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 48)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(v48, [("take_one_side", 0)], "BMK-024.42");
+    assert_eq!(n_fields_at(schema, 47), Some(schema.n_fields() - 1), "BMK-024.42");
     let max_of = |name: &str| {
         (0..schema.n_fields())
             .filter_map(|i| schema.field(i))
@@ -4514,4 +4522,26 @@ fn bmk_059_rule18_lead_take() {
         (Tif::PostOnly, Px(610)),
         "BMK-059.6"
     );
+    // .7 take_one_side (schema v48): holding 5 Up shares, a Down trigger buys nothing; without the
+    // rule it buys Down; an Up trigger while Down is held is blocked the same way; with nothing
+    // held the rule changes nothing.
+    for (row, one, held, mid1, n) in [
+        (
+            "BMK-059.7 Up held, rule on",
+            1i64,
+            Some(4u32),
+            9_998_300i64,
+            0usize,
+        ),
+        ("BMK-059.7 Up held, rule off", 0, Some(4), 9_998_300, 1),
+        ("BMK-059.7 Down held, rule on", 1, Some(5), 10_001_600, 0),
+        ("BMK-059.7 nothing held, rule on", 1, None, 9_998_300, 1),
+    ] {
+        let mut h = setup(&take(&[("take_one_side", one)]), (600, 620));
+        if let Some(k) = held {
+            hold(&mut h, k, 5, 600);
+        }
+        perp(&mut h, t0, 10_000_000);
+        assert_eq!(placed(&perp(&mut h, t0 + 400 * ms, mid1)).len(), n, "{row}");
+    }
 }
