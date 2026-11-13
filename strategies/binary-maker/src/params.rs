@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 46, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 47, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -476,6 +476,20 @@ hft_strategy_sdk::define_params! {
         fvl_gap: Rate [min = -1_000_000_000, max = 1_000_000_000, default = 60_000_000, since = 46, relax = None],
         /// rule 17: minimum time between two rule-17 bids of one token
         fvl_cool_ms: DurationMs [min = 0, max = 60_000, default = 2_000, since = 46, relax = None],
+        /// rule 18 (lead take, schema v47): true = a rule-15 trigger buys the favoured token with a
+        /// taker order (FAK, lead_shares at the best ask + take_slip_c cents) instead of posting
+        /// the lead bid; nothing rests
+        take_on: Bool [default = 0, since = 47, relax = None],
+        /// rule 18: only a token whose best ask is at least this (fraction of one, 1e-9)
+        take_p_min: Rate [min = 0, max = 1_000_000_000, default = 550_000_000, since = 47, relax = None],
+        /// rule 18: ... and below this
+        take_p_max: Rate [min = 0, max = 1_000_000_000, default = 850_000_000, since = 47, relax = None],
+        /// rule 18: the order's worst price is the best ask plus this many cents
+        take_slip_c: Count [min = 0, max = 10, default = 1, since = 47, relax = None],
+        /// rule 18: taker orders per token per window
+        take_max_win: Count [min = 1, max = 100, default = 1, since = 47, relax = None],
+        /// rule 18: taker orders per rolling hour over all tokens (0 = no limit; at most 256)
+        take_max_hour: Count [min = 0, max = 256, default = 0, since = 47, relax = None],
     }
 }
 

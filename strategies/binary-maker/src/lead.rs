@@ -112,8 +112,11 @@ pub struct LeadLeg {
     pub confirmed: bool,
 }
 
+/// Rule 18: taker-order times kept for the hourly limit (`take_max_hour` <= it).
+pub const TAKE_RING: usize = 256;
+
 /// Rule 15 state; not in the snapshot.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct LeadState {
     pub ring: PerpRing,
     /// The lead trigger and the perp-cancel trigger; both restart with each window.
@@ -131,6 +134,11 @@ pub struct LeadState {
     /// Rule 17: engine time of the last fair-gap bid placed for the Up (index 0) and the Down
     /// (index 1) token of the window.
     pub fv_last: [i64; 2],
+    /// Rule 18: taker orders sent for the Up (index 0) and the Down (index 1) token of the window,
+    /// and the engine times of the last `TAKE_RING` taker orders (hourly limit).
+    pub take_n: [u32; 2],
+    pub take_t: Box<[i64; TAKE_RING]>,
+    pub take_head: usize,
     /// Source of the trigger being placed.
     pub cur_src: u32,
     pub win: i64,
@@ -140,7 +148,50 @@ pub struct LeadState {
     pub block: Vec<i64>,
 }
 
+impl Default for LeadState {
+    fn default() -> LeadState {
+        LeadState {
+            ring: PerpRing::default(),
+            lead: Trigger::default(),
+            pc: Trigger::default(),
+            spot: PerpRing::default(),
+            lead_spot: Trigger::default(),
+            cb: PerpRing::default(),
+            lead_cb: Trigger::default(),
+            cbp: PerpRing::default(),
+            lead_cbp: Trigger::default(),
+            fv_last: [i64::MIN / 2; 2],
+            take_n: [0; 2],
+            take_t: Box::new([i64::MIN / 2; TAKE_RING]),
+            take_head: 0,
+            cur_src: 0,
+            win: 0,
+            legs: Vec::new(),
+            block: Vec::new(),
+        }
+    }
+}
+
 impl LeadState {
+    /// Rule 18: taker orders sent within the hour before `ens`.
+    pub fn takes_last_hour(&self, ens: i64) -> u32 {
+        self.take_t
+            .iter()
+            .filter(|t| ens.saturating_sub(**t) < 3_600_000_000_000)
+            .count() as u32
+    }
+
+    /// Rule 18: a taker order sent at `ens` for direction `k` (0 = Up, 1 = Down).
+    pub fn took(&mut self, k: usize, ens: i64) {
+        if let Some(n) = self.take_n.get_mut(k) {
+            *n += 1;
+        }
+        if let Some(t) = self.take_t.get_mut(self.take_head) {
+            *t = ens;
+        }
+        self.take_head = (self.take_head + 1) % TAKE_RING;
+    }
+
     /// Window `start`: the cool-downs restart (the research computes them per window).
     pub fn window(&mut self, start: i64) {
         if self.win != start {
@@ -151,6 +202,7 @@ impl LeadState {
             self.lead_cb = Trigger::default();
             self.lead_cbp = Trigger::default();
             self.fv_last = [i64::MIN / 2; 2];
+            self.take_n = [0; 2];
         }
     }
 }

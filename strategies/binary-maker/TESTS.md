@@ -22,7 +22,7 @@ spec: README.md
 | 订阅 | BMK-003、BMK-009、BMK-026、BMK-051 |
 | 波动率 | BMK-002 |
 | 特征 | BMK-034、BMK-035 |
-| 规则 | BMK-052、BMK-053、BMK-054、BMK-055、BMK-057、BMK-058、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
+| 规则 | BMK-052、BMK-053、BMK-054、BMK-055、BMK-057、BMK-058、BMK-059、BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-021, BMK-023, BMK-025–BMK-034, BMK-036–BMK-038 |
 | Note 码表与报表字段 | BMK-003 |
 | 实现说明 | BMK-006, BMK-017, BMK-025, BMK-030, BMK-034 |
 | 延迟与资源契约 | BMK-003 |
@@ -382,15 +382,16 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| BMK-024.1 | schema;`DESC_VERSION` | 版本 46;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
+| BMK-024.1 | schema;`DESC_VERSION` | 版本 47;`DESC_VERSION` 7;`n_fields_at(5)` = 32,`n_fields_at(6)` = 56 |
 | BMK-024.3 | 下标 56 | `dir_pair_free` 0,`since` 7;版本 7,`n_fields_at(7)` = 57 |
 | BMK-024.34 | schema v38 的最后一个字段 | `ref_cb_w` 0,`since` 38;`n_fields_at(38)` = v37 字段数 + 1 |
 | BMK-024.35 | schema v41 的字段(v39/v40 属于另一条研究线,本线没有) | `n_fields_at(40)` = `n_fields_at(38)`;v41 依次为 `ref_aux`、`fc_on`、`fc_s`、`fc_lam`、`fc_c0`、`fc_c1`、`fc_w`、`fc_m_post`、`fc_m_cancel`、`fc_m_pair`、`fc_iv_n`、`fc_ver`,全部 `since` 41;`ref_aux` 0、`fc_on` 0、`fc_m_pair` −1(不配对) |
 | BMK-024.36 | schema v42 的字段 | 依次 `lead_w_ms` 0、`lead_x_bp` 0、`lead_life_ms` 3 000、`lead_cool_ms` 2 000、`lead_shares` 5、`lead_pc_w_ms` 0、`lead_pc_x_bp` 0、`lead_pc_block_ms` 1 000、`lead_pc_cool_ms` 1 000、`lead_only` 0,`since` 42 |
 | BMK-024.37 | schema v43 的字段 | 依次 `lead_src` 1、`lead_price` 0、`lead_m` 0.5 c、`lead_maxtick` 3、`lead_k` 1,`since` 43;`n_fields_at(42)` = 总数 − 5 |
-| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 7 |
-| BMK-024.39 | schema v45 的字段与放宽的上限 | 依次 `lead_cf_ms` 0、`lead_cf_x_bp` 0.5 bp,`since` 45;`n_fields_at(44)` = 总数 − 6;`ref_aux` 上限 7,`lead_src` 上限 15 |
-| BMK-024.40 | schema v46 的字段 | 依次 `fvl_w_ms` 0、`fvl_x_bp` 0、`fvl_gap` 0.06、`fvl_cool_ms` 2 000,`since` 46;`n_fields_at(45)` = 总数 − 4 |
+| BMK-024.38 | schema v44 的字段 | `lead_p_min` 0,`since` 44;`n_fields_at(43)` = 总数 − 13 |
+| BMK-024.39 | schema v45 的字段与放宽的上限 | 依次 `lead_cf_ms` 0、`lead_cf_x_bp` 0.5 bp,`since` 45;`n_fields_at(44)` = 总数 − 12;`ref_aux` 上限 7,`lead_src` 上限 15 |
+| BMK-024.40 | schema v46 的字段 | 依次 `fvl_w_ms` 0、`fvl_x_bp` 0、`fvl_gap` 0.06、`fvl_cool_ms` 2 000,`since` 46;`n_fields_at(45)` = 总数 − 10 |
+| BMK-024.41 | schema v47 的字段 | 依次 `take_on` 0、`take_p_min` 0.55、`take_p_max` 0.85、`take_slip_c` 1、`take_max_win` 1、`take_max_hour` 0,`since` 47;`n_fields_at(46)` = 总数 − 6 |
 | BMK-024.4 | 下标 57–60 | `tilt_z`、`tilt_clip_shares`、`late_hedge_ms`、`late_hedge_z` 均为 0,`since` 8;版本 8,`n_fields_at(8)` = 61 |
 | BMK-024.2 | 下标 32–55 | `comp_skip` 0、`comp_dir` 0、`dir_cap_shares` 20、`comp_every_ms` 250、`comp_flow_min_shares` 50、`comp_excl_own` 1、八个特征的 `_mu`/`_sd`(README"参数"所列值)、`load_gate_ns` 0、`mdslow_gate_ns` 0,`since` 均为 6 |
 
@@ -823,3 +824,20 @@ spec: README.md
 | BMK-058.6 | 没有起点 TWAP;Up 盘口 0.460/0.470(价差 1 美分) | 都不挂 |
 | BMK-058.7 | 另开规则 15(`lead_src` 1、300 ms、1 bp),永续 1.1 s 后 +1.5 bp | 只挂一张,该腿记录的源 = 1(规则 15 先占用该腿) |
 | BMK-058.8 | `fvl_w_ms` 0(缺省)、`fvl_x_bp` 0.3 bp,同 .1 的报价 | 不挂;`lead_on` 为假 |
+
+### BMK-059 规则 18:领先吃单(schema v47)
+
+- 规则:[规则](README.md#规则)(规则 18)
+- 级别:table
+- 里程碑:M3
+- 前置:`specs3`,`ref_aux` 3、`lead_w_ms` 300、`lead_x_bp` 1.5 bp、`lead_only` 1、`inv_max_shares` 20、`take_on` 1(其余缺省:卖一带 [0.55, 0.85)、`take_slip_c` 1、`take_max_win` 1、`take_max_hour` 0、`lead_shares` 5);窗口 600 s(第 2 对槽位):Up、Down 盘口都是 0.600/0.620;永续 640 s 起 100 000.00,400 ms 后 +1.6 bp
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_059_rule18_lead_take`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-059.1 | 触发 | 只有一张单:Up、买、`Ioc`、最差价 0.630、5 份、`SPEND`、标签 `take_tag_of(4)`;该腿记录的源 = 32;没有领先挂单 |
+| BMK-059.2 | 该腿置空,2.6 s 后同向再触发;同上但 `take_max_win` 2 | 不发;发第二张 0.630 |
+| BMK-059.3 | Up 盘口 0.450/0.470;0.830/0.850;0.530/0.550 | 不发;不发(上界不含);发 |
+| BMK-059.4 | `take_max_hour` 1:Up 吃单后 1 s 永续反向 −1.7 bp(Down 触发);`take_max_hour` 0 | 不发;发 |
+| BMK-059.5 | 另设 `lead_life_ms` 750、永续撤单 1 000 ms / 0.5 bp;吃单置为已挂,900 ms 后永续回落 1.2 bp | 不撤 |
+| BMK-059.6 | `take_on` 0(缺省),同样的触发 | 一张 `PostOnly` 领先挂单 0.610 |
