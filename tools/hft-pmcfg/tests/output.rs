@@ -24,6 +24,7 @@ fn live(keys: &Path, extra: Vec<LiveAccount>) -> PmLive {
         daily_loss_max_resumes: None,
         account_cap: None,
         group_cap: None,
+        ioc_max_cross: None,
         presign: true,
         presign_grid: None,
         cancel_race: true,
@@ -941,4 +942,100 @@ fn pmc_014_coinbase_perp_reference() {
         "ens5",
     ]);
     assert_eq!(code, Some(2), "PMC-014.4");
+}
+
+/// PMC-016: `ioc_max_cross` (`--ioc-cross`) in the generated price band.
+#[test]
+fn pmc_016_ioc_cross_output() {
+    let d = tempfile::tempdir().unwrap();
+    let p = |s: &str| d.path().join(s);
+    let s = |p: &Path| p.display().to_string();
+    let hot = p("hot");
+    let write = |l: &PmLive, out: &Path| {
+        hft_pmcfg::write_polymarket_maker_live(out, &hot, None, None, "10.0.0.5", "ens5", l)
+    };
+    let bands = |out: &Path| {
+        let rd = rd_of(out);
+        let k = hft_risk::RiskParams::decode_blob(&std::fs::read(out.join("risk_params.bin")).unwrap(), &rd)
+            .unwrap();
+        k.classes
+            .iter()
+            .map(|c| (c.max_px_dev.0, c.ioc_max_cross.0, c.rr_max_cross.0))
+            .collect::<Vec<_>>()
+    };
+    // .1 default: 0.5 %.
+    let base = live(d.path(), vec![]);
+    write(&base, &p("base")).unwrap();
+    assert_eq!(
+        bands(&p("base")),
+        vec![(500_000_000, hft_pmcfg::PM_IOC_CROSS, 10_000_000)],
+        "PMC-016.1"
+    );
+    // .2 `ioc_max_cross` 10 %: only that field of the band changes; the other files are the same
+    // (core.toml but for the risk blob's hash).
+    let wide = PmLive {
+        ioc_max_cross: Some(100_000_000),
+        ..live(d.path(), vec![])
+    };
+    write(&wide, &p("wide")).unwrap();
+    assert_eq!(
+        bands(&p("wide")),
+        vec![(500_000_000, 100_000_000, 10_000_000)],
+        "PMC-016.2"
+    );
+    for f in FILES
+        .iter()
+        .filter(|f| !["risk_params.bin", "core.toml"].contains(*f))
+    {
+        assert_eq!(
+            std::fs::read(p("base").join(f)).unwrap(),
+            std::fs::read(p("wide").join(f)).unwrap(),
+            "PMC-016.2 {f}"
+        );
+    }
+    // core.toml: only the risk blob's sha256 line.
+    let text = |dir: &str| std::fs::read_to_string(p(dir).join("core.toml")).unwrap();
+    let (a, b) = (text("base"), text("wide"));
+    let diff: Vec<_> = a.lines().zip(b.lines()).filter(|(x, y)| x != y).collect();
+    assert_eq!(
+        (a.lines().count(), diff.len()),
+        (b.lines().count(), 1),
+        "PMC-016.2 core.toml"
+    );
+    assert!(
+        diff[0].0.starts_with("sha256 = "),
+        "PMC-016.2 core.toml: {}",
+        diff[0].0
+    );
+    // .3 the tool's `--ioc-cross 0.1` writes the library's files.
+    let (code, out, err) = tool(&[
+        "--live",
+        "12345",
+        &s(&p("k1")),
+        "--ioc-cross",
+        "0.1",
+        &s(&p("tool")),
+        &s(&hot),
+        "10.0.0.5",
+        "ens5",
+    ]);
+    assert_eq!(code, Some(0), "PMC-016.3: {err}");
+    assert_eq!(out.trim_end(), s(&p("tool").join("core.toml")), "PMC-016.3");
+    for f in FILES {
+        assert_eq!(
+            std::fs::read(p("tool").join(f)).unwrap(),
+            std::fs::read(p("wide").join(f)).unwrap(),
+            "PMC-016.3 {f}"
+        );
+    }
+    // .4 the library refuses a value outside 1..=PM_IOC_CROSS_MAX and writes nothing.
+    for x in [0, -1, hft_pmcfg::PM_IOC_CROSS_MAX + 1] {
+        let bad = PmLive {
+            ioc_max_cross: Some(x),
+            ..live(d.path(), vec![])
+        };
+        let e = write(&bad, &p("bad")).unwrap_err();
+        assert!(e.contains("ioc_max_cross"), "PMC-016.4 {x}: {e}");
+        assert!(!p("bad").exists(), "PMC-016.4 {x}");
+    }
 }

@@ -33,7 +33,7 @@ status: impl
 
 ```text
 hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC]
-          [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES]
+          [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--ioc-cross FRACTION] [--no-presign] [--presign-grid SHARES]
           [--live-account UID KEYS_DIR ...]
           [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] [--cb-perp]
           [--cpu-plan none|pin|spin] [--param NAME=RAW ...]
@@ -49,6 +49,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `--live UID KEYS_DIR` | 实盘做市(`order_env = "prod"`):Live 账户 `pm-live`(账户 1,venue UID `UID`),凭据文件 `KEYS_DIR/{api_key,secret,passphrase}`;参数、限额与 `--day-loss-carry`/`--daily-loss`/`--daily-loss-resumes` 的语义归  [hft-core 可执行配置](../../apps/hft-core/config/README.md) |
 | `--taker-probe` | 只用于 `--live`:实盘吃单探针——与 `--live` 相同的 venue、槽位、账户、凭据、限额、预签名、OMS 与 REST 设置,只是策略实例换成 [pm-taker-probe](../../strategies/pm-taker-probe/README.md)(实例名 `pm-taker-probe`,一个 group = 槽位 `btc-up-0`(InstId 1),可开仓,参数为其 schema 默认值,`enabled = 0`)、价格带的 `rr_max_cross` 为 0.5(`PM_PROBE_RR_MAX_CROSS`:卖回在最优买价,半个价差可达价格的数个百分点;做市为 0.01);`--param` 改按 pm-taker-probe 的 schema 检查 |
 | `--no-presign` | 只用于 `--live`:不写 `venues.pm.presign`(缺省写 (2, 2, `0.01`, 60 000),[hft-core 配置键](../../apps/hft-core/README.md)) |
+| `--ioc-cross FRACTION` | 只用于 `--live`:风控价格带的 `ioc_max_cross`(Ioc 单越过对手最优价的上限,占该价的比例,[hft-risk](../../crates/hft-risk/README.md));`FRACTION` 为 > 0、≤ 0.2、至多 6 位小数的十进制数;缺省 0.005(0.5%,对任何结果代币都不到 1 美分,即 Ioc 买单只能挂在卖一)。binary-maker 规则 18 的 `take_slip_c` > 0 需要它(例:0.1 在卖一 0.55 时允许高出 5.5 美分) |
 | `--presign-grid SHARES` | 只用于 `--live`,与 `--no-presign` 互斥:在 `venues.pm.presign` 里加 `grid_qty = "SHARES"`(预签名价格网格:每个已绑定 inst 在 0.01 的每个整数倍价位常备一张 `SHARES` 份的买单,语义归 [venue-polymarket 预签名](../../crates/venue-polymarket/README.md#预签名));`SHARES` 为 > 0、至多 6 位小数的十进制数(只含数字与小数点,整数部分不可省);缺省不写(网格关) |
 | `--live-account UID KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `pm-live-<账户号>`,角色 `any`(见[多账户](#多账户)) |
 | `--account LABEL:UID:ROLE KEYS_DIR` | 只用于 `--live`,可重复:再一个 Live 账户,标签 `LABEL`、角色 `ROLE`(见[多账户](#多账户)) |
@@ -64,7 +65,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 | `SRC_IP`、`BIND_DEVICE` | venue `pm`(及 `--maker`/`--live` 的 venue `bn`、`cb`)的出口地址与网卡 |
 | `USER`、`PIPELINE_USER` | 可选:Admin 的 cli 主体;pipeline 主体(发现进程的系统用户,发 `BindSlot`) |
 
-成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 或 `--no-coinbase` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker(`--taker-probe` 时 pm-taker-probe)schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--account-cap`/`--group-cap` 不是 > 0 且至多 6 位小数的十进制(`pm-live` 的账户与场所名义上限、每个 slot 组的名义上限,缺省 55 / 25 USDC);`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
+成功时标准输出打印 `core.toml` 的路径,退出 0;`-h`/`--help` 打印用法,退出 0。拒绝(退出 2,标准错误打印原因与用法,不写任何文件):位置参数不是 4–6 个;未知选项;非重复选项出现两次;选项缺值;`--maker` 与 `--live` 同用;只用于 `--live` 的选项没有 `--live`;`--param` 或 `--no-coinbase` 没有 `--maker`/`--live`、不是 `NAME=整数`、字段不在 binary-maker(`--taker-probe` 时 pm-taker-probe)schema 中或超出其 `[min, max]`;`--daily-loss` 不是 > 0 且至多 6 位小数的十进制;`--daily-loss-resumes` 不在 0–20;`--ioc-cross` 不是 > 0、≤ 0.2 且至多 6 位小数的十进制;`--account-cap`/`--group-cap` 不是 > 0 且至多 6 位小数的十进制(`pm-live` 的账户与场所名义上限、每个 slot 组的名义上限,缺省 55 / 25 USDC);`--day-loss-carry` 的日期不是 `YYYY-MM-DD` 或金额不 < 0;[多账户](#多账户)的任一条约束不满足。写文件失败同样退出 2。
 
 ### 多账户
 
@@ -96,6 +97,7 @@ hft-pmcfg [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-
 ```rust
 pub struct PmLive { pub uid: String, pub keys_dir: PathBuf, pub day_loss_carry: Option<(u32, i64)>,
     pub daily_loss_abs: Option<i64>, pub daily_loss_max_resumes: Option<u8>, pub presign: bool,
+    pub ioc_max_cross: Option<i64>,     // --ioc-cross:价格带 ioc_max_cross(1e-9);None = PM_IOC_CROSS(0.5%);须在 1..=PM_IOC_CROSS_MAX
     pub presign_grid: Option<String>,   // --presign-grid:份数文本;None = 不写 grid_qty;Some 需 presign = true
     pub extra_accounts: Vec<LiveAccount>, pub coinbase: bool,   // coinbase = false:--no-coinbase
     pub perp: bool, pub chainlink: bool, pub cl_keys: Option<PathBuf> }   // --no-perp、--no-chainlink、--cl-keys

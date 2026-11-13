@@ -229,6 +229,36 @@ spec: README.md
 | PMC-013.3 | 工具 `--live 12345 k1 --presign-grid 5` | 退出 0;六个文件与 .2 的库输出逐字节相同 |
 | PMC-013.4 | `presign = false` 而 `presign_grid = Some("5")`;`presign_grid` 为 `0`、`abc`、`5.0000001`、`-5`;`presign_grid_e6` 对 `5`、`0.5`、`0`、`x`、`4295` | 库拒绝(含 `presign_grid needs presign`;含 `presign_grid`),不写输出目录;5 000 000、500 000、其余 `None` |
 
+### PMC-015 `--ioc-cross` 的解析
+
+- 规则:[命令行](README.md#命令行)(`--ioc-cross`)
+- 级别:table
+- 里程碑:M6
+- 前置:位置参数 `out hot 10.0.0.5 ens5`;`L` = `--live 12345 k1` 加位置参数
+- 实现:`tools/hft-pmcfg/tests/cli.rs::pmc_015_ioc_cross_flag`
+
+| 行 | 命令行 | 期望 |
+|---|---|---|
+| PMC-015.1 | L | `ioc_max_cross = None` |
+| PMC-015.2 | L 加 `--ioc-cross 0.1` / `0.005` / `0.2` / `0.000001`;`--taker-probe --ioc-cross 0.1` + L | `ioc_max_cross` = 100 000 000 / 5 000 000 / 200 000 000 / 1 000;LiveProbe 同样 |
+| PMC-015.3 | L 加 `--ioc-cross` `0`、`0.0`、`abc`、`-0.1`、`0.2000001`、`0.21`、`1` | 拒绝:含 `--ioc-cross: FRACTION must be` |
+| PMC-015.4 | `--ioc-cross 0.1` 无 `--live`(无模式、`--maker`);给两次;缺 FRACTION | 拒绝:`--ioc-cross needs --live`;`given twice`;`--ioc-cross: missing FRACTION` |
+
+### PMC-016 `ioc_max_cross` 的输出:风控价格带
+
+- 规则:[命令行](README.md#命令行)(`--ioc-cross`)、[库](README.md#库)
+- 级别:unit
+- 里程碑:M6
+- 前置:`write_polymarket_maker_live`(UID `12345`、目录 k1);已构建的 `hft-pmcfg` 二进制
+- 实现:`tools/hft-pmcfg/tests/output.rs::pmc_016_ioc_cross_output`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| PMC-016.1 | 缺省的实盘配置 | `risk_params.bin` 只有一个价格类:`max_px_dev` 0.5、`ioc_max_cross` = `PM_IOC_CROSS`(0.005)、`rr_max_cross` 0.01 |
+| PMC-016.2 | `ioc_max_cross = Some(100 000 000)` | 该类的 `ioc_max_cross` 为 0.1,另两项不变;`core.toml` 只有风控 blob 的 `sha256` 一行不同,其余四个文件与缺省逐字节相同 |
+| PMC-016.3 | 工具 `--live 12345 k1 --ioc-cross 0.1` | 退出 0;六个文件与 .2 的库输出逐字节相同 |
+| PMC-016.4 | `ioc_max_cross` 为 0、−1、`PM_IOC_CROSS_MAX` + 1 | 库拒绝(含 `ioc_max_cross`),不写输出目录 |
+
 ## 验收
 
 PMC-001–PMC-009 全部通过。2026-11-07 一次性对照:加入 Coinbase 之前的 `hft-pmcfg` 与带 `--no-coinbase` 的当前版本对 6 组命令行(无模式选项;`--maker`;`--maker --param clip_shares=7`;`--live`;`--live --live-account … --no-presign`;`--live --taker-probe`)的输出文件 `cmp` 全部相同。迁移验收(2026-10-30,一次性):迁移前的 `pm_sim_config` 与迁移后的 `hft-pmcfg`、`pm_sim_config` 对 7 组命令行(无模式选项;`--maker` 带 USER/PIPELINE_USER;`--live`;`--live` + `--live-account` + `--param`;`--live --no-presign --daily-loss 20 --daily-loss-resumes 3 --day-loss-carry 2026-10-29 -3.5`;`--maker` 两个 `--param`;`--live` + 两个 `--live-account`)的 42 个输出文件 `cmp` 全部相同。

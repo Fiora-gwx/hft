@@ -231,6 +231,7 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 
 - 规则 15 的触发在窗口年龄 ≥ 5 s 且距结束 ≥ 10 s、`enabled` 时不挂领先单,而是对被看好的代币:该腿没有任何订单、本窗口该代币已吃次数 < `take_max_win`、(`take_max_hour` > 0 时)过去一小时所有代币合计已吃次数 < `take_max_hour`、盘口两边都有且卖一 ∈ [`take_p_min`, `take_p_max`)、本腿净份数 + `lead_shares` ≤ `inv_max_shares` → 发一张 FAK 吃单买入(`OrderIntent::spend_buy`、`Tif::Ioc`,[venue-polymarket 吃单](../../crates/venue-polymarket/README.md#吃单):按金额买入),数量 `lead_shares`、最差价 = 卖一 + `take_slip_c` 美分(不超过 1 − 1 美分),标签 `take_tag_of(腿)`,该腿记录的源为 `LEAD_SRC_TAKE`(32)。
 - 吃单不由策略撤销:寿命 `lead_life_ms`、永续撤单、确认撤单都不作用于它;它成交、过期或被拒后该腿恢复空闲。持仓到结算。
+- 风控价格带:吃单是 Ioc 买单,最差价高于卖一的部分受 hft-risk 价格带的 `ioc_max_cross` 限制(超出 → 该意图被拒,`PX_BAND`)。[hft-pmcfg](../../tools/hft-pmcfg/README.md#命令行) 的缺省是 0.5%,对 0.55–0.85 的卖一不到 1 美分,所以 `take_slip_c` ≥ 1 的单全部被拒;要用滑点,配置须带 `--ioc-cross`(例如 0.1)。`take_slip_c` = 0 不受影响。
 - `take_on` = 0(缺省)时与 v46 逐位相同。
 
 ### Note 码表与报表字段

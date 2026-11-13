@@ -82,6 +82,11 @@ pub const PM_LIVE_LABEL: &str = "pm-live";
 /// the maker's 1 % would refuse; 50 % as `max_px_dev`.
 pub const PM_PROBE_RR_MAX_CROSS: i64 = 500_000_000;
 
+/// `ioc_max_cross` of the generated price band (hft-risk: how far beyond the touch an Ioc order may
+/// bid, as a fraction of the touch, 1e-9): the default, and the most `--ioc-cross` may set.
+pub const PM_IOC_CROSS: i64 = 5_000_000;
+pub const PM_IOC_CROSS_MAX: i64 = 200_000_000;
+
 /// The strategy of a generated configuration.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PmStrategy {
@@ -172,6 +177,10 @@ pub struct PmLive {
     pub account_cap: Option<i64>,
     /// `max_group_notional` of every `pm-live` slot group (USDC raw 1e-6, > 0); `None` = 25 USDC.
     pub group_cap: Option<i64>,
+    /// `ioc_max_cross` of the price band (fraction of the touch, 1e-9; > 0 and at most
+    /// `PM_IOC_CROSS_MAX`); `None` = `PM_IOC_CROSS` (0.5 %, under one cent for every outcome
+    /// token). binary-maker rule 18 with `take_slip_c` > 0 needs more.
+    pub ioc_max_cross: Option<i64>,
     /// `venues.pm.presign` = `PM_LIVE_PRESIGN`; false (`--no-presign`) = no table (off).
     pub presign: bool,
     /// `--presign-grid SHARES`: `venues.pm.presign.grid_qty` (venue-polymarket "预签名" price
@@ -252,6 +261,13 @@ impl PmLive {
     /// At most `MAX_EXTRA_ACCOUNTS` further accounts; labels non-empty, of `[A-Za-z0-9._-]`, not
     /// starting with `sim-` (a Live account) and unique; UIDs non-empty and unique.
     pub fn check(&self) -> Result<(), String> {
+        if let Some(x) = self.ioc_max_cross
+            && !(1..=PM_IOC_CROSS_MAX).contains(&x)
+        {
+            return Err(format!(
+                "ioc_max_cross {x}: must be within 1..={PM_IOC_CROSS_MAX} (1e-9)"
+            ));
+        }
         if let Some(q) = &self.presign_grid {
             if !self.presign {
                 return Err("presign_grid needs presign".into());
@@ -1439,7 +1455,7 @@ fn write_pm(
     risk.classes.push(hft_risk::BandSpec {
         // Outcome-token spreads are wide relative to their price (0.01 at 0.10 is 10 %).
         max_px_dev: Rate(if maker { 500_000_000 } else { 30_000_000 }),
-        ioc_max_cross: Rate(5_000_000),
+        ioc_max_cross: Rate(live.and_then(|l| l.ioc_max_cross).unwrap_or(PM_IOC_CROSS)),
         rr_max_cross: Some(Rate(if probe { PM_PROBE_RR_MAX_CROSS } else { 10_000_000 })),
     });
     // Live micro limits (USDC, 1e-6): account and venue 55 (two overlapping windows plus resting
