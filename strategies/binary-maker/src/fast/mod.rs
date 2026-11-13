@@ -50,6 +50,12 @@ pub const LEAD_SRC_CB: u32 = 4;
 pub const LEAD_SRC_CBP: u32 = 8;
 /// Rule 17 (fair-gap lead): the source mark of its bids (not a `lead_src` bit).
 pub const LEAD_SRC_FV: u32 = 16;
+/// Rule 18 (lead take): the source mark of its taker orders (not a `lead_src` bit).
+pub const LEAD_SRC_TAKE: u32 = 32;
+/// Order tag of a rule-18 taker order of slot leg `gix` (the lead bids use `tag_of`).
+pub fn take_tag_of(gix: u16) -> u32 {
+    0x5400_0000 | u32::from(gix)
+}
 
 /// Rule 14: no new entry bid before this age of the window (ms).
 pub const FC_START_MS: i64 = 5_000;
@@ -1377,6 +1383,7 @@ impl Fast {
             }
             if let Some(q) = self.quotes.get(hurt).copied()
                 && q.state == QState::Live
+                && !self.is_take(hurt)
                 && (self.is_lead(hurt, &q) || (d.fc_on && self.fc_pair.get(hurt) == Some(&false)))
                 && let Some(r) = q.r
                 && ctx.cancel(r).is_ok()
@@ -1409,7 +1416,10 @@ impl Fast {
             && let Some(sg) = trigger.fire(r, d.lead_x_bp.0, ens, i64::from(d.lead_cool_ms) * ms)
         {
             let i = if sg > 0 { up } else { up + 1 };
-            if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
+            if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS && d.take_on {
+                // Rule 18: the trigger takes instead of posting.
+                self.lead_take(i, usize::from(sg < 0), start, v, ctx);
+            } else if d.enabled && age_ms >= LEAD_START_MS && left_ms >= LEAD_LAST_MS {
                 let feat = if model {
                     self.fc_features(v, utc_ms.div_euclid(1_000), start, w, left_ms, up)
                 } else {
@@ -1479,6 +1489,102 @@ impl Fast {
         let dist = if i.is_multiple_of(2) { dist_up } else { -dist_up };
         let mid = ((i128::from(bid) + i128::from(ask)) * i128::from(ONE) / (2 * i128::from(unit_px))) as i64;
         Some(crate::fcev::fair(dist, sq, sig).saturating_sub(mid))
+    }
+
+    /// Slot leg `i`'s lead order is a rule-18 taker order.
+    pub fn is_take(&self, i: usize) -> bool {
+        self.lead.legs.get(i).is_some_and(|l| l.src == LEAD_SRC_TAKE)
+    }
+
+    /// Rule 18 (lead take): a taker buy (FAK, by spend) of `lead_shares` of slot leg `i` (direction
+    /// `k`: 0 = Up, 1 = Down) at the best ask + `take_slip_c` cents, when the leg has no order,
+    /// its best ask is within [`take_p_min`, `take_p_max`), the token and hourly limits allow it
+    /// and the leg's net shares stay within `inv_max_shares`.
+    fn lead_take<V: Views>(&mut self, i: usize, k: usize, start: i64, v: &V, ctx: &mut Ctx<'_>) {
+        let d = *self.p.defaults();
+        let ens = v.now().engine_ns;
+        let Some(q) = self.quotes.get(i).copied() else {
+            return;
+        };
+        if q.state != QState::None
+            || self.lead.take_n.get(k).is_none_or(|n| *n >= d.take_max_win)
+            || (d.take_max_hour > 0 && self.lead.takes_last_hour(ens) >= d.take_max_hour)
+        {
+            return;
+        }
+        let hot = *v.inst(q.inst);
+        let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
+        let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
+        let cent = (unit_px / 100).max(1);
+        let book = v.book(q.inst);
+        let (Some(bid), Some(ask)) = (
+            book.best(Side::Buy).map(|l| l.px.0),
+            book.best(Side::Sell).map(|l| l.px.0),
+        ) else {
+            return;
+        };
+        if bid <= 0 || ask <= bid || ask >= unit_px {
+            return;
+        }
+        let frac = |p: i64| i128::from(p) * 1_000_000_000;
+        if frac(ask) < i128::from(d.take_p_min.0) * i128::from(unit_px)
+            || frac(ask) >= i128::from(d.take_p_max.0) * i128::from(unit_px)
+        {
+            return;
+        }
+        let px = (ask + i64::from(d.take_slip_c) * cent).min(unit_px - cent);
+        let pos = |j: usize| {
+            self.quotes
+                .get(j)
+                .and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
+                .unwrap_or(0)
+        };
+        let qty = i64::from(d.lead_shares).saturating_mul(unit_qty);
+        let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+        if pos(i).saturating_sub(pos(i ^ 1)).saturating_add(qty) > cap {
+            return;
+        }
+        // One side per window: the other token is held, or its order is on the way.
+        if d.take_one_side
+            && (pos(i ^ 1) > 0 || self.quotes.get(i ^ 1).is_some_and(|o| o.state != QState::None))
+        {
+            return;
+        }
+        let it = OrderIntent::spend_buy(
+            q.venue,
+            self.account,
+            q.id,
+            q.inst,
+            Tif::Ioc,
+            Px(px),
+            Qty(qty),
+            take_tag_of(i as u16),
+        );
+        if let Ok(h) = ctx.place(it)
+            && let Some(m) = self.quotes.get_mut(i)
+        {
+            m.state = QState::Placing;
+            m.handle = h.0;
+            m.px = px;
+            m.last_ens = ens;
+            m.win = start;
+            if let Some(l) = self.lead.legs.get_mut(i) {
+                *l = crate::lead::LeadLeg {
+                    handle: Some(h.0),
+                    r: None,
+                    placed: ens,
+                    src: LEAD_SRC_TAKE,
+                    confirmed: true,
+                };
+            }
+            if let Some(x) = self.fc_pair.get_mut(i) {
+                *x = false;
+            }
+            if let Some(x) = self.skind.get_mut(i) {
+                *x = false;
+            }
+            self.lead.took(k, ens);
+        }
     }
 
     /// Rule 15: a post-only bid of `lead_shares` one cent above the best bid of slot leg `i` (the
@@ -1668,7 +1774,10 @@ impl Fast {
                     unconfirmed = ens.saturating_sub(placed) >= i64::from(d.lead_cf_ms) * 1_000_000;
                 }
             }
-            let cancel = if lead {
+            // A rule-18 taker order ends by itself (filled, expired or rejected): never cancelled.
+            let cancel = if lead && self.is_take(i) {
+                false
+            } else if lead {
                 !d.enabled
                     || !now.clock_ok
                     || ens.saturating_sub(placed) >= life

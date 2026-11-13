@@ -116,6 +116,12 @@ status: impl
 | `fvl_w_ms` / `fvl_x_bp` | DurationMs / Rate | 0 / 0(关) | 规则 17(公允价差领先单):永续中间价的回看时长(0–10 000)与朝该代币有利方向的最小变动(占 1 的比例;1 bp = 100 000);两者都 > 0 才开;schema v46 | None |
 | `fvl_gap` | Rate | 0.06 | 规则 17:代币的模型公允价 Φ(d) 至少比它的盘口中间价高这么多(占 1 的比例;6 美分 = 60 000 000;可为负) | None |
 | `fvl_cool_ms` | DurationMs | 2 000 | 规则 17:同一代币两张规则 17 挂单的最短间隔(从挂出起算) | None |
+| `take_on` | Bool | 0 | 规则 18(领先吃单):为真时规则 15 的触发不挂领先单,改为吃单买入被看好的代币;schema v47 | None |
+| `take_p_min` / `take_p_max` | Rate | 0.55 / 0.85 | 规则 18:只在该代币卖一价 ∈ [`take_p_min`, `take_p_max`) 时吃 | None |
+| `take_slip_c` | Count | 1 | 规则 18:订单的最差价 = 卖一 + 这么多美分(0–10) | None |
+| `take_max_win` | Count | 1 | 规则 18:每个代币每个窗口至多吃这么多次 | None |
+| `take_max_hour` | Count | 0(不限) | 规则 18:所有代币合计每滚动一小时至多吃这么多次(至多 256) | None |
+| `take_one_side` | Bool | 0 | 规则 18:为真时,本窗口另一个代币有持仓或有在途订单就不吃(每窗口只买一边);schema v48 | None |
 | `lead_price` | Count | 0 | 规则 15 挂单价:0 = 买一 + 1 美分;1 = 模型价 | None |
 | `lead_m` | Rate | 0.5 | 规则 15 模型价的扣减(美分) | None |
 | `lead_maxtick` | Count | 3 | 规则 15 模型价至多高出买一的美分数 | None |
@@ -221,6 +227,14 @@ v7(规则 10、11,默认关闭)来自 2026-10-28 负责人要求的混合做市�
 - 该代币同时满足:该腿没有任何订单;距它上一张规则 17 挂单的挂出 ≥ `fvl_cool_ms`(每个窗口重新开始);`enabled`;窗口年龄 ≥ 5 s 且距结束 ≥ 10 s;卖一 − 买一 ≥ 2 美分、买一 > 0 且卖一 < 1;规则 14 的特征可得(起点 TWAP 与新鲜的 Chainlink 价格),且公允价 Φ(d) − 盘口中间价 ≥ `fvl_gap`,d = clip(dist / (max(σ, 0.03) · sq), ±8)(`fcev::fair`;dist、sq、σ 同规则 15 的模型价)。
 - 满足时按规则 15 的挂单判定在(买一取整到美分)+ 1 美分挂 `lead_shares` 份 post-only 买单:`lead_p_min`、净份数上限 `inv_max_shares`、寿命 `lead_life_ms`、永续撤单、`lead_only` 都与规则 15 的领先单相同;该腿记录的源为 `LEAD_SRC_FV`(16,不是 `lead_src` 的位)。规则 15 先判定:同一报价上规则 15 已挂出时该腿已被占用,规则 17 不再挂。
 - 开启时每秒取一次隐含 σ 样本(与 `lead_price` 1 相同);`fvl_w_ms` = 0(缺省)时与 v45 逐位相同。
+
+**规则 18:领先吃单(schema v47,缺省关)**。研究(仓外,2026-11-13):规则 15 的信号是对的,但挂单只在信号错时成交(三轮实盘 2 342 张单:挂进去没成交的按挂单价算 +7.4 美分/份,成交的 −4.8)。按录制盘口在触发后 D ms 的卖一价买入并持有到结算、不涉及成交模型:9 个录制日,卖一价 0.55–0.85、变动 ≥ 1.5 bp、每代币每窗口第一次,D = 400 ms 为 +4.6 美分/份(t 3.3),1 s 仍 +2.8;卖一价低于 0.50 的代币为负;没有触发时买热门方为 −0.5。`take_on` 为真时生效,触发、冷却与触发源沿用规则 15(`lead_w_ms`、`lead_x_bp`、`lead_cool_ms`、`lead_src`)。实现 `Fast::lead_take`:
+
+- 规则 15 的触发在窗口年龄 ≥ 5 s 且距结束 ≥ 10 s、`enabled` 时不挂领先单,而是对被看好的代币:该腿没有任何订单、本窗口该代币已吃次数 < `take_max_win`、(`take_max_hour` > 0 时)过去一小时所有代币合计已吃次数 < `take_max_hour`、盘口两边都有且卖一 ∈ [`take_p_min`, `take_p_max`)、本腿净份数 + `lead_shares` ≤ `inv_max_shares` → 发一张 FAK 吃单买入(`OrderIntent::spend_buy`、`Tif::Ioc`,[venue-polymarket 吃单](../../crates/venue-polymarket/README.md#吃单):按金额买入),数量 `lead_shares`、最差价 = 卖一 + `take_slip_c` 美分(不超过 1 − 1 美分),标签 `take_tag_of(腿)`,该腿记录的源为 `LEAD_SRC_TAKE`(32)。
+- 吃单不由策略撤销:寿命 `lead_life_ms`、永续撤单、确认撤单都不作用于它;它成交、过期或被拒后该腿恢复空闲。持仓到结算。
+- 风控价格带:吃单是 Ioc 买单,最差价高于卖一的部分受 hft-risk 价格带的 `ioc_max_cross` 限制(超出 → 该意图被拒,`PX_BAND`)。[hft-pmcfg](../../tools/hft-pmcfg/README.md#命令行) 的缺省是 0.5%,对 0.55–0.85 的卖一不到 1 美分,所以 `take_slip_c` ≥ 1 的单全部被拒;要用滑点,配置须带 `--ioc-cross`(例如 0.1)。`take_slip_c` = 0 不受影响。
+- `take_one_side`(schema v48,缺省关)为真时:同一窗口的另一个代币净份数 > 0,或它的腿上有在途订单 → 不发。研究(仓外,2026-11-13):已买一边后反向触发再买另一边的单,9 个录制日扣费后 −5.3 美分/份(每天约 10 个窗口,t −1.1),四轮实盘 journal 回放为 +4.8(t 0.7),合计无优势;而两边都买等于付两次手续费锁定亏损。缺省 0 时与 v47 逐位相同。
+- `take_on` = 0(缺省)时与 v46 逐位相同。
 
 ### Note 码表与报表字段
 

@@ -9,7 +9,7 @@ use crate::{AccountRole, LiveAccount, MAX_EXTRA_ACCOUNTS, PmLive, PmStrategy};
 pub fn usage(prog: &str) -> String {
     format!(
         "usage: {prog} [--maker | --live UID KEYS_DIR [--taker-probe] [--day-loss-carry YYYY-MM-DD USDC] \
-         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--no-presign] [--presign-grid SHARES] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
+         [--daily-loss USDC] [--daily-loss-resumes N] [--account-cap USDC] [--group-cap USDC] [--ioc-cross FRACTION] [--no-presign] [--presign-grid SHARES] [--no-cancel-race] [--live-account UID KEYS_DIR ...] \
          [--account LABEL:UID:ROLE KEYS_DIR ...] [--no-chainlink]] [--no-coinbase] [--no-perp] [--cl-keys DIR] [--cb-perp] \
          [--cpu-plan none|pin|spin] [--param NAME=RAW ...] \
          OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]"
@@ -120,6 +120,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut resumes = None;
     let mut account_cap = None;
     let mut group_cap = None;
+    let mut ioc_cross = None;
     let mut no_presign = false;
     let mut presign_grid: Option<String> = None;
     let mut no_cancel_race = false;
@@ -209,6 +210,18 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                         .ok_or(format!("{flag}: USDC must be a decimal > 0 (at most 6 places)"))?,
                 );
             }
+            "--ioc-cross" => {
+                once(ioc_cross.is_some(), "--ioc-cross")?;
+                let v = next("--ioc-cross", "FRACTION")?;
+                ioc_cross = Some(
+                    usdc(&v)
+                        .and_then(|p| p.checked_mul(1_000))
+                        .filter(|p| (1..=crate::PM_IOC_CROSS_MAX).contains(p))
+                        .ok_or(
+                            "--ioc-cross: FRACTION must be a decimal > 0 and at most 0.2 (at most 6 places)",
+                        )?,
+                );
+            }
             "--daily-loss-resumes" => {
                 once(resumes.is_some(), "--daily-loss-resumes")?;
                 let v = next("--daily-loss-resumes", "N")?;
@@ -291,6 +304,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         (resumes.is_some(), "--daily-loss-resumes"),
         (account_cap.is_some(), "--account-cap"),
         (group_cap.is_some(), "--group-cap"),
+        (ioc_cross.is_some(), "--ioc-cross"),
     ];
     if live.is_none()
         && let Some((_, flag)) = needs_live.iter().find(|(set, _)| *set)
@@ -343,6 +357,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                 daily_loss_max_resumes: resumes,
                 account_cap,
                 group_cap,
+                ioc_max_cross: ioc_cross,
                 presign: !no_presign,
                 presign_grid,
                 cancel_race: !no_cancel_race,

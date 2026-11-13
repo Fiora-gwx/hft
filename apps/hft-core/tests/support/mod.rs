@@ -825,6 +825,7 @@ impl From<&PmLive> for hft_pmcfg::PmLive {
             daily_loss_max_resumes: l.daily_loss_max_resumes,
             account_cap: l.account_cap,
             group_cap: l.group_cap,
+            ioc_max_cross: None,
             presign: l.presign,
             presign_grid: None,
             cancel_race: l.cancel_race,

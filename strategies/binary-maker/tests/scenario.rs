@@ -989,7 +989,7 @@ const V6_FIELDS: [(&str, i64); 24] = [
 fn bmk_024_schema_v6() {
     use hft_strategy_sdk::params::n_fields_at;
     let schema = BinaryMaker::DESC.schema;
-    assert_eq!(schema.version(), 46, "BMK-024.1");
+    assert_eq!(schema.version(), 48, "BMK-024.1");
     assert_eq!(binary_maker::DESC_VERSION, 7, "BMK-024.1");
     assert_eq!(n_fields_at(schema, 5), Some(32), "BMK-024.1");
     assert_eq!(n_fields_at(schema, 6), Some(56), "BMK-024.1");
@@ -1399,7 +1399,11 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v44, [("lead_p_min", 0)], "BMK-024.38");
-    assert_eq!(n_fields_at(schema, 43), Some(schema.n_fields() - 7), "BMK-024.38");
+    assert_eq!(
+        n_fields_at(schema, 43),
+        Some(schema.n_fields() - 14),
+        "BMK-024.38"
+    );
     // .39 v45 appends the confirmation of a Coinbase-triggered lead bid (0 = off keeps v44) and
     // widens ref_aux (bit 2) and lead_src (bits 2, 3).
     let v45: Vec<_> = (0..schema.n_fields())
@@ -1408,7 +1412,11 @@ fn bmk_024_schema_v6() {
         .map(|f| (f.name, f.default))
         .collect();
     assert_eq!(v45, [("lead_cf_ms", 0), ("lead_cf_x_bp", 50_000)], "BMK-024.39");
-    assert_eq!(n_fields_at(schema, 44), Some(schema.n_fields() - 6), "BMK-024.39");
+    assert_eq!(
+        n_fields_at(schema, 44),
+        Some(schema.n_fields() - 13),
+        "BMK-024.39"
+    );
     // .40 v46 appends rule 17 (fvl_w_ms 0 = off keeps v45).
     let v46: Vec<_> = (0..schema.n_fields())
         .filter_map(|i| schema.field(i))
@@ -1425,7 +1433,38 @@ fn bmk_024_schema_v6() {
         ],
         "BMK-024.40"
     );
-    assert_eq!(n_fields_at(schema, 45), Some(schema.n_fields() - 4), "BMK-024.40");
+    assert_eq!(
+        n_fields_at(schema, 45),
+        Some(schema.n_fields() - 11),
+        "BMK-024.40"
+    );
+    // .41 v47 appends rule 18 (take_on 0 = off keeps v46).
+    let v47: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 47)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(
+        v47,
+        [
+            ("take_on", 0),
+            ("take_p_min", 550_000_000),
+            ("take_p_max", 850_000_000),
+            ("take_slip_c", 1),
+            ("take_max_win", 1),
+            ("take_max_hour", 0)
+        ],
+        "BMK-024.41"
+    );
+    assert_eq!(n_fields_at(schema, 46), Some(schema.n_fields() - 7), "BMK-024.41");
+    // .42 v48 appends rule 18's one side per window (0 = off keeps v47).
+    let v48: Vec<_> = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .filter(|f| f.since == 48)
+        .map(|f| (f.name, f.default))
+        .collect();
+    assert_eq!(v48, [("take_one_side", 0)], "BMK-024.42");
+    assert_eq!(n_fields_at(schema, 47), Some(schema.n_fields() - 1), "BMK-024.42");
     let max_of = |name: &str| {
         (0..schema.n_fields())
             .filter_map(|i| schema.field(i))
@@ -4320,4 +4359,189 @@ fn bmk_058_rule17_fair_gap_lead() {
         "BMK-058.8"
     );
     assert!(!h.strategy().fast.lead_on(), "BMK-058.8 lead_on");
+}
+
+/// BMK-059: rule 18 (lead take, schema v47).
+#[test]
+fn bmk_059_rule18_lead_take() {
+    use binary_maker::fast::{LEAD_SRC_TAKE, QState, take_tag_of};
+    let s = 1_000_000_000i64;
+    let ms = 1_000_000i64;
+    let g3 = GroupTable::new(&specs3(), CAPACITY);
+    let take = |extra: &[(&str, i64)]| {
+        let mut f = vec![
+            ("ref_aux", 3),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 150_000),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+            ("take_on", 1),
+        ];
+        f.extend_from_slice(extra);
+        params_with(&f)
+    };
+    // Window 600 s (slots 4 Up, 5 Down), both books 0.600 / 0.620 unless a row says otherwise.
+    let setup = |p: &BinaryMakerParams, up: (i64, i64)| {
+        let mut h = StrategyHarness::<BinaryMaker>::new(p, &g3, fixture(), A1).expect("params");
+        slot_book(h.views_mut(), SLOTS[4], up.0, up.1);
+        slot_book(h.views_mut(), SLOTS[5], 600, 620);
+        h
+    };
+    let perp = |h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64| {
+        h.views_mut().at_engine_ns(t);
+        h.views_mut()
+            .bbo(RP, (Px(mid - 5), Qty(1_000_000)), (Px(mid + 5), Qty(1_000_000)));
+        let b = h.views_mut().bbo_of(RP);
+        h.feed(&ev::bbo(RP, 8, b).as_ref())
+    };
+    let free = |h: &mut StrategyHarness<BinaryMaker>, i: usize| {
+        let q = &mut h.strategy_mut().fast.quotes[i];
+        q.state = QState::None;
+        q.r = None;
+    };
+    let t0 = 640 * s;
+    // .1 a +1.6 bp move: one taker buy of the Up token, 5 shares by spend, FAK, worst price the
+    // ask + 1 cent; no lead bid.
+    let mut h = setup(&take(&[]), (600, 620));
+    perp(&mut h, t0, 10_000_000);
+    let out = perp(&mut h, t0 + 400 * ms, 10_001_600);
+    let places: Vec<_> = out.places().copied().collect();
+    assert_eq!(places.len(), 1, "BMK-059.1 one order");
+    let it = places[0];
+    assert_eq!(
+        (it.inst, it.side, it.tif, it.px, it.qty, it.flags, it.tag),
+        (
+            SLOTS[4],
+            Side::Buy,
+            Tif::Ioc,
+            Px(630),
+            Qty(5_000_000),
+            OrderIntent::SPEND,
+            take_tag_of(4)
+        ),
+        "BMK-059.1"
+    );
+    assert_eq!(
+        h.strategy().fast.lead.legs[4].src,
+        LEAD_SRC_TAKE,
+        "BMK-059.1 source"
+    );
+    // .2 one per token per window: 2.5 s later (leg free, a new trigger) nothing; take_max_win 2
+    // allows it.
+    free(&mut h, 4);
+    perp(&mut h, t0 + 2_600 * ms, 10_001_600);
+    assert!(
+        placed(&perp(&mut h, t0 + 3_000 * ms, 10_003_300)).is_empty(),
+        "BMK-059.2 second in the window"
+    );
+    let mut h = setup(&take(&[("take_max_win", 2)]), (600, 620));
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_600)).len(),
+        1,
+        "BMK-059.2 first"
+    );
+    free(&mut h, 4);
+    perp(&mut h, t0 + 2_600 * ms, 10_001_600);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 3_000 * ms, 10_003_300)),
+        vec![(SLOTS[4], Px(630))],
+        "BMK-059.2 take_max_win 2"
+    );
+    // .3 the ask band [0.55, 0.85): 0.47 and 0.85 are outside, 0.55 is inside.
+    for (row, book, n) in [
+        ("BMK-059.3 below", (450, 470), 0usize),
+        ("BMK-059.3 at the top", (830, 850), 0),
+        ("BMK-059.3 at the bottom", (530, 550), 1),
+    ] {
+        let mut h = setup(&take(&[]), book);
+        perp(&mut h, t0, 10_000_000);
+        assert_eq!(placed(&perp(&mut h, t0 + 400 * ms, 10_001_600)).len(), n, "{row}");
+    }
+    // .4 the hourly limit over all tokens: with take_max_hour 1 the Down trigger 1 s after the Up
+    // take sends nothing; without the limit it does.
+    for (row, lim, n) in [("BMK-059.4 limit 1", 1i64, 0usize), ("BMK-059.4 no limit", 0, 1)] {
+        let mut h = setup(&take(&[("take_max_hour", lim)]), (600, 620));
+        perp(&mut h, t0, 10_000_000);
+        assert_eq!(
+            placed(&perp(&mut h, t0 + 400 * ms, 10_001_600)).len(),
+            1,
+            "{row} up"
+        );
+        perp(&mut h, t0 + 1_000 * ms, 10_001_600);
+        assert_eq!(
+            placed(&perp(&mut h, t0 + 1_250 * ms, 9_999_900)).len(),
+            n,
+            "{row} down"
+        );
+    }
+    // .5 a taker order is never cancelled by the strategy: live past lead_life_ms, and on an
+    // adverse perpetual move.
+    let mut h = setup(
+        &take(&[
+            ("lead_life_ms", 750),
+            ("lead_pc_w_ms", 1_000),
+            ("lead_pc_x_bp", 50_000),
+        ]),
+        (600, 620),
+    );
+    perp(&mut h, t0, 10_000_000);
+    assert_eq!(
+        placed(&perp(&mut h, t0 + 400 * ms, 10_001_600)).len(),
+        1,
+        "BMK-059.5 take"
+    );
+    {
+        let f = &mut h.strategy_mut().fast;
+        f.quotes[4].state = QState::Live;
+        f.quotes[4].r = Some(order_ref(31));
+        f.lead.legs[4].handle = None;
+        f.lead.legs[4].r = Some(order_ref(31));
+    }
+    assert!(
+        cancels(&perp(&mut h, t0 + 1_300 * ms, 10_000_400)).is_empty(),
+        "BMK-059.5 no cancel"
+    );
+    // .6 take_on 0 (the default): the same trigger posts the rule-15 bid (post-only, inside).
+    let mut h = setup(
+        &params_with(&[
+            ("ref_aux", 3),
+            ("lead_w_ms", 300),
+            ("lead_x_bp", 150_000),
+            ("lead_only", 1),
+            ("inv_max_shares", 20),
+        ]),
+        (600, 620),
+    );
+    perp(&mut h, t0, 10_000_000);
+    let out = perp(&mut h, t0 + 400 * ms, 10_001_600);
+    let places: Vec<_> = out.places().copied().collect();
+    assert_eq!(places.len(), 1, "BMK-059.6");
+    assert_eq!(
+        (places[0].tif, places[0].px),
+        (Tif::PostOnly, Px(610)),
+        "BMK-059.6"
+    );
+    // .7 take_one_side (schema v48): holding 5 Up shares, a Down trigger buys nothing; without the
+    // rule it buys Down; an Up trigger while Down is held is blocked the same way; with nothing
+    // held the rule changes nothing.
+    for (row, one, held, mid1, n) in [
+        (
+            "BMK-059.7 Up held, rule on",
+            1i64,
+            Some(4u32),
+            9_998_300i64,
+            0usize,
+        ),
+        ("BMK-059.7 Up held, rule off", 0, Some(4), 9_998_300, 1),
+        ("BMK-059.7 Down held, rule on", 1, Some(5), 10_001_600, 0),
+        ("BMK-059.7 nothing held, rule on", 1, None, 9_998_300, 1),
+    ] {
+        let mut h = setup(&take(&[("take_one_side", one)]), (600, 620));
+        if let Some(k) = held {
+            hold(&mut h, k, 5, 600);
+        }
+        perp(&mut h, t0, 10_000_000);
+        assert_eq!(placed(&perp(&mut h, t0 + 400 * ms, mid1)).len(), n, "{row}");
+    }
 }

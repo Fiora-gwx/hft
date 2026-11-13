@@ -1,4 +1,4 @@
-//! Command-line parsing (TESTS.md PMC-001–PMC-003, PMC-009, PMC-010, PMC-012).
+//! Command-line parsing (TESTS.md PMC-001–PMC-003, PMC-009, PMC-010, PMC-012, PMC-015).
 use std::path::PathBuf;
 
 use hft_pmcfg::cli::{Mode, parse};
@@ -426,6 +426,62 @@ fn pmc_012_presign_grid_flag() {
         match parse(&args(&line)) {
             Ok(c) => panic!("PMC-012.4: accepted {c:?}"),
             Err(e) => assert!(e.contains(want), "PMC-012.4 {line}: {e}"),
+        }
+    }
+}
+
+/// PMC-015: `--ioc-cross FRACTION`.
+#[test]
+fn pmc_015_ioc_cross_flag() {
+    let live = |flags: &str| parse(&args(&format!("--live 12345 k1 {flags} {POS}")));
+    // .1 default: not set.
+    let Mode::Live(l) = live("").unwrap().mode else {
+        panic!("PMC-015.1")
+    };
+    assert_eq!(l.ioc_max_cross, None, "PMC-015.1");
+    // .2 the fraction as a 1e-9 rate; also with --taker-probe.
+    for (text, raw) in [
+        ("0.1", 100_000_000),
+        ("0.005", 5_000_000),
+        ("0.2", 200_000_000),
+        ("0.000001", 1_000),
+    ] {
+        let Mode::Live(l) = live(&format!("--ioc-cross {text}")).unwrap().mode else {
+            panic!("PMC-015.2")
+        };
+        assert_eq!(l.ioc_max_cross, Some(raw), "PMC-015.2 {text}");
+    }
+    let Mode::LiveProbe(l) = live("--taker-probe --ioc-cross 0.1").unwrap().mode else {
+        panic!("PMC-015.2")
+    };
+    assert_eq!(l.ioc_max_cross, Some(100_000_000), "PMC-015.2");
+    // .3 refused: not a decimal within (0, 0.2] with at most 6 places.
+    for text in ["0", "0.0", "abc", "-0.1", "0.2000001", "0.21", "1"] {
+        let e = live(&format!("--ioc-cross {text}")).unwrap_err();
+        assert!(
+            e.contains("--ioc-cross: FRACTION must be"),
+            "PMC-015.3 {text}: {e}"
+        );
+    }
+    // .4 refused: without --live, twice, without a value.
+    for (line, want) in [
+        (format!("--ioc-cross 0.1 {POS}"), "--ioc-cross needs --live"),
+        (
+            format!("--maker --ioc-cross 0.1 {POS}"),
+            "--ioc-cross needs --live",
+        ),
+        (
+            format!("--live 12345 k1 --ioc-cross 0.1 --ioc-cross 0.1 {POS}"),
+            "given twice",
+        ),
+        (
+            format!("--live 12345 k1 {POS} --ioc-cross"),
+            "--ioc-cross: missing FRACTION",
+        ),
+    ] {
+        match parse(&args(&line)) {
+            Ok(c) => panic!("PMC-015.4: accepted {c:?}"),
+            Err(e) => assert!(e.contains(want), "PMC-015.4 {line}: {e}"),
         }
     }
 }
